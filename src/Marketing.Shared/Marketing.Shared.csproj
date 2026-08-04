@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Contract layer. Holds the ambient abstractions (current user, tenant, clock, cache, tokens)
+    that upper layers depend on and Infrastructure implements. Abstractions live here rather than
+    in Application so Infrastructure never has to reference a higher layer.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Marketing.Shared</RootNamespace>
+    <AssemblyName>Marketing.Shared</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Marketing.Common\Marketing.Common.csproj" />
+  </ItemGroup>
+
+</Project>

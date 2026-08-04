@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Business layer, rules half: services, DTOs, validators and mappings.
+    This is the only layer allowed to orchestrate repositories, transactions and integrations.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Marketing.Application</RootNamespace>
+    <AssemblyName>Marketing.Application</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Marketing.Common\Marketing.Common.csproj" />
+    <ProjectReference Include="..\Marketing.Shared\Marketing.Shared.csproj" />
+    <ProjectReference Include="..\Marketing.Business\Marketing.Business.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AutoMapper" />
+    <PackageReference Include="FluentValidation" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Utility layer. Deliberately has zero project references and no third-party dependencies so
+    every other layer can consume it without creating a cycle or dragging in a framework.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Marketing.Common</RootNamespace>
+    <AssemblyName>Marketing.Common</AssemblyName>
+  </PropertyGroup>
+
+</Project>

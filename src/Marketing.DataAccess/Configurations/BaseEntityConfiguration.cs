@@ -1,0 +1,66 @@
+using Marketing.DataAccess.Entities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace Marketing.DataAccess.Configurations;
+
+/// <summary>
+/// Base configuration applied to every table, so identity, tenancy, auditing, soft delete and
+/// concurrency are declared exactly once.
+/// </summary>
+/// <typeparam name="TEntity">Entity being configured.</typeparam>
+public abstract class BaseEntityConfiguration<TEntity> : IEntityTypeConfiguration<TEntity>
+    where TEntity : BaseEntity
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<TEntity> builder)
+    {
+        builder.HasKey(entity => entity.Id);
+
+        builder.Property(entity => entity.Id)
+            .ValueGeneratedNever();
+
+        builder.Property(entity => entity.TenantId);
+
+        builder.Property(entity => entity.CreatedBy)
+            .IsRequired();
+
+        builder.Property(entity => entity.CreatedOn)
+            .IsRequired();
+
+        builder.Property(entity => entity.ModifiedBy);
+        builder.Property(entity => entity.ModifiedOn);
+        builder.Property(entity => entity.DeletedBy);
+        builder.Property(entity => entity.DeletedOn);
+
+        builder.Property(entity => entity.IsDeleted)
+            .IsRequired()
+            .HasDefaultValue(false);
+
+        // PostgreSQL exposes the transaction id that last wrote each row as the system column
+        // "xmin". Mapping RowVersion onto it gives optimistic concurrency for free: no extra
+        // column, no trigger, and the value is guaranteed to change on every UPDATE.
+        builder.Property(entity => entity.RowVersion)
+            .HasColumnName("xmin")
+            .HasColumnType("xid")
+            .ValueGeneratedOnAddOrUpdate()
+            .IsConcurrencyToken();
+
+        // Soft-deleted rows are excluded from every query, so the index only has to cover live
+        // rows. A partial index is materially smaller and stays useful as deleted rows accumulate.
+        builder.HasIndex(entity => entity.IsDeleted)
+            .HasFilter("is_deleted = false");
+
+        if (typeof(ITenantScoped).IsAssignableFrom(typeof(TEntity)))
+        {
+            // Every tenant-scoped read starts with "where tenant_id = ...", so it leads the index.
+            builder.HasIndex(entity => new { entity.TenantId, entity.Id });
+        }
+
+        ConfigureEntity(builder);
+    }
+
+    /// <summary>Applies the configuration specific to <typeparamref name="TEntity"/>.</summary>
+    /// <param name="builder">Builder for the entity.</param>
+    protected abstract void ConfigureEntity(EntityTypeBuilder<TEntity> builder);
+}

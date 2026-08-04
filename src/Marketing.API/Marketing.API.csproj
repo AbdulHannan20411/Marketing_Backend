@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- Presentation layer. Controllers are thin: validate, delegate, shape the response. -->
+  <PropertyGroup>
+    <RootNamespace>Marketing.API</RootNamespace>
+    <AssemblyName>Marketing.API</AssemblyName>
+    <UserSecretsId>marketing-api-2f3c4d5e-6a7b-8c9d-0e1f-2a3b4c5d6e7f</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Marketing.Common\Marketing.Common.csproj" />
+    <ProjectReference Include="..\Marketing.Shared\Marketing.Shared.csproj" />
+    <ProjectReference Include="..\Marketing.DataAccess\Marketing.DataAccess.csproj" />
+    <ProjectReference Include="..\Marketing.Business\Marketing.Business.csproj" />
+    <ProjectReference Include="..\Marketing.Application\Marketing.Application.csproj" />
+    <ProjectReference Include="..\Marketing.Infrastructure\Marketing.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <PackageReference Include="Asp.Versioning.Mvc" />
+    <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" />
+    <PackageReference Include="Swashbuckle.AspNetCore" />
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+    <PackageReference Include="AspNetCore.HealthChecks.NpgSql" />
+    <PackageReference Include="AspNetCore.HealthChecks.Redis" />
+    <PackageReference Include="AspNetCore.HealthChecks.UI.Client" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Marketing.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

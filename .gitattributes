@@ -1,0 +1,32 @@
+# Normalise line endings so the repository stores LF and diffs stay clean across
+# Windows developers, Linux CI agents and container builds.
+* text=auto eol=lf
+
+# Windows-only tooling that requires CRLF.
+*.cmd    text eol=crlf
+*.bat    text eol=crlf
+*.ps1    text eol=crlf
+*.sln    text eol=crlf
+
+# Shell scripts must keep LF or they fail to execute in containers.
+*.sh     text eol=lf
+
+# Treat as binary: never diff, never merge, never convert.
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.pdf    binary
+*.zip    binary
+*.gz     binary
+*.dll    binary
+*.exe    binary
+*.pfx    binary
+*.snk    binary
+
+# Language detection on GitHub: keep the language bar representative of the source.
+*.cs         linguist-language=C#
+*.csproj     linguist-language=XML
+*.props      linguist-language=XML
+docs/**      linguist-documentation

@@ -1,0 +1,37 @@
+## Build output
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Visual Studio / Rider
+.vs/
+.idea/
+_ReSharper*/
+*.DotSettings.user
+
+## Test results
+[Tt]est[Rr]esult*/
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.trx
+
+## Local secrets and environment
+appsettings.Local.json
+*.env
+.env
+.env.*
+!.env.example
+secrets.json
+
+## Runtime data
+data/
+*.pfx
+*.key
