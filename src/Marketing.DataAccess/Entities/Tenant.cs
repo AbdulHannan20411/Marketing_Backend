@@ -44,6 +44,16 @@ public sealed class Tenant : BaseEntity
     /// <summary>Instant the tenant was suspended, in UTC.</summary>
     public DateTimeOffset? SuspendedOn { get; set; }
 
+    /// <summary>Commercial plan band shown on the platform screens.</summary>
+    public Marketing.Common.Constants.ContractEnums.TenantPlan PlanBand { get; set; } =
+        Marketing.Common.Constants.ContractEnums.TenantPlan.Starter;
+
+    /// <summary>Instant anyone in this tenant was last active.</summary>
+    public DateTimeOffset? LastActiveOn { get; set; }
+
+    /// <summary>Messages sent in the current calendar month.</summary>
+    public int MessagesThisMonth { get; set; }
+
     /// <summary>Users belonging to this tenant.</summary>
     public ICollection<User> Users { get; set; } = [];
 }

@@ -49,6 +49,15 @@ public sealed class User : BaseEntity, ITenantScoped
     /// <summary>Instant the temporary lockout expires, in UTC.</summary>
     public DateTimeOffset? LockoutEndsOn { get; set; }
 
+    /// <summary>Job title, shown on the employees screen.</summary>
+    public string JobTitle { get; set; } = string.Empty;
+
+    /// <summary>Avatar URL, surfaced in the token and the profile.</summary>
+    public string? AvatarUrl { get; set; }
+
+    /// <summary>Per-user adjustments to the permissions their role grants.</summary>
+    public ICollection<UserPermissionOverride> PermissionOverrides { get; set; } = [];
+
     /// <summary>Owning tenant navigation.</summary>
     public Tenant? Tenant { get; set; }
 

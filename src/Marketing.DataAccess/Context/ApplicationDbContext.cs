@@ -62,6 +62,63 @@ public class ApplicationDbContext : DbContext
     /// <summary>Append-only audit trail.</summary>
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
+    /// <summary>Per-user adjustments to role-granted permissions.</summary>
+    public DbSet<UserPermissionOverride> UserPermissionOverrides => Set<UserPermissionOverride>();
+
+    /// <summary>Reusable permission bundles.</summary>
+    public DbSet<PermissionSet> PermissionSets => Set<PermissionSet>();
+
+    /// <summary>Contacts.</summary>
+    public DbSet<Contact> Contacts => Set<Contact>();
+
+    /// <summary>Contact groups.</summary>
+    public DbSet<ContactGroup> ContactGroups => Set<ContactGroup>();
+
+    /// <summary>Group memberships.</summary>
+    public DbSet<ContactGroupMember> ContactGroupMembers => Set<ContactGroupMember>();
+
+    /// <summary>Tags.</summary>
+    public DbSet<ContactTag> ContactTags => Set<ContactTag>();
+
+    /// <summary>Tag assignments.</summary>
+    public DbSet<ContactTagAssignment> ContactTagAssignments => Set<ContactTagAssignment>();
+
+    /// <summary>WhatsApp Business Account connections.</summary>
+    public DbSet<WhatsAppConnection> WhatsAppConnections => Set<WhatsAppConnection>();
+
+    /// <summary>Message templates.</summary>
+    public DbSet<MessageTemplate> MessageTemplates => Set<MessageTemplate>();
+
+    /// <summary>Campaigns.</summary>
+    public DbSet<Campaign> Campaigns => Set<Campaign>();
+
+    /// <summary>Delivery failures.</summary>
+    public DbSet<DeliveryFailure> DeliveryFailures => Set<DeliveryFailure>();
+
+    /// <summary>Pre-aggregated daily messaging counters.</summary>
+    public DbSet<MessageDailyStat> MessageDailyStats => Set<MessageDailyStat>();
+
+    /// <summary>Dashboard activity feed.</summary>
+    public DbSet<ActivityEntry> ActivityEntries => Set<ActivityEntry>();
+
+    /// <summary>Subscription plans.</summary>
+    public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
+
+    /// <summary>Tenant subscriptions.</summary>
+    public DbSet<TenantSubscription> TenantSubscriptions => Set<TenantSubscription>();
+
+    /// <summary>Invoices.</summary>
+    public DbSet<Invoice> Invoices => Set<Invoice>();
+
+    /// <summary>Payments.</summary>
+    public DbSet<Payment> Payments => Set<Payment>();
+
+    /// <summary>Renewal records.</summary>
+    public DbSet<RenewalRecord> RenewalRecords => Set<RenewalRecord>();
+
+    /// <summary>Notifications.</summary>
+    public DbSet<Notification> Notifications => Set<Notification>();
+
     /// <summary>
     /// Tenant applied by the global query filter.
     /// <para>
