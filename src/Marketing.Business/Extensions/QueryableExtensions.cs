@@ -1,5 +1,5 @@
 using System.Linq.Expressions;
-using Marketing.Common.Enums;
+using static Marketing.Common.Constants.AppConstants;
 using Marketing.Common.Exceptions;
 using Marketing.Common.Requests;
 using Marketing.Common.Responses;
@@ -86,7 +86,7 @@ public static class QueryableExtensions
 
         if (totalCount == 0)
         {
-            return PagedResult<TSource>.Empty(request.PageNumber, request.PageSize);
+            return PagedResults.Empty<TSource>(request.PageNumber, request.PageSize);
         }
 
         var items = await source

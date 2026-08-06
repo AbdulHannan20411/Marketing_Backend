@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Marketing.Common.Enums;
+using static Marketing.Common.Constants.AppConstants;
 using Marketing.Common.Helpers;
 using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;

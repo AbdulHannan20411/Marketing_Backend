@@ -1,4 +1,5 @@
 using System.Data;
+using System.Data.Common;
 using System.Runtime.CompilerServices;
 using Dapper;
 using Marketing.Business.Repositories.Interfaces;
@@ -6,6 +7,7 @@ using Marketing.Common.Exceptions;
 using Marketing.DataAccess.Context;
 using Marketing.Shared.Abstractions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Marketing.Business.Repositories.Implementations;
 
@@ -69,15 +71,16 @@ public sealed class SqlQueryExecutor : ISqlQueryExecutor
         var connection = await OpenConnectionAsync(cancellationToken);
 
         // Unbuffered: Dapper hands back rows as the reader produces them, so a million-row export
-        // holds one row in memory rather than a million.
-        var reader = await connection.QueryUnbufferedAsync<TResult>(
+        // holds one row in memory rather than a million. This overload returns the sequence
+        // directly rather than a Task, so there is nothing to await until enumeration begins.
+        var rows = connection.QueryUnbufferedAsync<TResult>(
             command.CommandText,
             command.Parameters,
-            command.Transaction,
+            _context.Database.CurrentTransaction?.GetDbTransaction(),
             command.CommandTimeout,
             command.CommandType);
 
-        await foreach (var row in reader.WithCancellation(cancellationToken))
+        await foreach (var row in rows.WithCancellation(cancellationToken))
         {
             yield return row;
         }
@@ -133,7 +136,9 @@ public sealed class SqlQueryExecutor : ISqlQueryExecutor
             cancellationToken: cancellationToken);
     }
 
-    private async Task<IDbConnection> OpenConnectionAsync(CancellationToken cancellationToken)
+    // DbConnection, not IDbConnection: Dapper's unbuffered streaming overload is only defined on
+    // the concrete base class, because it needs the async reader API the interface does not expose.
+    private async Task<DbConnection> OpenConnectionAsync(CancellationToken cancellationToken)
     {
         var connection = _context.Database.GetDbConnection();
 

@@ -38,7 +38,7 @@ public abstract class ApiControllerBase : ControllerBase
     {
         ArgumentNullException.ThrowIfNull(page);
 
-        Response.Headers[Common.Constants.ApplicationHeaderNames.TotalCount] =
+        Response.Headers[Common.Constants.AppConstants.Headers.TotalCount] =
             page.TotalCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         return Ok(ApiResponse.OkPage(page));

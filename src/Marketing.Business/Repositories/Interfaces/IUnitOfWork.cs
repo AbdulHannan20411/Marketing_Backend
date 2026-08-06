@@ -13,7 +13,7 @@ public interface IUnitOfWork
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Rows affected.</returns>
     /// <exception cref="Common.Exceptions.ConcurrencyConflictException">A row changed underneath us.</exception>
-    Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+    public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Runs <paramref name="operation"/> inside an explicit transaction, committing on success and
@@ -26,14 +26,14 @@ public interface IUnitOfWork
     /// Wrapped in the provider's execution strategy, which is mandatory once retries are enabled:
     /// a retried transaction must be replayed from its beginning, not resumed midway.
     /// </remarks>
-    Task<TResult> ExecuteInTransactionAsync<TResult>(
+    public Task<TResult> ExecuteInTransactionAsync<TResult>(
         Func<CancellationToken, Task<TResult>> operation,
         CancellationToken cancellationToken = default);
 
     /// <summary>Runs an operation with no result inside an explicit transaction.</summary>
     /// <param name="operation">Work to perform.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task ExecuteInTransactionAsync(
+    public Task ExecuteInTransactionAsync(
         Func<CancellationToken, Task> operation,
         CancellationToken cancellationToken = default);
 }

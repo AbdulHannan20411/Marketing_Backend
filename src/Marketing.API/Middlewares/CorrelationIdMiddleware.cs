@@ -36,17 +36,17 @@ public sealed class CorrelationIdMiddleware
 
         var correlationId = ResolveCorrelationId(context);
 
-        context.Items[ApplicationHeaderNames.CorrelationId] = correlationId;
+        context.Items[AppConstants.Headers.CorrelationId] = correlationId;
         context.TraceIdentifier = correlationId;
 
         // Written before the response body starts, since headers cannot be set afterwards.
         context.Response.OnStarting(() =>
         {
-            context.Response.Headers[ApplicationHeaderNames.CorrelationId] = correlationId;
+            context.Response.Headers[AppConstants.Headers.CorrelationId] = correlationId;
             return Task.CompletedTask;
         });
 
-        using (LogContext.PushProperty(ApplicationHeaderNames.CorrelationId, correlationId))
+        using (LogContext.PushProperty(AppConstants.Headers.CorrelationId, correlationId))
         using (LogContext.PushProperty("TenantSlug", tenantContext.TenantSlug))
         using (LogContext.PushProperty("UserId", currentUser.UserId))
         {
@@ -64,7 +64,7 @@ public sealed class CorrelationIdMiddleware
     /// </summary>
     private static string ResolveCorrelationId(HttpContext context)
     {
-        var inbound = context.Request.Headers[ApplicationHeaderNames.CorrelationId].ToString();
+        var inbound = context.Request.Headers[AppConstants.Headers.CorrelationId].ToString();
 
         if (string.IsNullOrWhiteSpace(inbound) || inbound.Length > MaxAcceptedLength || !IsSafe(inbound))
         {

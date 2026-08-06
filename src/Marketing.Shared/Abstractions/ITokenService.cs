@@ -9,7 +9,7 @@ public interface ITokenService
     /// <summary>Issues a signed JWT access token for a principal.</summary>
     /// <param name="descriptor">Identity, tenant and roles to embed.</param>
     /// <returns>The token and its absolute expiry.</returns>
-    AccessToken CreateAccessToken(TokenSubject descriptor);
+    public AccessToken CreateAccessToken(TokenSubject descriptor);
 
     /// <summary>
     /// Generates a cryptographically random refresh token.
@@ -18,11 +18,11 @@ public interface ITokenService
     /// persisted, so a database disclosure does not yield usable tokens.
     /// </para>
     /// </summary>
-    RefreshTokenMaterial CreateRefreshToken();
+    public RefreshTokenMaterial CreateRefreshToken();
 
     /// <summary>Hashes a refresh token so it can be matched against the stored hash.</summary>
     /// <param name="refreshToken">Plaintext refresh token supplied by the client.</param>
-    string HashRefreshToken(string refreshToken);
+    public string HashRefreshToken(string refreshToken);
 
     /// <summary>
     /// Validates an expired access token's signature and returns its claims, ignoring lifetime.
@@ -30,5 +30,5 @@ public interface ITokenService
     /// </summary>
     /// <param name="accessToken">The expired access token.</param>
     /// <returns>The principal, or <see langword="null"/> when the token is not valid.</returns>
-    ClaimsPrincipal? GetPrincipalFromExpiredToken(string accessToken);
+    public ClaimsPrincipal? GetPrincipalFromExpiredToken(string accessToken);
 }

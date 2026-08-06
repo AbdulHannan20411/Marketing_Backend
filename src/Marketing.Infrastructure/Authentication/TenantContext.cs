@@ -45,7 +45,7 @@ public sealed class TenantContext : ITenantContext
                 return scope.TenantId;
             }
 
-            var raw = _httpContextAccessor.HttpContext?.User.FindFirst(ApplicationClaimTypes.TenantId)?.Value;
+            var raw = _httpContextAccessor.HttpContext?.User.FindFirst(AppConstants.Claims.TenantId)?.Value;
 
             return Guid.TryParse(raw, out var tenantId) ? tenantId : null;
         }
@@ -54,7 +54,7 @@ public sealed class TenantContext : ITenantContext
     /// <inheritdoc />
     public string? TenantSlug =>
         AmbientScope.Value?.TenantSlug
-        ?? _httpContextAccessor.HttpContext?.User.FindFirst(ApplicationClaimTypes.TenantSlug)?.Value;
+        ?? _httpContextAccessor.HttpContext?.User.FindFirst(AppConstants.Claims.TenantSlug)?.Value;
 
     /// <inheritdoc />
     public bool HasTenant => TenantId is not null;
@@ -64,7 +64,7 @@ public sealed class TenantContext : ITenantContext
         // An explicit scope always wins. A job that entered a tenant deliberately must stay inside
         // it even when the principal driving it could see everything - otherwise the query filter
         // silently widens and the job processes other tenants' rows.
-        AmbientScope.Value is null && _currentUser.IsPlatformAdmin;
+        AmbientScope.Value is null && _currentUser.IsSuperAdmin;
 
     /// <inheritdoc />
     public Guid RequireTenantId() =>

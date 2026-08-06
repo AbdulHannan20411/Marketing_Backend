@@ -1,7 +1,7 @@
 using System.Linq.Expressions;
 using AwesomeAssertions;
 using Marketing.Business.Extensions;
-using Marketing.Common.Enums;
+using static Marketing.Common.Constants.AppConstants;
 using Marketing.Common.Exceptions;
 using Marketing.Common.Requests;
 using Marketing.Common.Responses;
@@ -100,7 +100,7 @@ public sealed class PagingAndSortingTests
     [Fact]
     public void An_empty_page_reports_zero_pages_and_no_navigation()
     {
-        var page = PagedResult<Row>.Empty(pageNumber: 1, pageSize: 25);
+        var page = PagedResults.Empty<Row>(pageNumber: 1, pageSize: 25);
 
         page.TotalPages.Should().Be(0);
         page.HasPreviousPage.Should().BeFalse();

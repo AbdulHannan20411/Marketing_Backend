@@ -30,7 +30,7 @@ public sealed class RedisCacheServiceTests
     {
         var cache = CreateUnavailableCache();
 
-        var result = await cache.GetAsync<CachedPayload>("marketing:platform:probe");
+        var result = await cache.GetAsync<CachedPayload>("marketing:platform:probe", TestContext.Current.CancellationToken);
 
         // The caller falls through to PostgreSQL. A throw here would turn a cache outage into an
         // API outage, which is the whole failure mode this design exists to prevent.
@@ -59,7 +59,8 @@ public sealed class RedisCacheServiceTests
             {
                 factoryCalls++;
                 return Task.FromResult<CachedPayload?>(new CachedPayload("from-database"));
-            });
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         result!.Value.Should().Be("from-database");
         factoryCalls.Should().Be(1);
@@ -72,7 +73,8 @@ public sealed class RedisCacheServiceTests
 
         var result = await cache.GetOrCreateAsync<CachedPayload>(
             "marketing:platform:missing",
-            _ => Task.FromResult<CachedPayload?>(null));
+            _ => Task.FromResult<CachedPayload?>(null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         result.Should().BeNull();
     }

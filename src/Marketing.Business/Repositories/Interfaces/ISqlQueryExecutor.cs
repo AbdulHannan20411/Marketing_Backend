@@ -19,7 +19,7 @@ public interface ISqlQueryExecutor
     /// <param name="sql">SQL that must reference <c>@TenantId</c>.</param>
     /// <param name="parameters">Additional parameters. Never string-interpolate into the SQL.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<IReadOnlyList<TResult>> QueryAsync<TResult>(
+    public Task<IReadOnlyList<TResult>> QueryAsync<TResult>(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default);
@@ -29,7 +29,7 @@ public interface ISqlQueryExecutor
     /// <param name="sql">SQL that must reference <c>@TenantId</c>.</param>
     /// <param name="parameters">Additional parameters.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<TResult?> QuerySingleOrDefaultAsync<TResult>(
+    public Task<TResult?> QuerySingleOrDefaultAsync<TResult>(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default);
@@ -42,7 +42,7 @@ public interface ISqlQueryExecutor
     /// <param name="sql">SQL that must reference <c>@TenantId</c>.</param>
     /// <param name="parameters">Additional parameters.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    IAsyncEnumerable<TResult> StreamAsync<TResult>(
+    public IAsyncEnumerable<TResult> StreamAsync<TResult>(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default);
@@ -56,7 +56,7 @@ public interface ISqlQueryExecutor
     /// <param name="parameters">Parameters.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <exception cref="Common.Exceptions.ForbiddenException">Caller is not a platform administrator.</exception>
-    Task<IReadOnlyList<TResult>> QueryPlatformAsync<TResult>(
+    public Task<IReadOnlyList<TResult>> QueryPlatformAsync<TResult>(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default);

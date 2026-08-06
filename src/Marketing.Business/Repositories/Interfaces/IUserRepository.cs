@@ -16,18 +16,18 @@ public interface IUserRepository : IRepository<User>
     /// </summary>
     /// <param name="normalizedEmail">Lowercased address.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<User?> FindForAuthenticationAsync(string normalizedEmail, CancellationToken cancellationToken = default);
+    public Task<User?> FindForAuthenticationAsync(string normalizedEmail, CancellationToken cancellationToken = default);
 
     /// <summary>Loads a tracked user with their role assignments, for token issuance and refresh.</summary>
     /// <param name="userId">User identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<User?> FindWithRolesAsync(Guid userId, CancellationToken cancellationToken = default);
+    public Task<User?> FindWithRolesAsync(Guid userId, CancellationToken cancellationToken = default);
 
     /// <summary>Returns whether an address is already registered anywhere on the platform.</summary>
     /// <param name="normalizedEmail">Lowercased address.</param>
     /// <param name="excludingUserId">User to exclude, when checking during an update.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<bool> IsEmailTakenAsync(
+    public Task<bool> IsEmailTakenAsync(
         string normalizedEmail,
         Guid? excludingUserId = null,
         CancellationToken cancellationToken = default);
@@ -35,5 +35,5 @@ public interface IUserRepository : IRepository<User>
     /// <summary>Returns the role names granted to a user.</summary>
     /// <param name="userId">User identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<IReadOnlyList<string>> GetRoleNamesAsync(Guid userId, CancellationToken cancellationToken = default);
+    public Task<IReadOnlyList<string>> GetRoleNamesAsync(Guid userId, CancellationToken cancellationToken = default);
 }

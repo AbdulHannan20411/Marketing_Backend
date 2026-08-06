@@ -82,7 +82,7 @@ public class Repository<TEntity> : IRepository<TEntity>
 
         if (totalCount == 0)
         {
-            return PagedResult<TProjection>.Empty(request.PageNumber, request.PageSize);
+            return PagedResults.Empty<TProjection>(request.PageNumber, request.PageSize);
         }
 
         // Project before paging so the SELECT list is narrow and the projection participates in

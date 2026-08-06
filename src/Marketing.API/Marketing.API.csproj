@@ -14,6 +14,7 @@
     <ProjectReference Include="..\Marketing.Business\Marketing.Business.csproj" />
     <ProjectReference Include="..\Marketing.Application\Marketing.Application.csproj" />
     <ProjectReference Include="..\Marketing.Infrastructure\Marketing.Infrastructure.csproj" />
+    <ProjectReference Include="..\Marketing.Scheduler\Marketing.Scheduler.csproj" />
   </ItemGroup>
 
   <ItemGroup>

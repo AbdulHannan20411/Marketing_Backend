@@ -37,7 +37,7 @@ public sealed class HttpRequestContext : IRequestContext
                 return _fallbackCorrelationId.Value;
             }
 
-            if (httpContext.Items.TryGetValue(ApplicationHeaderNames.CorrelationId, out var stored) &&
+            if (httpContext.Items.TryGetValue(AppConstants.Headers.CorrelationId, out var stored) &&
                 stored is string correlationId &&
                 !string.IsNullOrWhiteSpace(correlationId))
             {

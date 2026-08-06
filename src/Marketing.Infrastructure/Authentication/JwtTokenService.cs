@@ -19,7 +19,16 @@ public sealed class JwtTokenService : ITokenService
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly SigningCredentials _signingCredentials;
     private readonly TokenValidationParameters _refreshValidationParameters;
-    private readonly JwtSecurityTokenHandler _tokenHandler = new();
+    /// <summary>
+    /// Claim mapping is disabled to match the JwtBearer handler in the API host.
+    /// <para>
+    /// Left at its default, this handler rewrites <c>sub</c> to the long
+    /// <c>ClaimTypes.NameIdentifier</c> URI on the way back in, so a principal recovered during
+    /// refresh would carry different claim names from one produced by an ordinary authenticated
+    /// request - and any code reading <c>sub</c> would silently find nothing.
+    /// </para>
+    /// </summary>
+    private readonly JwtSecurityTokenHandler _tokenHandler = new() { MapInboundClaims = false };
 
     /// <summary>Initialises a new instance.</summary>
     /// <param name="options">Token settings.</param>
@@ -71,8 +80,8 @@ public sealed class JwtTokenService : ITokenService
             new(JwtRegisteredClaimNames.Sub, descriptor.UserId.ToString()),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
             new(JwtRegisteredClaimNames.Email, descriptor.Email),
-            new(ApplicationClaimTypes.DisplayName, descriptor.DisplayName),
-            new(ApplicationClaimTypes.SessionId, descriptor.SessionId.ToString()),
+            new(AppConstants.Claims.DisplayName, descriptor.DisplayName),
+            new(AppConstants.Claims.SessionId, descriptor.SessionId.ToString()),
             new(
                 JwtRegisteredClaimNames.Iat,
                 issuedAt.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -83,17 +92,17 @@ public sealed class JwtTokenService : ITokenService
         // out of the user's own row, and read back only through ITenantContext.
         if (descriptor.TenantId is { } tenantId)
         {
-            claims.Add(new Claim(ApplicationClaimTypes.TenantId, tenantId.ToString()));
+            claims.Add(new Claim(AppConstants.Claims.TenantId, tenantId.ToString()));
         }
 
         if (!string.IsNullOrWhiteSpace(descriptor.TenantSlug))
         {
-            claims.Add(new Claim(ApplicationClaimTypes.TenantSlug, descriptor.TenantSlug));
+            claims.Add(new Claim(AppConstants.Claims.TenantSlug, descriptor.TenantSlug));
         }
 
         claims.AddRange(descriptor.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
         claims.AddRange(descriptor.Permissions.Select(
-            permission => new Claim(ApplicationClaimTypes.Permission, permission)));
+            permission => new Claim(AppConstants.Claims.Permission, permission)));
 
         var token = new JwtSecurityToken(
             issuer: _options.Issuer,

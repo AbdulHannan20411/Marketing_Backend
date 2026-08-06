@@ -1,15 +1,26 @@
 namespace Marketing.Common.Responses;
 
-/// <summary>One page of results plus the counters a client needs to render pagination.</summary>
-/// <typeparam name="TItem">Item type; always a DTO, never an entity.</typeparam>
+/// <summary>
+/// Represents one page of results together with the metadata required
+/// to render pagination.
+/// </summary>
+/// <typeparam name="TItem">
+/// The item type. This should be a DTO rather than a domain entity.
+/// </typeparam>
 public sealed class PagedResult<TItem>
 {
-    /// <summary>Initialises a new instance.</summary>
-    /// <param name="items">Items on this page.</param>
-    /// <param name="totalCount">Total matching rows across all pages.</param>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PagedResult{TItem}"/> class.
+    /// </summary>
+    /// <param name="items">Items on the current page.</param>
+    /// <param name="totalCount">Total number of matching items across all pages.</param>
     /// <param name="pageNumber">One-based page number.</param>
-    /// <param name="pageSize">Requested page size.</param>
-    public PagedResult(IReadOnlyList<TItem> items, int totalCount, int pageNumber, int pageSize)
+    /// <param name="pageSize">Number of items requested per page.</param>
+    public PagedResult(
+        IReadOnlyList<TItem> items,
+        int totalCount,
+        int pageNumber,
+        int pageSize)
     {
         ArgumentNullException.ThrowIfNull(items);
         ArgumentOutOfRangeException.ThrowIfNegative(totalCount);
@@ -22,37 +33,83 @@ public sealed class PagedResult<TItem>
         PageSize = pageSize;
     }
 
-    /// <summary>Items on this page.</summary>
+    /// <summary>
+    /// Gets the items contained in the current page.
+    /// </summary>
     public IReadOnlyList<TItem> Items { get; }
 
-    /// <summary>Total matching rows across all pages.</summary>
+    /// <summary>
+    /// Gets the total number of matching items across all pages.
+    /// </summary>
     public int TotalCount { get; }
 
-    /// <summary>One-based page number.</summary>
+    /// <summary>
+    /// Gets the current one-based page number.
+    /// </summary>
     public int PageNumber { get; }
 
-    /// <summary>Page size that produced this result.</summary>
+    /// <summary>
+    /// Gets the requested page size.
+    /// </summary>
     public int PageSize { get; }
 
-    /// <summary>Total number of pages, at least one even when empty.</summary>
-    public int TotalPages => TotalCount == 0 ? 0 : (int)Math.Ceiling(TotalCount / (double)PageSize);
+    /// <summary>
+    /// Gets the total number of pages.
+    /// Returns <c>0</c> when there are no matching items.
+    /// </summary>
+    public int TotalPages =>
+        TotalCount == 0
+            ? 0
+            : (int)Math.Ceiling(TotalCount / (double)PageSize);
 
-    /// <summary>Whether a previous page exists.</summary>
+    /// <summary>
+    /// Gets a value indicating whether a previous page exists.
+    /// </summary>
     public bool HasPreviousPage => PageNumber > 1;
 
-    /// <summary>Whether a further page exists.</summary>
+    /// <summary>
+    /// Gets a value indicating whether a subsequent page exists.
+    /// </summary>
     public bool HasNextPage => PageNumber < TotalPages;
 
-    /// <summary>An empty page, used to short-circuit queries that cannot match anything.</summary>
-    public static PagedResult<TItem> Empty(int pageNumber, int pageSize) =>
-        new([], 0, pageNumber, pageSize);
-
-    /// <summary>Projects the items of this page onto a new type, preserving the counters.</summary>
-    /// <typeparam name="TTarget">Projected item type.</typeparam>
+    /// <summary>
+    /// Projects the items in this page to another type while preserving
+    /// the paging metadata.
+    /// </summary>
+    /// <typeparam name="TTarget">The projected item type.</typeparam>
     /// <param name="selector">Projection applied to each item.</param>
+    /// <returns>A new paged result containing the projected items.</returns>
     public PagedResult<TTarget> Map<TTarget>(Func<TItem, TTarget> selector)
     {
         ArgumentNullException.ThrowIfNull(selector);
-        return new PagedResult<TTarget>([.. Items.Select(selector)], TotalCount, PageNumber, PageSize);
+
+        return new PagedResult<TTarget>(
+            [.. Items.Select(selector)],
+            TotalCount,
+            PageNumber,
+            PageSize);
+    }
+}
+
+/// <summary>
+/// Factory methods for creating <see cref="PagedResult{TItem}"/> instances.
+/// </summary>
+public static class PagedResults
+{
+    /// <summary>
+    /// Creates an empty page.
+    /// </summary>
+    public static PagedResult<TItem> Empty<TItem>(
+        int pageNumber,
+        int pageSize)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(pageNumber, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(pageSize, 1);
+
+        return new PagedResult<TItem>(
+            [],
+            totalCount: 0,
+            pageNumber,
+            pageSize);
     }
 }

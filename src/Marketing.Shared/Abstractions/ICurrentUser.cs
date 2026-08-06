@@ -11,33 +11,33 @@ namespace Marketing.Shared.Abstractions;
 public interface ICurrentUser
 {
     /// <summary>Identifier of the signed-in user, or <see langword="null"/> when anonymous.</summary>
-    Guid? UserId { get; }
+    public Guid? UserId { get; }
 
     /// <summary>Normalised email address of the signed-in user.</summary>
-    string? Email { get; }
+    public string? Email { get; }
 
     /// <summary>Display name, used for audit trails and log context.</summary>
-    string? DisplayName { get; }
+    public string? DisplayName { get; }
 
     /// <summary>Roles carried by the token.</summary>
-    IReadOnlyCollection<string> Roles { get; }
+    public IReadOnlyCollection<string> Roles { get; }
 
     /// <summary>Fine-grained permissions carried by the token.</summary>
-    IReadOnlyCollection<string> Permissions { get; }
+    public IReadOnlyCollection<string> Permissions { get; }
 
     /// <summary>Whether a user identity is present.</summary>
-    bool IsAuthenticated { get; }
+    public bool IsAuthenticated { get; }
 
     /// <summary>Whether the principal may act across every tenant.</summary>
-    bool IsPlatformAdmin { get; }
+    public bool IsSuperAdmin { get; }
 
     /// <summary>Identifier written to <c>CreatedBy</c> and <c>ModifiedBy</c> audit columns.</summary>
     /// <remarks>Falls back to a well-known system identity for background jobs and seeding.</remarks>
-    Guid AuditUserId { get; }
+    public Guid AuditUserId { get; }
 
     /// <summary>Returns whether the principal holds the given role.</summary>
-    bool IsInRole(string role);
+    public bool IsInRole(string role);
 
     /// <summary>Returns whether the principal holds the given permission.</summary>
-    bool HasPermission(string permission);
+    public bool HasPermission(string permission);
 }

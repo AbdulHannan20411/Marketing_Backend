@@ -1,4 +1,4 @@
-using Marketing.Common.Enums;
+using static Marketing.Common.Constants.AppConstants;
 using Marketing.Common.Helpers;
 
 namespace Marketing.DataAccess.Entities;

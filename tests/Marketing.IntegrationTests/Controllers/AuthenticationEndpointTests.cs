@@ -19,6 +19,9 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
 
     public AuthenticationEndpointTests(ApiFactory factory) => _factory = factory;
 
+    /// <summary>Ties every awaited call to the test runner's cancellation, so a hung request fails fast.</summary>
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
     private sealed record Envelope<TData>(TData Data, string? Message, bool Success);
 
     private sealed record AuthPayload(
@@ -28,17 +31,16 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
         DateTimeOffset RefreshTokenExpiresAtUtc,
         JsonElement User);
 
-    private async Task<AuthPayload> SignInAsync(HttpClient client)
+    private static async Task<AuthPayload> SignInAsync(HttpClient client)
     {
-        var response = await client.PostAsJsonAsync("/api/v1/auth/login", new
-        {
-            email = ApiFactory.AdministratorEmail,
-            password = ApiFactory.AdministratorPassword,
-        });
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/auth/login",
+            new { email = ApiFactory.AdministratorEmail, password = ApiFactory.AdministratorPassword },
+            Ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var envelope = await response.Content.ReadFromJsonAsync<Envelope<AuthPayload>>(Json);
+        var envelope = await response.Content.ReadFromJsonAsync<Envelope<AuthPayload>>(Json, Ct);
 
         return envelope!.Data;
     }
@@ -63,10 +65,10 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", payload.AccessToken);
 
-        var response = await client.GetAsync("/api/v1/auth/me");
+        var response = await client.GetAsync("/api/v1/auth/me", Ct);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var body = await response.Content.ReadAsStringAsync();
+        var body = await response.Content.ReadAsStringAsync(Ct);
 
         // The contract the Angular client depends on: the browser is told the organisation's name,
         // never its key. A regression here is a tenancy leak, not a cosmetic change.
@@ -75,20 +77,33 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task The_profile_of_the_seeded_administrator_reports_the_super_admin_role()
+    {
+        var client = _factory.CreateClient();
+        var payload = await SignInAsync(client);
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", payload.AccessToken);
+
+        var body = await (await client.GetAsync("/api/v1/auth/me", Ct)).Content.ReadAsStringAsync(Ct);
+
+        body.Should().Contain(Roles.SuperAdmin);
+        body.Should().Contain(Permissions.Platform.All);
+    }
+
+    [Fact]
     public async Task Wrong_credentials_are_refused_with_a_problem_document()
     {
         var client = _factory.CreateClient();
 
-        var response = await client.PostAsJsonAsync("/api/v1/auth/login", new
-        {
-            email = ApiFactory.AdministratorEmail,
-            password = "definitely-not-the-password",
-        });
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/auth/login",
+            new { email = ApiFactory.AdministratorEmail, password = "definitely-not-the-password" },
+            Ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
 
-        var body = await response.Content.ReadAsStringAsync();
+        var body = await response.Content.ReadAsStringAsync(Ct);
         body.Should().Contain("errorCode");
     }
 
@@ -97,23 +112,21 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
     {
         var client = _factory.CreateClient();
 
-        var unknown = await client.PostAsJsonAsync("/api/v1/auth/login", new
-        {
-            email = "nobody@integration.test",
-            password = "whatever",
-        });
+        var unknown = await client.PostAsJsonAsync(
+            "/api/v1/auth/login",
+            new { email = "nobody@integration.test", password = "whatever" },
+            Ct);
 
-        var wrongPassword = await client.PostAsJsonAsync("/api/v1/auth/login", new
-        {
-            email = ApiFactory.AdministratorEmail,
-            password = "definitely-not-the-password",
-        });
+        var wrongPassword = await client.PostAsJsonAsync(
+            "/api/v1/auth/login",
+            new { email = ApiFactory.AdministratorEmail, password = "definitely-not-the-password" },
+            Ct);
 
         // Identical status and body, so the endpoint cannot be used to enumerate registered users.
         unknown.StatusCode.Should().Be(wrongPassword.StatusCode);
 
-        var unknownBody = await unknown.Content.ReadAsStringAsync();
-        var wrongBody = await wrongPassword.Content.ReadAsStringAsync();
+        var unknownBody = await unknown.Content.ReadAsStringAsync(Ct);
+        var wrongBody = await wrongPassword.Content.ReadAsStringAsync(Ct);
 
         ExtractDetail(unknownBody).Should().Be(ExtractDetail(wrongBody));
     }
@@ -123,15 +136,14 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
     {
         var client = _factory.CreateClient();
 
-        var response = await client.PostAsJsonAsync("/api/v1/auth/login", new
-        {
-            email = "not-an-email",
-            password = "",
-        });
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/auth/login",
+            new { email = "not-an-email", password = string.Empty },
+            Ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
 
-        var body = await response.Content.ReadAsStringAsync();
+        var body = await response.Content.ReadAsStringAsync(Ct);
         body.Should().Contain("errors").And.Contain("validation_failed");
     }
 
@@ -140,7 +152,7 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
     {
         var client = _factory.CreateClient();
 
-        var response = await client.GetAsync("/api/v1/auth/me");
+        var response = await client.GetAsync("/api/v1/auth/me", Ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
@@ -151,17 +163,17 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
         var client = _factory.CreateClient();
         var payload = await SignInAsync(client);
 
-        var first = await client.PostAsJsonAsync("/api/v1/auth/refresh", new
-        {
-            refreshToken = payload.RefreshToken,
-        });
+        var first = await client.PostAsJsonAsync(
+            "/api/v1/auth/refresh",
+            new { refreshToken = payload.RefreshToken },
+            Ct);
 
         first.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var replay = await client.PostAsJsonAsync("/api/v1/auth/refresh", new
-        {
-            refreshToken = payload.RefreshToken,
-        });
+        var replay = await client.PostAsJsonAsync(
+            "/api/v1/auth/refresh",
+            new { refreshToken = payload.RefreshToken },
+            Ct);
 
         replay.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
@@ -170,7 +182,7 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
         {
             var live = await context.RefreshTokens
                 .IgnoreQueryFilters()
-                .CountAsync(token => token.RevokedOn == null && token.ConsumedOn == null);
+                .CountAsync(token => token.RevokedOn == null && token.ConsumedOn == null, Ct);
 
             live.Should().Be(0);
         });
@@ -181,9 +193,9 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
     {
         var client = _factory.CreateClient();
 
-        var response = await client.GetAsync("/health/live");
+        var response = await client.GetAsync("/health/live", Ct);
 
-        response.Headers.Should().ContainKey(ApplicationHeaderNames.CorrelationId);
+        response.Headers.Should().ContainKey(AppConstants.Headers.CorrelationId);
     }
 
     [Fact]
@@ -191,7 +203,7 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
     {
         var client = _factory.CreateClient();
 
-        var response = await client.GetAsync("/health/live");
+        var response = await client.GetAsync("/health/live", Ct);
 
         response.Headers.GetValues("X-Content-Type-Options").Should().Contain("nosniff");
         response.Headers.GetValues("X-Frame-Options").Should().Contain("DENY");
@@ -209,7 +221,7 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
             var entries = await context.AuditLogs
                 .AsNoTracking()
                 .Where(log => log.EntityName == nameof(User))
-                .ToListAsync();
+                .ToListAsync(Ct);
 
             entries.Should().NotBeEmpty();
 

@@ -35,6 +35,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddValidatorsFromAssembly(assembly, ServiceLifetime.Scoped, includeInternalTypes: false);
 
         services.AddScoped<IAuthenticationService, AuthenticationService>();
+        services.AddScoped<ISessionMaintenanceService, SessionMaintenanceService>();
 
         return services;
     }

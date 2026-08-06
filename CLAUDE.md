@@ -15,13 +15,14 @@ Nullable reference types, implicit usings, file-scoped namespaces, ReSharper con
 ## Layers and reference direction
 
 ```
-Marketing.API            → Infrastructure, Application, Business, DataAccess, Shared, Common
-Marketing.Infrastructure → Application, Shared, Common
-Marketing.Application    → Business, Shared, Common          (services, DTOs, validators, mappings)
-Marketing.Business       → DataAccess, Shared, Common        (repositories, unit of work, Dapper)
-Marketing.DataAccess     → Shared, Common                    (entities, DbContext, interceptors)
-Marketing.Shared         → Common                            (ambient abstractions)
-Marketing.Common         → nothing                           (enums, constants, exceptions, responses)
+Marketing.API            → Scheduler, Infrastructure, Application, Business, DataAccess, Shared, Common
+Marketing.Scheduler      → Application, Shared, Common        (Quartz, jobs)
+Marketing.Infrastructure → Application, Shared, Common        (Redis, Serilog, Polly, Refit, JWT)
+Marketing.Application    → Business, Shared, Common           (services, DTOs, validators, mappings)
+Marketing.Business       → DataAccess, Shared, Common         (repositories, unit of work, Dapper)
+Marketing.DataAccess     → Shared, Common                     (entities, DbContext, interceptors)
+Marketing.Shared         → Common                             (ambient abstractions)
+Marketing.Common         → nothing                            (constants, enums, exceptions, responses)
 ```
 
 A layer references only lower layers. Adding a reference that violates this is a design change,
@@ -84,9 +85,68 @@ from a route, query string, header or request body, and never returned to a tena
 EF reads are `AsNoTracking` by default in the repository; write paths call `GetForUpdateAsync`.
 Project in the database — `GetPagedAsync` takes a projection so entities never materialise.
 
+## Constants, roles and permissions
+
+Three files in `Marketing.Common/Constants`, and no magic strings anywhere else.
+
+| File | Holds |
+| --- | --- |
+| `Roles.cs` | `SuperAdmin`, `Admin`, `Employee` plus grouping helpers |
+| `Permissions.cs` | `resource:action` catalogue, wildcard matching, `ForRole()` defaults |
+| `AppConstants.cs` | Everything else — `Claims`, `Headers`, `Policies`, `RateLimits`, `Platform`, `Defaults`, `CacheKeys` — **and every enum**, nested as types |
+
+- Enums live inside `AppConstants`. Shorten with `using static Marketing.Common.Constants.AppConstants;`
+  so `UserStatus.Active` still reads normally.
+- Role and permission strings are persisted and embedded in JWTs. **Never rename one** — a rename
+  invalidates live tokens and orphans stored assignments. Only add.
+- Two types expose a `Roles` property (`ICurrentUser` and its stub), which shadows the `Roles`
+  class. Those files alias it: `using RoleCatalog = Marketing.Common.Constants.Roles;`.
+- Authorise on **permissions**, not role names, wherever the check is about capability. A customer
+  asking for "employees who can export reports" is then a data change, not a code change.
+- The seeder reconciles permission sets on every startup, so adding a grant to `Permissions.ForRole`
+  reaches existing deployments rather than only fresh databases.
+
+## Scheduler
+
+`Marketing.Scheduler` owns Quartz and every recurring job. Kept out of Infrastructure because a job
+is a unit of work with its own schedule and failure semantics, not a way of talking to a dependency.
+
+**Adding a job is one file.** Registration is by assembly scan, so there is no list to update and
+no way to write a job that compiles but never runs:
+
+```csharp
+[ScheduledJob(
+    Key = "email-dispatch",
+    Group = "email",
+    Cron = "0 */5 * * * ?",
+    Description = "Sends queued outbound email.")]
+public sealed class EmailDispatchJob : ScheduledJobBase
+{
+    private readonly IEmailQueueService _emails;
+
+    public EmailDispatchJob(IEmailQueueService emails, ILogger<EmailDispatchJob> logger)
+        : base(logger) => _emails = emails;
+
+    protected override Task ExecuteJobAsync(CancellationToken cancellationToken) =>
+        _emails.DispatchPendingAsync(cancellationToken);
+}
+```
+
+- Derive from `ScheduledJobBase`, or `TenantScopedJobBase` when the work belongs to one tenant —
+  it enters the tenant scope so the global query filters apply exactly as on an HTTP request.
+- **Call an Application service, never a repository.** The job is a trigger; the work belongs in a
+  service so it is testable without a scheduler and reusable from an endpoint.
+- The base class owns timing, structured logging, cancellation and the Quartz exception contract.
+  Do not catch and swallow inside `ExecuteJobAsync`.
+- Cron is UTC, seconds-first, and validated at startup — a malformed expression fails the host
+  rather than producing a job that silently never fires.
+- `Scheduler:Jobs:<key>` overrides the cron or disables the job without a deploy;
+  `Scheduler:Enabled: false` stops the scheduler entirely while leaving the API serving.
+- Jobs default to non-concurrent. Overlapping runs of a queue drainer send the same message twice.
+
 ## Security
 
-- Roles: `PlatformAdmin`, `TenantOwner`, `TenantUser`. Policies in `PolicyNames`; controllers
+- Roles: `SuperAdmin`, `Admin`, `Employee`. Policies in `AppConstants.Policies`; controllers
   reference the policy, never a raw role string.
 - Passwords: PBKDF2-HMAC-SHA256, iteration count stored per hash, transparent upgrade on sign-in,
   constant-time comparison. Argon2id is the intended successor — the versioned hash prefix exists
@@ -198,10 +258,28 @@ Comments explain *why*, not *what*. A comment restating the code is noise; a com
 trade-off, a non-obvious constraint or a rejected alternative is the reason the next person does
 not undo the decision.
 
+## Logging
+
+Use the **source generator**, not the `ILogger` extension methods:
+
+```csharp
+[LoggerMessage(EventId = 2003, Level = LogLevel.Information, Message = "User {UserId} signed in.")]
+private partial void LogSignInSucceeded(Guid userId);
+```
+
+`logger.LogInformation("...", someInt)` boxes every value type into an `object[]` whether or not
+the level is enabled, which CA1873 rejects as a build error. The generated method checks
+`IsEnabled` first and allocates nothing. Event id ranges: 1000 data access, 2000 application,
+3000 scheduler, 4000 API.
+
 ## Known gaps in the foundation
 
-- No migration has been generated yet — run `dotnet ef migrations add InitialSchema` once a
-  .NET 10 SDK and PostgreSQL are available.
+- No migration has been generated yet — run `dotnet ef migrations add InitialSchema` with
+  PostgreSQL running.
+- **AutoMapper licence is an open decision.** Every version below 15.1.1 carries a high-severity
+  advisory and the last MIT release (14.0.0) is inside that range, so the pinned 16.2.0 is patched
+  but commercially licensed. The solution has one mapping profile; dropping the dependency is
+  viable. See the comment in `Directory.Packages.props`.
 - The Refit client has no per-tenant authorization handler. Access tokens are per-tenant and
   encrypted at rest, so the handler lands with the WhatsApp connection module rather than being
   faked now.

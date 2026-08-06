@@ -77,20 +77,20 @@ public static class AuthenticationExtensions
             });
 
         services.AddAuthorizationBuilder()
-            .AddPolicy(PolicyNames.PlatformAdministration, policy => policy
+            .AddPolicy(AppConstants.Policies.SuperAdminOnly, policy => policy
                 .RequireAuthenticatedUser()
-                .RequireRole(RoleNames.PlatformAdmin))
-            .AddPolicy(PolicyNames.TenantAdministration, policy => policy
+                .RequireRole(Roles.SuperAdmin))
+            .AddPolicy(AppConstants.Policies.TenantAdministration, policy => policy
                 .RequireAuthenticatedUser()
-                .RequireRole(RoleNames.TenantOwner, RoleNames.PlatformAdmin))
-            .AddPolicy(PolicyNames.TenantMembership, policy => policy
+                .RequireRole(Roles.Admin, Roles.SuperAdmin))
+            .AddPolicy(AppConstants.Policies.TenantMembership, policy => policy
                 .RequireAuthenticatedUser()
-                .RequireRole(RoleNames.TenantUser, RoleNames.TenantOwner, RoleNames.PlatformAdmin))
-            .AddPolicy(PolicyNames.RequireTenant, policy => policy
+                .RequireRole(Roles.Employee, Roles.Admin, Roles.SuperAdmin))
+            .AddPolicy(AppConstants.Policies.RequireTenant, policy => policy
                 .RequireAuthenticatedUser()
                 // Guards endpoints that are meaningless without a tenant. Enforcing it as a policy
                 // means the check happens before the action, not inside every service.
-                .RequireClaim(ApplicationClaimTypes.TenantId));
+                .RequireClaim(AppConstants.Claims.TenantId));
 
         return services;
     }

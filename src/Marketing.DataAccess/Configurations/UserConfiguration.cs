@@ -1,4 +1,4 @@
-using Marketing.Common.Enums;
+using static Marketing.Common.Constants.AppConstants;
 using Marketing.DataAccess.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;

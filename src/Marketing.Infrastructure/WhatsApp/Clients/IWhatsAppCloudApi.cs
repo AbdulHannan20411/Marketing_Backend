@@ -18,7 +18,7 @@ public interface IWhatsAppCloudApi
     /// <param name="wabaId">WhatsApp Business Account identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Get("/{wabaId}/phone_numbers")]
-    Task<GraphCollection<WhatsAppPhoneNumber>> GetPhoneNumbersAsync(
+    public Task<GraphPage<WhatsAppPhoneNumber>> GetPhoneNumbersAsync(
         string wabaId,
         CancellationToken cancellationToken = default);
 
@@ -26,7 +26,7 @@ public interface IWhatsAppCloudApi
     /// <param name="phoneNumberId">Phone number identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Get("/{phoneNumberId}")]
-    Task<WhatsAppPhoneNumber> GetPhoneNumberAsync(
+    public Task<WhatsAppPhoneNumber> GetPhoneNumberAsync(
         string phoneNumberId,
         CancellationToken cancellationToken = default);
 
@@ -36,7 +36,7 @@ public interface IWhatsAppCloudApi
     /// <param name="after">Cursor returned by a previous page.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Get("/{wabaId}/message_templates")]
-    Task<GraphCollection<WhatsAppTemplate>> GetTemplatesAsync(
+    public Task<GraphPage<WhatsAppTemplate>> GetTemplatesAsync(
         string wabaId,
         [AliasAs("limit")] int limit = 100,
         [AliasAs("after")] string? after = null,
@@ -50,7 +50,7 @@ public interface IWhatsAppCloudApi
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Post("/{phoneNumberId}/messages")]
-    Task<SendMessageResponse> SendMessageAsync(
+    public Task<SendMessageResponse> SendMessageAsync(
         string phoneNumberId,
         [Body] object payload,
         CancellationToken cancellationToken = default);

@@ -15,12 +15,12 @@ public interface IRefreshTokenRepository : IRepository<RefreshToken>
     /// </summary>
     /// <param name="tokenHash">Hex-encoded SHA-256 hash of the presented token.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<RefreshToken?> FindByHashAsync(string tokenHash, CancellationToken cancellationToken = default);
+    public Task<RefreshToken?> FindByHashAsync(string tokenHash, CancellationToken cancellationToken = default);
 
     /// <summary>Loads every live token issued for a session.</summary>
     /// <param name="sessionId">Session identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<IReadOnlyList<RefreshToken>> FindBySessionAsync(
+    public Task<IReadOnlyList<RefreshToken>> FindBySessionAsync(
         Guid sessionId,
         CancellationToken cancellationToken = default);
 
@@ -31,7 +31,7 @@ public interface IRefreshTokenRepository : IRepository<RefreshToken>
     /// <param name="userId">User identifier.</param>
     /// <param name="utcNow">Instant used to exclude expired tokens.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<IReadOnlyList<RefreshToken>> GetActiveSessionsAsync(
+    public Task<IReadOnlyList<RefreshToken>> GetActiveSessionsAsync(
         Guid userId,
         DateTimeOffset utcNow,
         CancellationToken cancellationToken = default);
@@ -45,7 +45,7 @@ public interface IRefreshTokenRepository : IRepository<RefreshToken>
     /// <param name="utcNow">Instant to stamp.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Number of tokens revoked.</returns>
-    Task<int> RevokeAllForUserAsync(
+    public Task<int> RevokeAllForUserAsync(
         Guid userId,
         string reason,
         DateTimeOffset utcNow,
@@ -62,5 +62,5 @@ public interface IRefreshTokenRepository : IRepository<RefreshToken>
     /// <param name="expiredBefore">Cut-off instant.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Number of rows deleted.</returns>
-    Task<int> PurgeExpiredAsync(DateTimeOffset expiredBefore, CancellationToken cancellationToken = default);
+    public Task<int> PurgeExpiredAsync(DateTimeOffset expiredBefore, CancellationToken cancellationToken = default);
 }

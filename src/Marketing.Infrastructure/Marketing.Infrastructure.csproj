@@ -2,7 +2,8 @@
 
   <!--
     Infrastructure: everything that talks to something outside the process.
-    Redis, Serilog, Quartz, Polly, Refit/Meta Cloud API, JWT issuance and the system clock.
+    Redis, Serilog, Polly, Refit/Meta Cloud API, JWT issuance and the system clock.
+    Background scheduling deliberately lives in Marketing.Scheduler, not here.
   -->
   <PropertyGroup>
     <RootNamespace>Marketing.Infrastructure</RootNamespace>
@@ -16,21 +17,21 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
+      Brings in the ASP.NET Core shared framework, which already supplies HttpClientFactory,
+      the options binder, the data-protection key derivation primitives and IHttpContextAccessor.
+      Referencing those as packages as well would be redundant and is rejected by NU1510.
+    -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="StackExchange.Redis" />
-    <PackageReference Include="Quartz" />
-    <PackageReference Include="Quartz.Extensions.Hosting" />
-    <PackageReference Include="Quartz.Extensions.DependencyInjection" />
     <PackageReference Include="Polly.Core" />
     <PackageReference Include="Polly.Extensions" />
-    <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
     <PackageReference Include="Refit" />
     <PackageReference Include="Refit.HttpClientFactory" />
-    <PackageReference Include="Microsoft.AspNetCore.Cryptography.KeyDerivation" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Serilog.Enrichers.Environment" />
@@ -38,7 +39,6 @@
     <PackageReference Include="Serilog.Formatting.Compact" />
     <PackageReference Include="Serilog.Sinks.Console" />
     <PackageReference Include="Serilog.Sinks.File" />
-    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
   </ItemGroup>
 
 </Project>

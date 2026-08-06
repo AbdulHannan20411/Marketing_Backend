@@ -3,6 +3,9 @@ using Marketing.DataAccess.Context;
 using Marketing.Shared.Abstractions;
 using Microsoft.EntityFrameworkCore;
 
+// StubCurrentUser exposes a Roles property, which would otherwise shadow the Roles constant class.
+using RoleCatalog = Marketing.Common.Constants.Roles;
+
 namespace Marketing.UnitTests;
 
 /// <summary>Deterministic clock.</summary>
@@ -59,9 +62,9 @@ public sealed class StubCurrentUser : ICurrentUser
 
     public bool IsAuthenticated => UserId is not null;
 
-    public bool IsPlatformAdmin => IsInRole(RoleNames.PlatformAdmin);
+    public bool IsSuperAdmin => IsInRole(RoleCatalog.SuperAdmin);
 
-    public Guid AuditUserId => UserId ?? SystemIdentity.UserId;
+    public Guid AuditUserId => UserId ?? AppConstants.Platform.SystemUserId;
 
     public bool IsInRole(string role) => Roles.Contains(role, StringComparer.Ordinal);
 

@@ -19,7 +19,7 @@ namespace Marketing.API.Middlewares;
 /// that ties the response to the full detail in the logs.
 /// </para>
 /// </summary>
-public sealed class GlobalExceptionHandler : IExceptionHandler
+public sealed partial class GlobalExceptionHandler : IExceptionHandler
 {
     private const string ProblemTypeBase = "https://docs.marketing-platform.io/errors/";
 
@@ -51,7 +51,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         ArgumentNullException.ThrowIfNull(exception);
 
         var exceptionId = Guid.NewGuid().ToString("N");
-        var correlationId = httpContext.Items[ApplicationHeaderNames.CorrelationId] as string
+        var correlationId = httpContext.Items[AppConstants.Headers.CorrelationId] as string
                             ?? httpContext.TraceIdentifier;
 
         var problemDetails = Translate(exception, exceptionId);
@@ -59,7 +59,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         Log(exception, exceptionId, correlationId, problemDetails.Status ?? 500);
 
         httpContext.Response.StatusCode = problemDetails.Status ?? StatusCodes.Status500InternalServerError;
-        httpContext.Response.Headers[ApplicationHeaderNames.ExceptionId] = exceptionId;
+        httpContext.Response.Headers[AppConstants.Headers.ExceptionId] = exceptionId;
 
         problemDetails.Instance = httpContext.Request.Path;
         problemDetails.Extensions["correlationId"] = correlationId;
@@ -103,7 +103,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
             },
         };
 
-    private static ProblemDetails BuildValidationProblem(ValidationException exception)
+    private static ValidationProblemDetails BuildValidationProblem(ValidationException exception)
     {
         var problem = new ValidationProblemDetails(
             exception.Errors.ToDictionary(entry => entry.Key, entry => entry.Value))
@@ -176,22 +176,24 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         // Logging them at error level trains everyone to ignore the error log.
         if (statusCode < StatusCodes.Status500InternalServerError)
         {
-            _logger.LogInformation(
-                "Request failed with {StatusCode}. ExceptionId: {ExceptionId}. CorrelationId: {CorrelationId}. Reason: {Reason}",
-                statusCode,
-                exceptionId,
-                correlationId,
-                exception.Message);
-
+            LogExpectedFailure(statusCode, exceptionId, correlationId, exception.Message);
             return;
         }
 
-        _logger.LogError(
-            exception,
-            "Unhandled exception. ExceptionId: {ExceptionId}. CorrelationId: {CorrelationId}.",
-            exceptionId,
-            correlationId);
+        LogUnhandledException(exception, exceptionId, correlationId);
     }
+
+    [LoggerMessage(
+        EventId = 4001,
+        Level = LogLevel.Information,
+        Message = "Request failed with {StatusCode}. ExceptionId: {ExceptionId}. CorrelationId: {CorrelationId}. Reason: {Reason}")]
+    private partial void LogExpectedFailure(int statusCode, string exceptionId, string correlationId, string reason);
+
+    [LoggerMessage(
+        EventId = 4002,
+        Level = LogLevel.Error,
+        Message = "Unhandled exception. ExceptionId: {ExceptionId}. CorrelationId: {CorrelationId}.")]
+    private partial void LogUnhandledException(Exception exception, string exceptionId, string correlationId);
 
     private static string ToTitle(string errorCode) =>
         string.Join(' ', errorCode.Split('_').Select(word =>

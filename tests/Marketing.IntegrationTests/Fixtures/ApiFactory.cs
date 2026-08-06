@@ -1,7 +1,7 @@
 using Marketing.DataAccess.Context;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Testcontainers.PostgreSql;
@@ -20,46 +20,43 @@ namespace Marketing.IntegrationTests.Fixtures;
 /// </summary>
 public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()
-        .WithImage("postgres:17-alpine")
+    /// <summary>Address of the bootstrap super administrator seeded for these tests.</summary>
+    public const string AdministratorEmail = "admin@integration.test";
+
+    /// <summary>Password of the bootstrap super administrator seeded for these tests.</summary>
+    public const string AdministratorPassword = "IntegrationTest!Password1";
+
+    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17-alpine")
         .WithDatabase("marketing_tests")
         .WithUsername("marketing")
         .WithPassword("marketing_test_password")
         .WithCleanUp(true)
         .Build();
 
-    private readonly RedisContainer _redis = new RedisBuilder()
-        .WithImage("redis:7-alpine")
+    private readonly RedisContainer _redis = new RedisBuilder("redis:7-alpine")
         .WithCleanUp(true)
         .Build();
 
-    /// <summary>Address of the bootstrap administrator seeded for these tests.</summary>
-    public const string AdministratorEmail = "admin@integration.test";
-
-    /// <summary>Password of the bootstrap administrator seeded for these tests.</summary>
-    public const string AdministratorPassword = "IntegrationTest!Password1";
-
     /// <inheritdoc />
-    public async ValueTask InitializeAsync()
-    {
+    public async ValueTask InitializeAsync() =>
         await Task.WhenAll(_postgres.StartAsync(), _redis.StartAsync());
-    }
 
     /// <inheritdoc />
     public override async ValueTask DisposeAsync()
     {
         await base.DisposeAsync();
         await Task.WhenAll(_postgres.DisposeAsync().AsTask(), _redis.DisposeAsync().AsTask());
+
+        GC.SuppressFinalize(this);
     }
 
-    /// <summary>Opens a scope and resolves the database context, for arranging and asserting state.</summary>
-    public AsyncServiceScope CreateScope() => Services.CreateAsyncScope();
-
-    /// <summary>Runs an action against a scoped database context.</summary>
+    /// <summary>Runs an action against a scoped database context, for arranging and asserting state.</summary>
     /// <param name="action">Work to perform.</param>
     public async Task WithDbContextAsync(Func<ApplicationDbContext, Task> action)
     {
-        await using var scope = CreateScope();
+        ArgumentNullException.ThrowIfNull(action);
+
+        await using var scope = Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
         await action(context);
@@ -94,6 +91,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 ["Authentication:Policy:MaxFailedLoginAttempts"] = "3",
                 ["Authentication:PasswordHashing:Iterations"] = "100000",
 
+                // The scheduler adds nothing to an API test and its triggers would fire mid-run.
+                ["Scheduler:Enabled"] = "false",
+
                 ["WhatsApp:AppId"] = "000000000000000",
                 ["WhatsApp:AppSecret"] = "integration-test-secret",
                 ["WhatsApp:WebhookVerifyToken"] = "integration-verify-token",
@@ -103,22 +103,6 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 ["Bootstrap:AdministratorEmail"] = AdministratorEmail,
                 ["Bootstrap:AdministratorPassword"] = AdministratorPassword,
             });
-        });
-
-        builder.ConfigureServices(services =>
-        {
-            // Remove only Quartz's hosted service. Clearing every IHostedService would take the
-            // test server itself down with it, since that is hosted the same way.
-            var schedulerServices = services
-                .Where(descriptor =>
-                    descriptor.ServiceType == typeof(IHostedService)
-                    && descriptor.ImplementationType?.FullName?.StartsWith("Quartz.", StringComparison.Ordinal) == true)
-                .ToList();
-
-            foreach (var descriptor in schedulerServices)
-            {
-                services.Remove(descriptor);
-            }
         });
     }
 }

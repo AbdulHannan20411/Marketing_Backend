@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Background scheduling. Owns Quartz and every recurring job in the platform.
+
+    Kept out of Marketing.Infrastructure deliberately: infrastructure is about how the process
+    talks to the outside world, whereas a job is a unit of work with its own schedule, retry
+    policy and failure semantics. Separating them means adding a job never touches the same file
+    as adding a cache or an HTTP client.
+
+    References Application only - jobs orchestrate business services, never repositories directly.
+    That keeps a job's logic testable without a scheduler and reusable from an endpoint.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Marketing.Scheduler</RootNamespace>
+    <AssemblyName>Marketing.Scheduler</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Marketing.Common\Marketing.Common.csproj" />
+    <ProjectReference Include="..\Marketing.Shared\Marketing.Shared.csproj" />
+    <ProjectReference Include="..\Marketing.Application\Marketing.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Quartz" />
+    <PackageReference Include="Quartz.Extensions.Hosting" />
+    <PackageReference Include="Quartz.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" />
+  </ItemGroup>
+
+</Project>

@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using Marketing.Common.Exceptions;
+using Marketing.Common.Constants;
 using Marketing.DataAccess.Entities;
 using Marketing.DataAccess.Interceptors;
 using Microsoft.EntityFrameworkCore;
@@ -143,7 +144,7 @@ public sealed class AuditingSaveChangesInterceptorTests : IDisposable
 
         Intercept();
 
-        user.CreatedBy.Should().Be(Marketing.Common.Constants.SystemIdentity.UserId);
+        user.CreatedBy.Should().Be(AppConstants.Platform.SystemUserId);
     }
 
     private void Intercept() =>

@@ -27,13 +27,13 @@ public static class CorsExtensions
             policy
                 .WithOrigins(corsOptions.AllowedOrigins)
                 .AllowAnyMethod()
-                .WithHeaders("Authorization", "Content-Type", "Accept", ApplicationHeaderNames.CorrelationId)
+                .WithHeaders("Authorization", "Content-Type", "Accept", AppConstants.Headers.CorrelationId)
                 // Without this the browser hides these from the client's JavaScript, so the SPA
                 // cannot read paging counts or surface a correlation id in an error report.
                 .WithExposedHeaders(
-                    ApplicationHeaderNames.CorrelationId,
-                    ApplicationHeaderNames.TotalCount,
-                    ApplicationHeaderNames.ExceptionId,
+                    AppConstants.Headers.CorrelationId,
+                    AppConstants.Headers.TotalCount,
+                    AppConstants.Headers.ExceptionId,
                     "X-Token-Expired")
                 .AllowCredentials()
                 .SetPreflightMaxAge(TimeSpan.FromSeconds(corsOptions.PreflightMaxAgeSeconds));

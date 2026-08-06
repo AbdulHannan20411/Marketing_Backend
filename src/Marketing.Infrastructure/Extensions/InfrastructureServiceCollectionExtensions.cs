@@ -1,6 +1,5 @@
 using Marketing.Infrastructure.Authentication;
 using Marketing.Infrastructure.Logging;
-using Marketing.Infrastructure.Quartz;
 using Marketing.Infrastructure.Redis;
 using Marketing.Infrastructure.Resilience;
 using Marketing.Infrastructure.Time;
@@ -11,6 +10,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Polly;
+using Polly.Registry;
 using Refit;
 
 namespace Marketing.Infrastructure.Extensions;
@@ -35,8 +36,7 @@ public static class InfrastructureServiceCollectionExtensions
             .AddSecurityPrimitives(configuration)
             .AddDistributedCache(configuration)
             .AddResilience(configuration)
-            .AddWhatsAppClient(configuration)
-            .AddBackgroundJobs();
+            .AddWhatsAppClient(configuration);
 
         return services;
     }
@@ -136,7 +136,7 @@ public static class InfrastructureServiceCollectionExtensions
             .GetSection(WhatsAppOptions.SectionName)
             .Get<WhatsAppOptions>() ?? new WhatsAppOptions();
 
-        services
+        var clientBuilder = services
             .AddRefitClient<IWhatsAppCloudApi>()
             .ConfigureHttpClient(client =>
             {
@@ -144,21 +144,23 @@ public static class InfrastructureServiceCollectionExtensions
                 client.Timeout = TimeSpan.FromSeconds(whatsAppOptions.RequestTimeoutSeconds);
                 client.DefaultRequestHeaders.Add("Accept", "application/json");
             })
-            .AddHttpMessageHandler<GraphApiErrorHandler>()
-            // Retry, circuit breaker, per-attempt and total timeouts. Configured centrally so no
-            // call site can opt out, and so a Meta incident degrades this platform's throughput
-            // rather than exhausting its request threads.
-            .AddStandardResilienceHandler(resilience =>
-            {
-                var options = whatsAppOptions;
+            .AddHttpMessageHandler<GraphApiErrorHandler>();
 
-                resilience.AttemptTimeout.Timeout = TimeSpan.FromSeconds(options.RequestTimeoutSeconds);
-                resilience.TotalRequestTimeout.Timeout =
-                    TimeSpan.FromSeconds(options.RequestTimeoutSeconds * 3);
-                resilience.CircuitBreaker.SamplingDuration =
-                    TimeSpan.FromSeconds(options.RequestTimeoutSeconds * 4);
-            })
-            .SetHandlerLifetime(TimeSpan.FromMinutes(5));
+        // Recycles pooled connection handlers so DNS changes are picked up; a handler pinned for
+        // the process lifetime keeps talking to an IP address Meta has since moved away from.
+        clientBuilder.SetHandlerLifetime(TimeSpan.FromMinutes(5));
+
+        // Retry, circuit breaker, per-attempt and total timeouts. Configured centrally so no call
+        // site can opt out, and so a Meta incident degrades this platform's throughput rather than
+        // exhausting its request threads. Applied last so it wraps the error handler.
+        clientBuilder.AddStandardResilienceHandler(resilience =>
+        {
+            resilience.AttemptTimeout.Timeout = TimeSpan.FromSeconds(whatsAppOptions.RequestTimeoutSeconds);
+            resilience.TotalRequestTimeout.Timeout =
+                TimeSpan.FromSeconds(whatsAppOptions.RequestTimeoutSeconds * 3);
+            resilience.CircuitBreaker.SamplingDuration =
+                TimeSpan.FromSeconds(whatsAppOptions.RequestTimeoutSeconds * 4);
+        });
 
         return services;
     }

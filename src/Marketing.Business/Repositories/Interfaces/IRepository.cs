@@ -25,26 +25,26 @@ public interface IRepository<TEntity>
     /// </para>
     /// </summary>
     /// <param name="asNoTracking">Whether to disable change tracking.</param>
-    IQueryable<TEntity> Query(bool asNoTracking = true);
+    public IQueryable<TEntity> Query(bool asNoTracking = true);
 
     /// <summary>Fetches a row by key without tracking. Returns null when absent or out of tenant.</summary>
-    Task<TEntity?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    public Task<TEntity?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>Fetches a tracked row by key, ready to be mutated and saved.</summary>
-    Task<TEntity?> GetForUpdateAsync(Guid id, CancellationToken cancellationToken = default);
+    public Task<TEntity?> GetForUpdateAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>Fetches the first row matching a predicate, without tracking.</summary>
-    Task<TEntity?> FirstOrDefaultAsync(
+    public Task<TEntity?> FirstOrDefaultAsync(
         Expression<Func<TEntity, bool>> predicate,
         CancellationToken cancellationToken = default);
 
     /// <summary>Returns whether any row matches a predicate.</summary>
-    Task<bool> ExistsAsync(
+    public Task<bool> ExistsAsync(
         Expression<Func<TEntity, bool>> predicate,
         CancellationToken cancellationToken = default);
 
     /// <summary>Counts rows matching an optional predicate.</summary>
-    Task<int> CountAsync(
+    public Task<int> CountAsync(
         Expression<Func<TEntity, bool>>? predicate = null,
         CancellationToken cancellationToken = default);
 
@@ -62,7 +62,7 @@ public interface IRepository<TEntity>
     /// <param name="defaultSort">Sort applied when the request specifies none.</param>
     /// <param name="filter">Optional additional predicate.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<PagedResult<TProjection>> GetPagedAsync<TProjection>(
+    public Task<PagedResult<TProjection>> GetPagedAsync<TProjection>(
         PageRequest request,
         Expression<Func<TEntity, TProjection>> projection,
         IReadOnlyDictionary<string, Expression<Func<TEntity, object?>>> allowedSorts,
@@ -71,17 +71,17 @@ public interface IRepository<TEntity>
         CancellationToken cancellationToken = default);
 
     /// <summary>Stages an insert.</summary>
-    void Add(TEntity entity);
+    public void Add(TEntity entity);
 
     /// <summary>Stages several inserts.</summary>
-    void AddRange(IEnumerable<TEntity> entities);
+    public void AddRange(IEnumerable<TEntity> entities);
 
     /// <summary>Stages an update for a detached instance.</summary>
-    void Update(TEntity entity);
+    public void Update(TEntity entity);
 
     /// <summary>Stages a soft delete. The interceptor rewrites it into an <c>IsDeleted</c> update.</summary>
-    void Remove(TEntity entity);
+    public void Remove(TEntity entity);
 
     /// <summary>Stages several soft deletes.</summary>
-    void RemoveRange(IEnumerable<TEntity> entities);
+    public void RemoveRange(IEnumerable<TEntity> entities);
 }

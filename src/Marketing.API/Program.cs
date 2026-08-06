@@ -10,6 +10,7 @@ using Marketing.Common.Constants;
 using Marketing.DataAccess.Extensions;
 using Marketing.Infrastructure.Extensions;
 using Marketing.Infrastructure.Logging;
+using Marketing.Scheduler.Extensions;
 using Marketing.Shared.Abstractions;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
@@ -36,6 +37,10 @@ try
     builder.Services.AddRepositories();
     builder.Services.AddApplicationServices(builder.Configuration);
     builder.Services.AddInfrastructure(builder.Configuration);
+
+    // Discovers every [ScheduledJob] class in Marketing.Scheduler and wires it into Quartz.
+    // Adding a job - an email dispatcher, a campaign runner - needs no change here.
+    builder.Services.AddScheduler(builder.Configuration);
 
     // ---------------------------------------------------------------------------------------
     // API surface.
@@ -103,7 +108,7 @@ try
     {
         options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
         options.ForwardLimit = 2;
-        options.KnownNetworks.Clear();
+        options.KnownIPNetworks.Clear();
         options.KnownProxies.Clear();
     });
 
@@ -163,7 +168,7 @@ try
     app.UseRateLimiter();
     app.UseAuthorization();
 
-    app.MapControllers().RequireRateLimiting(RateLimitPolicies.Default);
+    app.MapControllers().RequireRateLimiting(AppConstants.RateLimits.Default);
     app.MapApiHealthChecks();
 
     await app.InitialiseDatabaseAsync();

@@ -2,11 +2,11 @@ using System.Text.Json.Serialization;
 
 namespace Marketing.Infrastructure.WhatsApp.Models;
 
-/// <summary>Graph API envelope for a paged collection.</summary>
+/// <summary>Graph API envelope for one page of a collection.</summary>
 /// <typeparam name="TItem">Item type.</typeparam>
 /// <param name="Data">Items on this page.</param>
 /// <param name="Paging">Cursors for the adjacent pages.</param>
-public sealed record GraphCollection<TItem>(
+public sealed record GraphPage<TItem>(
     [property: JsonPropertyName("data")] IReadOnlyList<TItem> Data,
     [property: JsonPropertyName("paging")] GraphPaging? Paging);
 

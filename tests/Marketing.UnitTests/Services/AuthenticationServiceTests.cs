@@ -3,7 +3,7 @@ using Marketing.Application.Configurations;
 using Marketing.Application.DTOs.Auth;
 using Marketing.Application.Services;
 using Marketing.Business.Repositories.Interfaces;
-using Marketing.Common.Enums;
+using static Marketing.Common.Constants.AppConstants;
 using Marketing.Common.Exceptions;
 using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;
@@ -35,7 +35,16 @@ public sealed class AuthenticationServiceTests
         MaxConcurrentSessions = 5,
     };
 
-    private AuthenticationService CreateService()
+    /// <summary>
+    /// Configures the permissive default stubs once, at construction.
+    /// <para>
+    /// They must not live in <see cref="CreateService"/>: NSubstitute lets a broader matcher
+    /// registered later replace a narrower one registered earlier, so a catch-all applied at
+    /// service-construction time would silently overwrite the specific expectation a test had
+    /// already set up.
+    /// </para>
+    /// </summary>
+    public AuthenticationServiceTests()
     {
         _tokenService.CreateAccessToken(Arg.Any<TokenSubject>())
             .Returns(new AccessToken("access-token", Now.AddMinutes(15)));
@@ -48,7 +57,10 @@ public sealed class AuthenticationServiceTests
 
         _refreshTokens.GetActiveSessionsAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns([]);
+    }
 
+    private AuthenticationService CreateService()
+    {
         return new AuthenticationService(
             _users,
             _refreshTokens,
@@ -91,7 +103,7 @@ public sealed class AuthenticationServiceTests
         _passwordHasher.Verify("secret", "stored-hash").Returns((true, false));
 
         var response = await CreateService()
-            .LoginAsync(new LoginRequest("Operator@Acme.test", "secret"));
+            .LoginAsync(new LoginRequest("Operator@Acme.test", "secret"), TestContext.Current.CancellationToken);
 
         response.AccessToken.Should().Be("access-token");
         response.RefreshToken.Should().Be("refresh-token");
@@ -101,7 +113,7 @@ public sealed class AuthenticationServiceTests
         response.User.GetType().GetProperty("TenantId").Should().BeNull();
 
         _refreshTokens.Received(1).Add(Arg.Is<RefreshToken>(token =>
-            token.UserId == UserId
+            token!.UserId == UserId
             && token.TenantId == TenantId
             && token.TokenHash == "refresh-hash"
             && token.SecurityStamp == user.SecurityStamp));
@@ -207,7 +219,9 @@ public sealed class AuthenticationServiceTests
         _passwordHasher.Verify("secret", "stored-hash").Returns((true, true));
         _passwordHasher.Hash("secret").Returns("upgraded-hash");
 
-        await CreateService().LoginAsync(new LoginRequest("operator@acme.test", "secret"));
+        await CreateService().LoginAsync(
+            new LoginRequest("operator@acme.test", "secret"),
+            TestContext.Current.CancellationToken);
 
         // Sign-in is the only moment the plaintext exists, so it is the only moment a work-factor
         // increase can be applied without forcing a password reset.
@@ -290,7 +304,9 @@ public sealed class AuthenticationServiceTests
         _refreshTokens.FindByHashAsync("presented-hash", Arg.Any<CancellationToken>()).Returns(stored);
         _users.FindWithRolesAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
 
-        var response = await CreateService().RefreshAsync(new RefreshTokenRequest("presented"));
+        var response = await CreateService().RefreshAsync(
+            new RefreshTokenRequest("presented"),
+            TestContext.Current.CancellationToken);
 
         response.RefreshToken.Should().Be("refresh-token");
 
@@ -299,7 +315,7 @@ public sealed class AuthenticationServiceTests
 
         // The replacement belongs to the same session, so concurrent-session accounting and the
         // sid claim stay stable across a refresh.
-        _refreshTokens.Received(1).Add(Arg.Is<RefreshToken>(token => token.SessionId == sessionId));
+        _refreshTokens.Received(1).Add(Arg.Is<RefreshToken>(token => token!.SessionId == sessionId));
     }
 
     [Fact]
@@ -311,7 +327,7 @@ public sealed class AuthenticationServiceTests
         _currentUser.UserId = UserId;
         _users.GetForUpdateAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
 
-        await CreateService().LogoutEverywhereAsync();
+        await CreateService().LogoutEverywhereAsync(TestContext.Current.CancellationToken);
 
         user.SecurityStamp.Should().NotBe(originalStamp);
 

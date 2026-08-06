@@ -11,7 +11,7 @@ namespace Marketing.API.Controllers;
 
 /// <summary>Sign-in, token rotation and session management.</summary>
 [ApiVersion("1.0")]
-[EnableRateLimiting(RateLimitPolicies.Authentication)]
+[EnableRateLimiting(AppConstants.RateLimits.Authentication)]
 public sealed class AuthController : ApiControllerBase
 {
     private readonly IAuthenticationService _authenticationService;

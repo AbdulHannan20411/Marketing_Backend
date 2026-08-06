@@ -93,7 +93,7 @@ public static class SerilogConfigurator
     {
         ArgumentNullException.ThrowIfNull(diagnosticContext);
 
-        diagnosticContext.Set(ApplicationHeaderNames.CorrelationId, correlationId);
+        diagnosticContext.Set(AppConstants.Headers.CorrelationId, correlationId);
 
         if (!string.IsNullOrWhiteSpace(tenantSlug))
         {

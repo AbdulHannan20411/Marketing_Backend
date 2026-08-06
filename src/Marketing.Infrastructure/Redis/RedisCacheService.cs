@@ -79,7 +79,9 @@ public sealed class RedisCacheService : ICacheService
                 return null;
             }
 
-            return JsonSerializer.Deserialize<TValue>(payload!, SerializerOptions);
+            // RedisValue converts implicitly to both string and ReadOnlySpan<byte>, which makes the
+            // Deserialize overload ambiguous. Pick the string form explicitly.
+            return JsonSerializer.Deserialize<TValue>(payload.ToString(), SerializerOptions);
         }
         catch (Exception exception) when (IsCacheFailure(exception))
         {

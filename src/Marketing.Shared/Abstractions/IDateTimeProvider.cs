@@ -7,8 +7,8 @@ namespace Marketing.Shared.Abstractions;
 public interface IDateTimeProvider
 {
     /// <summary>Current instant in UTC.</summary>
-    DateTimeOffset UtcNow { get; }
+    public DateTimeOffset UtcNow { get; }
 
     /// <summary>Current UTC instant as a <see cref="DateTime"/> with <see cref="DateTimeKind.Utc"/>.</summary>
-    DateTime UtcNowDateTime { get; }
+    public DateTime UtcNowDateTime { get; }
 }

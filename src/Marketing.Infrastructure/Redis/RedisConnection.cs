@@ -42,7 +42,7 @@ public sealed class RedisConnection : IDisposable
         }
     }
 
-    private static IConnectionMultiplexer? Connect(RedisOptions options, ILogger logger)
+    private static ConnectionMultiplexer? Connect(RedisOptions options, ILogger logger)
     {
         if (!options.Enabled)
         {

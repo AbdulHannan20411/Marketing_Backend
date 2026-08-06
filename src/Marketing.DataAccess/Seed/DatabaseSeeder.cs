@@ -1,5 +1,4 @@
 using Marketing.Common.Constants;
-using Marketing.Common.Enums;
 using Marketing.Common.Extensions;
 using Marketing.Common.Helpers;
 using Marketing.DataAccess.Context;
@@ -7,18 +6,19 @@ using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using static Marketing.Common.Constants.AppConstants;
 
 namespace Marketing.DataAccess.Seed;
 
 /// <summary>
-/// Brings a fresh database to a usable baseline: the three system roles and one bootstrap platform
-/// administrator.
+/// Brings a fresh database to a usable baseline: the three system roles and one bootstrap
+/// super administrator.
 /// <para>
-/// Idempotent by design - it is safe to run on every startup, which is what makes it usable both
-/// on a developer's first clone and as a deployment step.
+/// Idempotent by design - safe to run on every startup, which is what makes it usable both on a
+/// developer's first clone and as a deployment step.
 /// </para>
 /// </summary>
-public sealed class DatabaseSeeder
+public sealed partial class DatabaseSeeder
 {
     private readonly ApplicationDbContext _context;
     private readonly IPasswordHasher _passwordHasher;
@@ -38,11 +38,11 @@ public sealed class DatabaseSeeder
         _logger = logger;
     }
 
-    /// <summary>Seeds roles and the bootstrap administrator if they are absent.</summary>
-    /// <param name="bootstrapAdminEmail">Address of the first platform administrator.</param>
+    /// <summary>Seeds roles and the bootstrap super administrator if they are absent.</summary>
+    /// <param name="bootstrapAdminEmail">Address of the first super administrator.</param>
     /// <param name="bootstrapAdminPassword">
-    /// Initial password. Supplied from configuration - user secrets locally, the secret store in
-    /// every other environment. Never defaulted in code.
+    /// Initial password, supplied from configuration - user secrets locally, the secret store
+    /// elsewhere. Never defaulted in code.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task SeedAsync(
@@ -51,45 +51,48 @@ public sealed class DatabaseSeeder
         CancellationToken cancellationToken = default)
     {
         await SeedRolesAsync(cancellationToken);
-        await SeedPlatformAdministratorAsync(bootstrapAdminEmail, bootstrapAdminPassword, cancellationToken);
+        await SeedSuperAdministratorAsync(bootstrapAdminEmail, bootstrapAdminPassword, cancellationToken);
     }
 
+    /// <summary>
+    /// Creates any missing system role, and reconciles the permission set of existing ones.
+    /// <para>
+    /// Reconciling matters: when a release adds a permission to <see cref="Permissions.ForRole"/>,
+    /// existing deployments have to pick it up. Without this, only brand-new databases would ever
+    /// receive the new grant.
+    /// </para>
+    /// </summary>
     private async Task SeedRolesAsync(CancellationToken cancellationToken)
     {
-        var definitions = new (string Name, string Description, string[] Permissions)[]
+        var descriptions = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            (RoleNames.PlatformAdmin,
-                "Operates the platform and may act across every tenant.",
-                ["platform:*"]),
-            (RoleNames.TenantOwner,
-                "Owns a tenant: billing, users, WhatsApp connection and all tenant data.",
-                ["tenant:*"]),
-            (RoleNames.TenantUser,
-                "Operates campaigns, contacts and templates within a tenant.",
-                [
-                    "contacts:read", "contacts:write",
-                    "groups:read", "groups:write",
-                    "tags:read", "tags:write",
-                    "templates:read",
-                    "campaigns:read", "campaigns:write",
-                    "reports:read",
-                ]),
+            [Roles.SuperAdmin] = "Operates the platform and may act across every tenant.",
+            [Roles.Admin] = "Administers a single tenant: billing, users, WhatsApp connection and all tenant data.",
+            [Roles.Employee] = "Operates campaigns, contacts and templates within a tenant.",
         };
 
         var existing = await _context.Roles
             .IgnoreQueryFilters()
-            .Select(role => role.NormalizedName)
-            .ToListAsync(cancellationToken);
+            .Where(role => !role.IsDeleted)
+            .ToDictionaryAsync(role => role.NormalizedName, StringComparer.Ordinal, cancellationToken);
 
-        var existingNames = new HashSet<string>(existing, StringComparer.Ordinal);
-        var added = 0;
+        var created = 0;
+        var reconciled = 0;
 
-        foreach (var (name, description, permissions) in definitions)
+        foreach (var name in Roles.All)
         {
-            var normalized = name.ToUpperInvariant();
+            var normalized = Roles.Normalise(name);
+            var permissions = Permissions.ForRole(name);
 
-            if (existingNames.Contains(normalized))
+            if (existing.TryGetValue(normalized, out var role))
             {
+                if (role.Permissions.SequenceEqual(permissions, StringComparer.Ordinal))
+                {
+                    continue;
+                }
+
+                role.Permissions = [.. permissions];
+                reconciled++;
                 continue;
             }
 
@@ -98,32 +101,32 @@ public sealed class DatabaseSeeder
                 Id = SequentialGuid.Create(),
                 Name = name,
                 NormalizedName = normalized,
-                Description = description,
+                Description = descriptions[name],
                 IsSystemRole = true,
                 Permissions = [.. permissions],
             });
 
-            added++;
+            created++;
         }
 
-        if (added == 0)
+        if (created == 0 && reconciled == 0)
         {
             return;
         }
 
         await _context.SaveChangesAsync(cancellationToken);
-        _logger.LogInformation("Seeded {RoleCount} system roles.", added);
+
+        LogRolesSeeded(created, reconciled);
     }
 
-    private async Task SeedPlatformAdministratorAsync(
+    private async Task SeedSuperAdministratorAsync(
         string email,
         string password,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
-            _logger.LogWarning(
-                "Bootstrap administrator credentials were not configured; skipping administrator seeding.");
+            LogBootstrapCredentialsMissing();
             return;
         }
 
@@ -138,17 +141,19 @@ public sealed class DatabaseSeeder
             return;
         }
 
-        var adminRole = await _context.Roles
+        var superAdminName = Roles.Normalise(Roles.SuperAdmin);
+
+        var superAdminRole = await _context.Roles
             .IgnoreQueryFilters()
-            .SingleAsync(role => role.NormalizedName == RoleNames.PlatformAdmin.ToUpperInvariant(), cancellationToken);
+            .SingleAsync(role => role.NormalizedName == superAdminName, cancellationToken);
 
         var user = new User
         {
             Id = SequentialGuid.Create(),
-            TenantId = null, // Platform administrators are deliberately outside every tenant.
+            TenantId = null, // Platform staff are deliberately outside every tenant.
             Email = email.Trim(),
             NormalizedEmail = normalizedEmail,
-            DisplayName = "Platform Administrator",
+            DisplayName = "Super Administrator",
             PasswordHash = _passwordHasher.Hash(password),
             Status = UserStatus.Active,
             EmailConfirmed = true,
@@ -160,13 +165,34 @@ public sealed class DatabaseSeeder
         {
             Id = SequentialGuid.Create(),
             UserId = user.Id,
-            RoleId = adminRole.Id,
+            RoleId = superAdminRole.Id,
         });
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation(
-            "Seeded bootstrap platform administrator {Email}. Rotate this password immediately.",
-            normalizedEmail);
+        // Warning rather than information: a live credential exists with a known password until
+        // somebody rotates it, and that should not scroll past unnoticed in a startup log.
+        LogSuperAdministratorSeeded(normalizedEmail);
     }
+
+    // Source-generated logging. The generator emits a strongly typed, allocation-free call that
+    // checks IsEnabled before touching its arguments, which is what CA1873 asks for - the
+    // hand-written overloads box every value type into an object[] whether or not the level is on.
+    [LoggerMessage(
+        EventId = 1001,
+        Level = LogLevel.Information,
+        Message = "Seeded system roles. Created: {CreatedCount}. Permission sets reconciled: {ReconciledCount}.")]
+    private partial void LogRolesSeeded(int createdCount, int reconciledCount);
+
+    [LoggerMessage(
+        EventId = 1002,
+        Level = LogLevel.Warning,
+        Message = "Bootstrap administrator credentials were not configured; skipping administrator seeding.")]
+    private partial void LogBootstrapCredentialsMissing();
+
+    [LoggerMessage(
+        EventId = 1003,
+        Level = LogLevel.Warning,
+        Message = "Seeded bootstrap super administrator {Email}. Rotate this password immediately.")]
+    private partial void LogSuperAdministratorSeeded(string email);
 }

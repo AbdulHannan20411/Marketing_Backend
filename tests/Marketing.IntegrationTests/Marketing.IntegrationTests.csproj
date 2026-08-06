@@ -23,4 +23,9 @@
     <PackageReference Include="coverlet.collector" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- xunit.v3 ships no implicit global usings, unlike the v2 package. -->
+    <Using Include="Xunit" />
+  </ItemGroup>
+
 </Project>

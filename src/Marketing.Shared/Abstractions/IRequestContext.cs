@@ -11,11 +11,11 @@ namespace Marketing.Shared.Abstractions;
 public interface IRequestContext
 {
     /// <summary>Identifier tying every log entry and audit row for this operation together.</summary>
-    string CorrelationId { get; }
+    public string CorrelationId { get; }
 
     /// <summary>Client address, or null when there is no remote caller.</summary>
-    string? IpAddress { get; }
+    public string? IpAddress { get; }
 
     /// <summary>Client user agent, or null when there is no remote caller.</summary>
-    string? UserAgent { get; }
+    public string? UserAgent { get; }
 }

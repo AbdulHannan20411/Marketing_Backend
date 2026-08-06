@@ -24,6 +24,9 @@ csharp_style_prefer_pattern_matching = true:suggestion
 csharp_style_throw_expression = true:suggestion
 
 dotnet_style_readonly_field = true:error
+# "always" also covers interface members, which are implicitly public. Verbose, but the rule is
+# all-or-nothing: the analyzer reports explicit modifiers as *unnecessary* under the alternative,
+# so a mixed codebase cannot compile warning-free either way. Consistency wins.
 dotnet_style_require_accessibility_modifiers = always:error
 dotnet_style_qualification_for_field = false:error
 dotnet_style_qualification_for_property = false:error
@@ -60,6 +63,10 @@ dotnet_diagnostic.CA2007.severity = none      # ConfigureAwait not required in A
 dotnet_diagnostic.CA1848.severity = none      # LoggerMessage source-gen not enforced everywhere
 dotnet_diagnostic.IDE0290.severity = suggestion
 dotnet_diagnostic.CA1515.severity = none      # public types are intentional across layers
+# CA1716 flags "Shared" and "Scheduler" namespace segments because they collide with reserved
+# words in other .NET languages (VB's Shared). Nothing consumes this solution from VB, and the
+# names describe the layers accurately, so the interop concern does not apply.
+dotnet_diagnostic.CA1716.severity = none
 
 [tests/**/*.cs]
 dotnet_diagnostic.CS1591.severity = none

@@ -3,7 +3,7 @@ using Marketing.Application.DTOs.Auth;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Constants;
-using Marketing.Common.Enums;
+using static Marketing.Common.Constants.AppConstants;
 using Marketing.Common.Exceptions;
 using Marketing.Common.Extensions;
 using Marketing.Common.Helpers;
@@ -16,7 +16,7 @@ using Microsoft.Extensions.Options;
 namespace Marketing.Application.Services;
 
 /// <summary>Sign-in, refresh-token rotation and session revocation.</summary>
-public sealed class AuthenticationService : IAuthenticationService
+public sealed partial class AuthenticationService : IAuthenticationService
 {
     private readonly IUserRepository _userRepository;
     private readonly IRefreshTokenRepository _refreshTokenRepository;
@@ -85,19 +85,14 @@ public sealed class AuthenticationService : IAuthenticationService
         {
             _passwordHasher.Verify(request.Password, _decoyHash.Value);
 
-            _logger.LogInformation(
-                "Sign-in rejected for an unknown address. CorrelationId: {CorrelationId}",
-                _requestContext.CorrelationId);
+            LogUnknownAddressRejected(_requestContext.CorrelationId);
 
             throw new AuthenticationException();
         }
 
         if (user.LockoutEndsOn is { } lockoutEnd && lockoutEnd > utcNow)
         {
-            _logger.LogWarning(
-                "Sign-in rejected for locked account {UserId}. Lockout ends {LockoutEndsOn}.",
-                user.Id,
-                lockoutEnd);
+            LogLockedAccountRejected(user.Id, lockoutEnd);
 
             throw new AuthenticationException("account_locked");
         }
@@ -131,8 +126,7 @@ public sealed class AuthenticationService : IAuthenticationService
         await EnforceSessionLimitAsync(user.Id, utcNow, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("User {UserId} signed in. CorrelationId: {CorrelationId}",
-            user.Id, _requestContext.CorrelationId);
+        LogSignInSucceeded(user.Id, _requestContext.CorrelationId);
 
         return response;
     }
@@ -161,10 +155,7 @@ public sealed class AuthenticationService : IAuthenticationService
                 utcNow,
                 cancellationToken);
 
-            _logger.LogWarning(
-                "Refresh-token replay detected for user {UserId}, session {SessionId}. All sessions revoked.",
-                stored.UserId,
-                stored.SessionId);
+            LogRefreshTokenReplayDetected(stored.UserId, stored.SessionId);
 
             throw new AuthenticationException("refresh_token_replayed");
         }
@@ -243,7 +234,7 @@ public sealed class AuthenticationService : IAuthenticationService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("All sessions revoked for user {UserId}.", userId);
+        LogAllSessionsRevoked(userId);
     }
 
     /// <inheritdoc />
@@ -315,11 +306,7 @@ public sealed class AuthenticationService : IAuthenticationService
             // last lockout instead of locking on every subsequent failure forever.
             user.FailedLoginAttempts = 0;
 
-            _logger.LogWarning(
-                "User {UserId} locked out until {LockoutEndsOn} after {Attempts} failed attempts.",
-                user.Id,
-                user.LockoutEndsOn,
-                _policy.MaxFailedLoginAttempts);
+            LogAccountLockedOut(user.Id, user.LockoutEndsOn, _policy.MaxFailedLoginAttempts);
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -375,10 +362,48 @@ public sealed class AuthenticationService : IAuthenticationService
             user.Email,
             user.DisplayName,
             user.Tenant?.Name,
-            roles.Contains(RoleNames.PlatformAdmin, StringComparer.Ordinal),
+            roles.Contains(Roles.SuperAdmin, StringComparer.Ordinal),
             roles,
             permissions);
 
     private static string? Truncate(string? value, int maxLength) =>
         value is null || value.Length <= maxLength ? value : value[..maxLength];
+
+    // Source-generated logging: allocation-free, checks IsEnabled before touching arguments, and
+    // gives each security-relevant event a stable EventId that alerting can key on.
+    [LoggerMessage(
+        EventId = 2001,
+        Level = LogLevel.Information,
+        Message = "Sign-in rejected for an unknown address. CorrelationId: {CorrelationId}")]
+    private partial void LogUnknownAddressRejected(string correlationId);
+
+    [LoggerMessage(
+        EventId = 2002,
+        Level = LogLevel.Warning,
+        Message = "Sign-in rejected for locked account {UserId}. Lockout ends {LockoutEndsOn}.")]
+    private partial void LogLockedAccountRejected(Guid userId, DateTimeOffset lockoutEndsOn);
+
+    [LoggerMessage(
+        EventId = 2003,
+        Level = LogLevel.Information,
+        Message = "User {UserId} signed in. CorrelationId: {CorrelationId}")]
+    private partial void LogSignInSucceeded(Guid userId, string correlationId);
+
+    [LoggerMessage(
+        EventId = 2004,
+        Level = LogLevel.Warning,
+        Message = "Refresh-token replay detected for user {UserId}, session {SessionId}. All sessions revoked.")]
+    private partial void LogRefreshTokenReplayDetected(Guid userId, Guid sessionId);
+
+    [LoggerMessage(
+        EventId = 2005,
+        Level = LogLevel.Information,
+        Message = "All sessions revoked for user {UserId}.")]
+    private partial void LogAllSessionsRevoked(Guid userId);
+
+    [LoggerMessage(
+        EventId = 2006,
+        Level = LogLevel.Warning,
+        Message = "User {UserId} locked out until {LockoutEndsOn} after {Attempts} failed attempts.")]
+    private partial void LogAccountLockedOut(Guid userId, DateTimeOffset? lockoutEndsOn, int attempts);
 }

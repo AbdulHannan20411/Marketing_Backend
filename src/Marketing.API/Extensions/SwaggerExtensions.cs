@@ -2,7 +2,7 @@ using System.Reflection;
 using Asp.Versioning.ApiExplorer;
 using Marketing.API.Configurations;
 using Microsoft.Extensions.Options;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace Marketing.API.Extensions;
@@ -24,7 +24,9 @@ public static class SwaggerExtensions
             options.SupportNonNullableReferenceTypes();
             options.UseAllOfToExtendReferenceSchemas();
 
-            var securityScheme = new OpenApiSecurityScheme
+            const string schemeId = "Bearer";
+
+            options.AddSecurityDefinition(schemeId, new OpenApiSecurityScheme
             {
                 Name = "Authorization",
                 Type = SecuritySchemeType.Http,
@@ -34,15 +36,17 @@ public static class SwaggerExtensions
                 Description =
                     "JWT access token issued by POST /api/v1/auth/login. Enter the token only - the "
                     + "'Bearer' prefix is added for you.",
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer",
-                },
-            };
+            });
 
-            options.AddSecurityDefinition("Bearer", securityScheme);
-            options.AddSecurityRequirement(new OpenApiSecurityRequirement { [securityScheme] = [] });
+            // Microsoft.OpenApi v2 split the scheme from the reference to it: a requirement now
+            // points at a registered definition by id instead of embedding a self-referencing
+            // copy of the scheme object.
+            // Swashbuckle 10 takes a factory rather than an instance, so the requirement can
+            // resolve its scheme reference against the document being generated.
+            options.AddSecurityRequirement(_ => new OpenApiSecurityRequirement
+            {
+                [new OpenApiSecuritySchemeReference(schemeId)] = [],
+            });
 
             // Surfaces the same XML comments that document the code, so the API reference and the
             // source cannot drift apart.

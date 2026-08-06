@@ -1,4 +1,5 @@
 using HealthChecks.UI.Client;
+using Marketing.Common.Constants;
 using Marketing.DataAccess.Configurations;
 using Marketing.Infrastructure.Redis;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -78,7 +79,7 @@ public static class HealthCheckExtensions
         app.MapHealthChecks("/health", new()
         {
             ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse,
-        }).RequireAuthorization(Common.Constants.PolicyNames.PlatformAdministration);
+        }).RequireAuthorization(AppConstants.Policies.SuperAdminOnly);
 
         return app;
     }

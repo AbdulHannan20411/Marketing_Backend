@@ -61,7 +61,7 @@ public static class RateLimitingExtensions
                     }));
 
             // Tight and per-address: this is the bucket that makes credential stuffing expensive.
-            limiter.AddPolicy(RateLimitPolicies.Authentication, context =>
+            limiter.AddPolicy(AppConstants.RateLimits.Authentication, context =>
                 RateLimitPartition.GetFixedWindowLimiter(
                     ResolveClientAddress(context),
                     _ => new FixedWindowRateLimiterOptions
@@ -72,7 +72,7 @@ public static class RateLimitingExtensions
                     }));
 
             // Reports are expensive to compute. Concurrency, not throughput, is the constraint.
-            limiter.AddPolicy(RateLimitPolicies.Reports, context =>
+            limiter.AddPolicy(AppConstants.RateLimits.Reports, context =>
                 RateLimitPartition.GetConcurrencyLimiter(
                     ResolvePartitionKey(context),
                     _ => new ConcurrencyLimiterOptions
@@ -82,7 +82,7 @@ public static class RateLimitingExtensions
                         QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                     }));
 
-            limiter.AddPolicy(RateLimitPolicies.Campaigns, context =>
+            limiter.AddPolicy(AppConstants.RateLimits.Campaigns, context =>
                 RateLimitPartition.GetTokenBucketLimiter(
                     ResolvePartitionKey(context),
                     _ => new TokenBucketRateLimiterOptions
@@ -96,7 +96,7 @@ public static class RateLimitingExtensions
 
             // Generous by design. Meta retries webhooks aggressively and de-subscribes endpoints
             // that reject or stall, so throttling this one costs delivery receipts.
-            limiter.AddPolicy(RateLimitPolicies.Webhook, _ =>
+            limiter.AddPolicy(AppConstants.RateLimits.Webhook, _ =>
                 RateLimitPartition.GetTokenBucketLimiter(
                     "webhook",
                     _ => new TokenBucketRateLimiterOptions
@@ -108,7 +108,7 @@ public static class RateLimitingExtensions
                         AutoReplenishment = true,
                     }));
 
-            limiter.AddPolicy(RateLimitPolicies.Admin, context =>
+            limiter.AddPolicy(AppConstants.RateLimits.Admin, context =>
                 RateLimitPartition.GetFixedWindowLimiter(
                     ResolveUserKey(context),
                     _ => new FixedWindowRateLimiterOptions
@@ -118,7 +118,7 @@ public static class RateLimitingExtensions
                         QueueLimit = 0,
                     }));
 
-            limiter.AddPolicy(RateLimitPolicies.Default, context =>
+            limiter.AddPolicy(AppConstants.RateLimits.Default, context =>
                 RateLimitPartition.GetTokenBucketLimiter(
                     ResolvePartitionKey(context),
                     _ => new TokenBucketRateLimiterOptions
@@ -140,7 +140,7 @@ public static class RateLimitingExtensions
     /// </summary>
     private static string ResolvePartitionKey(HttpContext context)
     {
-        var tenantId = context.User.FindFirst(ApplicationClaimTypes.TenantId)?.Value;
+        var tenantId = context.User.FindFirst(AppConstants.Claims.TenantId)?.Value;
 
         if (!string.IsNullOrWhiteSpace(tenantId))
         {

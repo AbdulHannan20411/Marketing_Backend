@@ -36,11 +36,12 @@ model, cross-cutting infrastructure, and authentication. Domain modules build on
 
 | Area | Status |
 | --- | --- |
-| Solution, layering, build configuration | ✅ Complete |
+| Solution, layering, build configuration | ✅ Complete — builds clean, 0 warnings |
 | Entities, auditing, soft delete, concurrency, tenancy | ✅ Complete |
 | Repositories, unit of work, Dapper reporting path | ✅ Complete |
-| JWT auth, refresh rotation, roles and policies | ✅ Complete |
-| Redis cache, Serilog, Polly, Quartz, rate limiting | ✅ Complete |
+| JWT auth, refresh rotation, roles and permissions | ✅ Complete |
+| Redis cache, Serilog, Polly, rate limiting | ✅ Complete |
+| Scheduler library with one-file job registration | ✅ Complete |
 | Meta Cloud API transport client | 🟡 Client and error handling only |
 | Tenants, Users, Contacts, Templates, Campaigns, Reports | ⬜ Not started |
 
@@ -59,15 +60,18 @@ below it — the project graph enforces it, so a violation fails the build rathe
 ```mermaid
 flowchart TD
     API[Marketing.API<br/><i>controllers, middleware, filters</i>]
-    INF[Marketing.Infrastructure<br/><i>JWT, Redis, Serilog, Polly, Refit, Quartz</i>]
+    SCH[Marketing.Scheduler<br/><i>Quartz, recurring jobs</i>]
+    INF[Marketing.Infrastructure<br/><i>JWT, Redis, Serilog, Polly, Refit</i>]
     APP[Marketing.Application<br/><i>services, DTOs, validators, mappings</i>]
     BUS[Marketing.Business<br/><i>repositories, unit of work, Dapper</i>]
     DAL[Marketing.DataAccess<br/><i>entities, DbContext, interceptors</i>]
     SHR[Marketing.Shared<br/><i>ambient abstractions</i>]
-    CMN[Marketing.Common<br/><i>enums, constants, exceptions, responses</i>]
+    CMN[Marketing.Common<br/><i>constants, enums, exceptions, responses</i>]
 
+    API --> SCH
     API --> INF
     API --> APP
+    SCH --> APP
     INF --> APP
     APP --> BUS
     BUS --> DAL
@@ -140,6 +144,7 @@ Marketing_backend/
 │  ├─ Marketing.Business/           Generic + specific repositories, unit of work, Dapper executor
 │  ├─ Marketing.Application/        Services, DTOs, FluentValidation validators, AutoMapper profiles
 │  ├─ Marketing.Infrastructure/     Everything that talks outside the process
+│  ├─ Marketing.Scheduler/          Quartz and every recurring job — see "Adding a scheduled job"
 │  └─ Marketing.API/                Program, middleware, filters, controllers, DI extensions
 └─ tests/
    ├─ Marketing.UnitTests/          Fast, no I/O
@@ -193,6 +198,70 @@ exists. Each re-applies the soft-delete predicate by hand. `grep -rn IgnoreQuery
 the audit.
 
 ---
+
+## Adding a scheduled job
+
+Jobs live in `Marketing.Scheduler` and are discovered by assembly scan. **Adding one is a single
+file** — no DI registration, no list to update, and therefore no way to write a job that compiles
+and silently never runs.
+
+An email scheduler, end to end:
+
+```csharp
+[ScheduledJob(
+    Key = "email-dispatch",              // stable: also the configuration key
+    Group = "email",
+    Cron = "0 */5 * * * ?",              // UTC, seconds-first, validated at startup
+    Description = "Sends queued outbound email.")]
+public sealed class EmailDispatchJob : ScheduledJobBase
+{
+    private readonly IEmailQueueService _emails;
+
+    public EmailDispatchJob(IEmailQueueService emails, ILogger<EmailDispatchJob> logger)
+        : base(logger) => _emails = emails;
+
+    protected override Task ExecuteJobAsync(CancellationToken cancellationToken) =>
+        _emails.DispatchPendingAsync(cancellationToken);
+}
+```
+
+That is the whole change. The base class already handles timing, structured logging, cancellation
+on shutdown, and wrapping failures so Quartz applies its retry policy instead of the job quietly
+dropping off the schedule.
+
+| Need | Do this |
+| --- | --- |
+| Work scoped to one tenant | Derive from `TenantScopedJobBase` and wrap in `ForTenantAsync` — the tenant query filters then apply exactly as on an HTTP request |
+| Change a schedule in production | Set `Scheduler:Jobs:email-dispatch:Cron` — no deploy |
+| Disable one job | `Scheduler:Jobs:email-dispatch:Enabled: false` |
+| Stop all jobs but keep the API serving | `Scheduler:Enabled: false` |
+| Allow overlapping runs | `AllowConcurrentExecution = true` — off by default, because two runs of a queue drainer send the same message twice |
+
+Jobs call **Application services, never repositories**. The job is a trigger; the work belongs in a
+service so it can be unit-tested without a scheduler and reused from an endpoint.
+
+## Roles and permissions
+
+Three roles, defined once in `Marketing.Common/Constants/Roles.cs`:
+
+| Role | Scope |
+| --- | --- |
+| `SuperAdmin` | Operates the platform. The only role that crosses tenant boundaries |
+| `Admin` | Administers one tenant: billing, users, WhatsApp connection, all tenant data |
+| `Employee` | Operates campaigns, contacts and templates within one tenant |
+
+Capability is expressed as **permissions** (`Permissions.cs`), not role names — `resource:action`
+strings with wildcard grants, defaulted per role by `Permissions.ForRole()` and flattened into the
+JWT at sign-in. `Employee` deliberately excludes user management, billing, contact export and
+campaign dispatch: an employee builds the work, an admin approves anything irreversible or
+involving bulk personal data.
+
+Everything else constant — claim types, headers, policy names, rate-limit policies, cache keys,
+defaults — plus **every enum** lives in `AppConstants.cs`. Add
+`using static Marketing.Common.Constants.AppConstants;` to keep `UserStatus.Active` reading
+normally.
+
+> Role and permission strings are persisted and embedded in tokens. Never rename one; only add.
 
 ## Design decisions worth knowing
 
@@ -395,8 +464,13 @@ Domain modules, in the order they unblock each other:
 
 ### Known gaps in the foundation
 
-- **No migration has been generated yet.** Run `dotnet ef migrations add InitialSchema` once a
-  .NET 10 SDK and PostgreSQL are available.
+- **No migration has been generated yet.** Run `dotnet ef migrations add InitialSchema` with
+  PostgreSQL running.
+- **AutoMapper's licence is an open decision.** Every release below 15.1.1 carries a high-severity
+  advisory, and the last MIT release (14.0.0) falls inside that range — so there is no version that
+  is both free and patched. The pin is 16.2.0, which is patched but commercially licensed (free
+  below a revenue threshold). With one mapping profile in the solution, dropping the dependency is
+  a realistic alternative. See the comment in `Directory.Packages.props`.
 - **The Refit client has no per-tenant authorization handler.** Access tokens are per-tenant and
   encrypted at rest, so the handler lands with the WhatsApp connection module rather than being
   stubbed now.

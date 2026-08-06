@@ -32,7 +32,7 @@ public sealed class JwtTokenServiceTests
         tenantId,
         tenantId is null ? null : "acme",
         Guid.Parse("99999999-9999-9999-9999-999999999999"),
-        [RoleNames.TenantOwner],
+        [Roles.Admin],
         ["contacts:read"]);
 
     [Fact]
@@ -43,14 +43,14 @@ public sealed class JwtTokenServiceTests
 
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token.Value);
 
-        jwt.Claims.Should().ContainSingle(claim => claim.Type == ApplicationClaimTypes.TenantId)
+        jwt.Claims.Should().ContainSingle(claim => claim.Type == AppConstants.Claims.TenantId)
             .Which.Value.Should().Be(tenantId.ToString());
 
         jwt.Claims.Should().Contain(claim =>
-            claim.Type == ClaimTypes.Role && claim.Value == RoleNames.TenantOwner);
+            claim.Type == ClaimTypes.Role && claim.Value == Roles.Admin);
 
         jwt.Claims.Should().Contain(claim =>
-            claim.Type == ApplicationClaimTypes.Permission && claim.Value == "contacts:read");
+            claim.Type == AppConstants.Claims.Permission && claim.Value == "contacts:read");
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public sealed class JwtTokenServiceTests
 
         // Absence, not an empty string: a claim present but blank would be read as "tenant zero"
         // by anything doing a naive TryParse.
-        jwt.Claims.Should().NotContain(claim => claim.Type == ApplicationClaimTypes.TenantId);
+        jwt.Claims.Should().NotContain(claim => claim.Type == AppConstants.Claims.TenantId);
     }
 
     [Fact]
