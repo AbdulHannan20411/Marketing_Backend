@@ -1,0 +1,83 @@
+using Marketing.Application.DTOs.Billing;
+
+namespace Marketing.Application.Interfaces;
+
+/// <summary>Subscription and billing reads and lifecycle actions for the resolved tenant.</summary>
+public interface IBillingService
+{
+    /// <summary>
+    /// Returns the caller's subscription, its plan, and live usage counts.
+    /// <para>
+    /// Usage is computed on the request, not read from a rollup: the client renders every gauge
+    /// and upgrade prompt from it, and a stale figure either blocks a customer who has room or
+    /// lets one sail past a limit.
+    /// </para>
+    /// </summary>
+    public Task<SubscriptionSnapshot> GetSubscriptionAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Returns the plans a customer may buy. Excludes inactive and archived.</summary>
+    public Task<IReadOnlyList<SubscriptionPlanResponse>> GetPurchasablePlansAsync(
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns invoices, payments and renewals for the caller's tenant.</summary>
+    public Task<BillingHistory> GetBillingHistoryAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Moves the subscription to another plan.</summary>
+    /// <remarks>
+    /// Upgrades apply immediately; downgrades take effect at period end. A downgrade whose limits
+    /// sit below current usage is refused with a 409 naming the offending metric.
+    /// </remarks>
+    public Task<SubscriptionSnapshot> ChangePlanAsync(
+        ChangePlanRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Cancels the subscription at the end of the current period.</summary>
+    public Task<SubscriptionSnapshot> CancelAsync(
+        CancelSubscriptionRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Switches automatic renewal on or off.</summary>
+    public Task<SubscriptionSnapshot> SetAutoRenewAsync(
+        AutoRenewRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Retries payment for an unsettled invoice.</summary>
+    /// <param name="invoiceId">Invoice identifier.</param>
+    /// <param name="idempotencyKey">Caller-supplied key that makes a retry safe.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<InvoiceResponse> PayInvoiceAsync(
+        string invoiceId,
+        string? idempotencyKey,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>Plan administration. Platform staff only.</summary>
+public interface IPlanManagementService
+{
+    /// <summary>Returns every plan, including inactive and archived ones.</summary>
+    public Task<IReadOnlyList<SubscriptionPlanResponse>> GetAllAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Creates a plan.</summary>
+    public Task<SubscriptionPlanResponse> CreateAsync(PlanDraft draft, CancellationToken cancellationToken = default);
+
+    /// <summary>Applies a partial update, leaving omitted fields untouched.</summary>
+    public Task<SubscriptionPlanResponse> UpdateAsync(
+        string planId,
+        PlanPatch patch,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Copies a plan with a new identifier, a " (copy)" suffix, inactive status and both badge
+    /// flags cleared.
+    /// </summary>
+    public Task<SubscriptionPlanResponse> DuplicateAsync(string planId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retires a plan.
+    /// <para>
+    /// Never orphans a subscriber: a plan with live subscriptions is archived so it stops being
+    /// offered while existing terms are honoured, rather than deleted.
+    /// </para>
+    /// </summary>
+    public Task DeleteAsync(string planId, CancellationToken cancellationToken = default);
+}

@@ -287,10 +287,9 @@ public sealed partial class AuthenticationService : IAuthenticationService
     {
         var roles = user.UserRoles.Select(userRole => userRole.Role.Name).Distinct(StringComparer.Ordinal).ToList();
 
-        var permissions = user.UserRoles
-            .SelectMany(userRole => userRole.Role.Permissions)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+        // The effective set - role defaults plus per-user overrides. The client does not derive
+        // permissions from role, so the token has to carry the real answer.
+        var permissions = EffectivePermissions.Resolve(roles, user.PermissionOverrides);
 
         var accessToken = _tokenService.CreateAccessToken(new TokenSubject(
             user.Id,

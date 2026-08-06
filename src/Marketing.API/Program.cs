@@ -52,6 +52,7 @@ try
     builder.Services.AddApiRateLimiting();
     builder.Services.AddApiHealthChecks(builder.Configuration);
     builder.Services.AddApiDocumentation();
+    builder.Services.AddRealtime(builder.Configuration);
 
     builder.Services
         .AddControllers(options =>
@@ -175,6 +176,10 @@ try
 
     app.MapControllers().RequireRateLimiting(AppConstants.RateLimits.Default);
     app.MapApiHealthChecks();
+
+    // After UseAuthorization, so the hub's [Authorize] is enforced by the same pipeline
+    // that guards the REST endpoints.
+    app.MapRealtime();
 
     await app.InitialiseDatabaseAsync();
 

@@ -25,6 +25,7 @@ public static class BusinessServiceCollectionExtensions
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<ISqlQueryExecutor, SqlQueryExecutor>();
         services.AddScoped<IQueryExecutor, QueryExecutor>();
+        services.AddScoped<IAuditLogRepository, AuditLogRepository>();
 
         return services;
     }

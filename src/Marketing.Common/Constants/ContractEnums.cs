@@ -223,7 +223,11 @@ public static class ContractEnums
     /// <summary>Feature modules a plan can switch on.</summary>
     public enum FeatureModule
     {
-        /// <summary>WhatsApp channel.</summary>
+        /// <summary>
+        /// WhatsApp channel. Pinned, because the camelCase policy would emit "whatsApp" and the
+        /// contract's value is all lowercase.
+        /// </summary>
+        [JsonStringEnumMemberName("whatsapp")]
         WhatsApp,
 
         /// <summary>Email channel.</summary>

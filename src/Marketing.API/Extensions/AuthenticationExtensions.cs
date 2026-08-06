@@ -62,6 +62,23 @@ public static class AuthenticationExtensions
 
                 options.Events = new JwtBearerEvents
                 {
+                    OnMessageReceived = context =>
+                    {
+                        // A browser cannot set an Authorization header on a WebSocket handshake,
+                        // so SignalR passes the token as a query parameter instead. Accepted only
+                        // for the hub path - allowing it everywhere would put bearer tokens into
+                        // server access logs and browser history for every ordinary request.
+                        var accessToken = context.Request.Query["access_token"];
+
+                        if (!string.IsNullOrEmpty(accessToken)
+                            && context.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                        {
+                            context.Token = accessToken;
+                        }
+
+                        return Task.CompletedTask;
+                    },
+
                     OnAuthenticationFailed = context =>
                     {
                         if (context.Exception is SecurityTokenExpiredException)

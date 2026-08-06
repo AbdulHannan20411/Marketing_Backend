@@ -41,6 +41,12 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IAnalyticsService, AnalyticsService>();
         services.AddScoped<ICampaignService, CampaignService>();
         services.AddScoped<IWhatsAppService, WhatsAppService>();
+        services.AddScoped<IBillingService, BillingService>();
+        services.AddScoped<IPlanManagementService, PlanManagementService>();
+        services.AddScoped<IEmployeeService, EmployeeService>();
+        services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<ISearchService, SearchService>();
+        services.AddScoped<IPlatformService, PlatformService>();
 
         return services;
     }

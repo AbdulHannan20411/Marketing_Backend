@@ -28,6 +28,10 @@ public sealed class UserRepository : Repository<User>, IUserRepository
             .Include(user => user.Tenant)
             .Include(user => user.UserRoles.Where(userRole => !userRole.IsDeleted))
                 .ThenInclude(userRole => userRole.Role)
+            // Overrides come along, because the effective grant is what goes into the token and
+            // what the employees screen shows. Loading roles alone would issue a token that
+            // disagrees with both.
+            .Include(user => user.PermissionOverrides.Where(entry => !entry.IsDeleted))
             .FirstOrDefaultAsync(cancellationToken);
 
     /// <inheritdoc />
@@ -38,6 +42,10 @@ public sealed class UserRepository : Repository<User>, IUserRepository
             .Include(user => user.Tenant)
             .Include(user => user.UserRoles.Where(userRole => !userRole.IsDeleted))
                 .ThenInclude(userRole => userRole.Role)
+            // Overrides come along, because the effective grant is what goes into the token and
+            // what the employees screen shows. Loading roles alone would issue a token that
+            // disagrees with both.
+            .Include(user => user.PermissionOverrides.Where(entry => !entry.IsDeleted))
             .FirstOrDefaultAsync(cancellationToken);
 
     /// <inheritdoc />

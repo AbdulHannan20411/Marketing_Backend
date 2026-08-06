@@ -1,5 +1,6 @@
 using Marketing.Infrastructure.Authentication;
 using Marketing.Infrastructure.Logging;
+using Marketing.Infrastructure.Payments;
 using Marketing.Infrastructure.Redis;
 using Marketing.Infrastructure.Resilience;
 using Marketing.Infrastructure.Time;
@@ -37,6 +38,10 @@ public static class InfrastructureServiceCollectionExtensions
             .AddDistributedCache(configuration)
             .AddResilience(configuration)
             .AddWhatsAppClient(configuration);
+
+        // No payment provider is configured. The manual gateway records offline settlements so the
+        // billing flow works end to end; swapping in a provider replaces this one registration.
+        services.AddScoped<Application.Interfaces.IPaymentGateway, ManualPaymentGateway>();
 
         return services;
     }

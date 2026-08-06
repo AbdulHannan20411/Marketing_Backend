@@ -41,3 +41,40 @@ public static class ContactQueryExtensions
             || (contact.Email != null && EF.Functions.ILike(contact.Email, term)));
     }
 }
+
+/// <summary>
+/// Provider-specific name matching for the entities global search covers.
+/// <para>
+/// Here rather than in the search service for the same reason as contact search: the translation
+/// to PostgreSQL <c>ILIKE</c> is an Entity Framework concern, and keeping it in this layer is what
+/// lets the Application layer stay free of EF imports.
+/// </para>
+/// </summary>
+public static class SearchQueryExtensions
+{
+    /// <summary>Matches a campaign name, case-insensitively.</summary>
+    public static IQueryable<Campaign> WhereNameMatches(this IQueryable<Campaign> source, string term)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        return source.Where(campaign => EF.Functions.ILike(campaign.Name, $"%{term}%"));
+    }
+
+    /// <summary>Matches a template name, case-insensitively.</summary>
+    public static IQueryable<MessageTemplate> WhereNameMatches(this IQueryable<MessageTemplate> source, string term)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        return source.Where(template => EF.Functions.ILike(template.Name, $"%{term}%"));
+    }
+
+    /// <summary>Matches a user's display name or email, case-insensitively.</summary>
+    public static IQueryable<User> WhereNameMatches(this IQueryable<User> source, string term)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        return source.Where(user =>
+            EF.Functions.ILike(user.DisplayName, $"%{term}%")
+            || EF.Functions.ILike(user.Email, $"%{term}%"));
+    }
+}
