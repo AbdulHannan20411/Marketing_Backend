@@ -119,6 +119,12 @@ public class ApplicationDbContext : DbContext
     /// <summary>Notifications.</summary>
     public DbSet<Notification> Notifications => Set<Notification>();
 
+    /// <summary>Staged CSV import batches.</summary>
+    public DbSet<ContactImportBatch> ContactImportBatches => Set<ContactImportBatch>();
+
+    /// <summary>Staged CSV import rows.</summary>
+    public DbSet<ContactImportRow> ContactImportRows => Set<ContactImportRow>();
+
     /// <summary>
     /// Tenant applied by the global query filter.
     /// <para>

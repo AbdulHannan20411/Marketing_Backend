@@ -47,6 +47,11 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<ISearchService, SearchService>();
         services.AddScoped<IPlatformService, PlatformService>();
+        services.AddScoped<IContactWriteService, ContactWriteService>();
+        services.AddScoped<IContactImportService, ContactImportService>();
+        services.AddScoped<ICatalogService, CatalogService>();
+        services.AddScoped<ICampaignWriteService, CampaignWriteService>();
+        services.AddScoped<IAdminAccountService, AdminAccountService>();
 
         return services;
     }

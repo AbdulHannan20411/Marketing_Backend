@@ -423,3 +423,43 @@ public sealed class NotificationConfiguration : BaseEntityConfiguration<Notifica
             .IsDescending(false, false, true);
     }
 }
+
+/// <summary>Fluent configuration for <see cref="ContactImportBatch"/>.</summary>
+public sealed class ContactImportBatchConfiguration : BaseEntityConfiguration<ContactImportBatch>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<ContactImportBatch> builder)
+    {
+        builder.ToTable("contact_import_batches");
+
+        builder.Property(batch => batch.FileName).IsRequired().HasMaxLength(260);
+        builder.Property(batch => batch.Columns).HasColumnType("text[]").IsRequired();
+        builder.Property(batch => batch.Status).IsRequired().HasMaxLength(24).HasConversion<string>();
+
+        // Supports the cleanup job that discards abandoned uploads.
+        builder.HasIndex(batch => new { batch.TenantId, batch.Status, batch.UploadedOn });
+
+        builder.HasMany(batch => batch.Rows)
+            .WithOne(row => row.ContactImportBatch)
+            .HasForeignKey(row => row.ContactImportBatchId)
+            // Cascade here, unlike everywhere else: staged rows are worthless without their batch
+            // and are not business data worth preserving.
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+/// <summary>Fluent configuration for <see cref="ContactImportRow"/>.</summary>
+public sealed class ContactImportRowConfiguration : BaseEntityConfiguration<ContactImportRow>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<ContactImportRow> builder)
+    {
+        builder.ToTable("contact_import_rows");
+
+        builder.Property(row => row.Values).HasColumnType("text[]").IsRequired();
+        builder.Property(row => row.Error).HasMaxLength(500);
+
+        // The commit walks a batch in file order, and the preview reads the first few rows.
+        builder.HasIndex(row => new { row.ContactImportBatchId, row.RowNumber });
+    }
+}

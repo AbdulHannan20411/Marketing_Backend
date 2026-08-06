@@ -70,6 +70,19 @@ public static class ContractEnums
         Customer,
     }
 
+    /// <summary>State of a staged CSV import.</summary>
+    public enum ContactImportStatus
+    {
+        /// <summary>Uploaded and parsed; waiting for the operator to map columns.</summary>
+        AwaitingMapping,
+
+        /// <summary>Committed. Contacts were created.</summary>
+        Committed,
+
+        /// <summary>Abandoned or expired without being committed.</summary>
+        Discarded,
+    }
+
     // -------------------------------------------------------------------------------------
     // WhatsApp
     // -------------------------------------------------------------------------------------
