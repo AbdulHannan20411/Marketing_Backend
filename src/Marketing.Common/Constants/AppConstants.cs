@@ -32,8 +32,46 @@ public static class AppConstants
     /// request body, route value, query string or header.
     /// </para>
     /// </summary>
+    /// <remarks>
+    /// The client decodes the JWT payload directly and drives navigation and authorisation from
+    /// it, so these names are a contract. A JWT payload is signed but <b>not encrypted</b> - treat
+    /// every claim here as public to the token holder and never put a secret in one.
+    /// </remarks>
     public static class Claims
     {
+        /// <summary>Full name of the authenticated user.</summary>
+        public const string Name = "name";
+
+        /// <summary>
+        /// The principal's single role: <c>SuperAdmin</c>, <c>Admin</c> or <c>Employee</c>.
+        /// <para>
+        /// Singular by contract. The client reads one string, not a list, so a user carrying two
+        /// roles would break it - see <c>Roles.Primary</c>.
+        /// </para>
+        /// </summary>
+        public const string Role = "role";
+
+        /// <summary>
+        /// The principal's effective permissions, serialised as a JSON array.
+        /// <para>
+        /// The effective set, not the role's defaults: the client does not derive permissions from
+        /// role, so per-user overrides have to be resolved server-side before issuance.
+        /// </para>
+        /// </summary>
+        public const string Permissions = "permissions";
+
+        /// <summary>
+        /// Display label for the organisation.
+        /// <para>
+        /// A label and nothing more. It is never a tenant identifier and must never be used for
+        /// data access - tenancy comes from <see cref="TenantId"/>, server-side only.
+        /// </para>
+        /// </summary>
+        public const string WorkspaceName = "workspaceName";
+
+        /// <summary>Avatar URL, or null.</summary>
+        public const string AvatarUrl = "avatarUrl";
+
         /// <summary>Tenant the token was issued for. Absent for platform staff.</summary>
         public const string TenantId = "tenant_id";
 
@@ -42,12 +80,6 @@ public static class AppConstants
 
         /// <summary>Opaque identifier of the session that issued the token.</summary>
         public const string SessionId = "sid";
-
-        /// <summary>A fine-grained permission granted to the principal.</summary>
-        public const string Permission = "perm";
-
-        /// <summary>Full name of the authenticated user.</summary>
-        public const string DisplayName = "display_name";
     }
 
     /// <summary>Custom HTTP headers emitted or consumed by the API.</summary>

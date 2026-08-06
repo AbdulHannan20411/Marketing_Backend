@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Text.Json;
 using AwesomeAssertions;
 using Marketing.Common.Constants;
 using Marketing.Infrastructure.Authentication;
@@ -26,14 +27,16 @@ public sealed class JwtTokenServiceTests
     private JwtTokenService CreateService() => new(Options.Create(DefaultOptions), _clock);
 
     private static TokenSubject Subject(Guid? tenantId) => new(
-        Guid.Parse("11111111-1111-1111-1111-111111111111"),
-        "operator@example.com",
-        "Operator",
-        tenantId,
-        tenantId is null ? null : "acme",
-        Guid.Parse("99999999-9999-9999-9999-999999999999"),
-        [Roles.Admin],
-        ["contacts:read"]);
+        UserId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
+        Email: "operator@example.com",
+        Name: "Operator",
+        Role: tenantId is null ? Roles.SuperAdmin : Roles.Admin,
+        Permissions: [Permissions.Contacts.View, Permissions.Reports.View],
+        WorkspaceName: tenantId is null ? null : "Acme Retail",
+        AvatarUrl: null,
+        TenantId: tenantId,
+        TenantSlug: tenantId is null ? null : "acme",
+        SessionId: Guid.Parse("99999999-9999-9999-9999-999999999999"));
 
     [Fact]
     public void An_access_token_carries_the_tenant_claim_for_a_tenant_user()
@@ -46,11 +49,56 @@ public sealed class JwtTokenServiceTests
         jwt.Claims.Should().ContainSingle(claim => claim.Type == AppConstants.Claims.TenantId)
             .Which.Value.Should().Be(tenantId.ToString());
 
+        // Single-valued role claim, as the client contract requires, plus the framework's own role
+        // claim type so server-side RequireRole keeps working.
+        jwt.Claims.Should().ContainSingle(claim => claim.Type == AppConstants.Claims.Role)
+            .Which.Value.Should().Be(Roles.Admin);
+
         jwt.Claims.Should().Contain(claim =>
             claim.Type == ClaimTypes.Role && claim.Value == Roles.Admin);
 
-        jwt.Claims.Should().Contain(claim =>
-            claim.Type == AppConstants.Claims.Permission && claim.Value == "contacts:read");
+        jwt.Claims.Should().ContainSingle(claim => claim.Type == AppConstants.Claims.Name)
+            .Which.Value.Should().Be("Operator");
+
+        jwt.Claims.Should().ContainSingle(claim => claim.Type == AppConstants.Claims.WorkspaceName)
+            .Which.Value.Should().Be("Acme Retail");
+    }
+
+    [Fact]
+    public void The_decoded_payload_matches_the_shape_the_client_reads()
+    {
+        var token = CreateService().CreateAccessToken(Subject(Guid.NewGuid()));
+
+        // Decoded the way the client does it - straight from the base64url payload - rather than
+        // through JwtSecurityTokenHandler, which re-expands a JSON array claim back into repeated
+        // claims and so cannot show whether the wire format is an array.
+        var payload = DecodePayload(token.Value);
+
+        payload.GetProperty("permissions").ValueKind.Should().Be(
+            JsonValueKind.Array,
+            "the client always indexes permissions, so a single grant must not serialise as a bare string");
+
+        payload.GetProperty("permissions").EnumerateArray()
+            .Select(element => element.GetString())
+            .Should().Contain(Permissions.Contacts.View);
+
+        payload.GetProperty("role").ValueKind.Should().Be(
+            JsonValueKind.String,
+            "the client reads one role string, not a list");
+
+        foreach (var required in new[] { "sub", "email", "name", "role", "permissions", "workspaceName", "iat", "exp" })
+        {
+            payload.TryGetProperty(required, out _).Should().BeTrue($"'{required}' is a mandatory claim");
+        }
+    }
+
+    /// <summary>Base64url-decodes a JWT payload without validating it, as a browser would.</summary>
+    private static JsonElement DecodePayload(string token)
+    {
+        var payload = token.Split('.')[1];
+        var padded = payload.Replace('-', '+').Replace('_', '/').PadRight((payload.Length + 3) / 4 * 4, '=');
+
+        return JsonDocument.Parse(Convert.FromBase64String(padded)).RootElement.Clone();
     }
 
     [Fact]

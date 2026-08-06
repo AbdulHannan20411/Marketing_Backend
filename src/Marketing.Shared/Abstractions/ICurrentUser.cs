@@ -13,6 +13,15 @@ public interface ICurrentUser
     /// <summary>Identifier of the signed-in user, or <see langword="null"/> when anonymous.</summary>
     public Guid? UserId { get; }
 
+    /// <summary>
+    /// Session the access token belongs to, from its <c>sid</c> claim.
+    /// <para>
+    /// Sign-out uses this rather than a token supplied in the request body, so a caller can only
+    /// ever end their own session.
+    /// </para>
+    /// </summary>
+    public Guid? SessionId { get; }
+
     /// <summary>Normalised email address of the signed-in user.</summary>
     public string? Email { get; }
 

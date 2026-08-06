@@ -34,8 +34,15 @@ public sealed class ValidationException : AppException
     /// <summary>Validation failures keyed by property name.</summary>
     public IReadOnlyDictionary<string, string[]> Errors { get; }
 
-    /// <inheritdoc />
-    public override HttpStatusCode StatusCode => HttpStatusCode.BadRequest;
+    /// <summary>
+    /// 422 rather than 400.
+    /// <para>
+    /// The client renders 422 as inline field errors with no toast, and 400 as a generic error
+    /// toast. Field-level validation belongs against the field, so this is the status that
+    /// produces the intended behaviour.
+    /// </para>
+    /// </summary>
+    public override HttpStatusCode StatusCode => HttpStatusCode.UnprocessableEntity;
 
     /// <inheritdoc />
     public override string ErrorCode => "validation_failed";

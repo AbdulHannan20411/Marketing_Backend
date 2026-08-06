@@ -25,5 +25,22 @@ public sealed class LoginRequestValidator : AbstractValidator<LoginRequest>
         RuleFor(request => request.Password)
             .NotEmpty().WithMessage("Password is required.")
             .MaximumLength(256).WithMessage("Password must not exceed 256 characters.");
+
+        RuleFor(request => request.Portal)
+            .Must(portal => portal is null || LoginPortals.All.Contains(portal, StringComparer.Ordinal))
+            .WithMessage($"Portal must be one of: {string.Join(", ", LoginPortals.All)}.");
+    }
+}
+
+/// <summary>Validates <see cref="ForgotPasswordRequest"/>.</summary>
+public sealed class ForgotPasswordRequestValidator : AbstractValidator<ForgotPasswordRequest>
+{
+    /// <summary>Initialises a new instance.</summary>
+    public ForgotPasswordRequestValidator()
+    {
+        RuleFor(request => request.Email)
+            .NotEmpty().WithMessage("Email address is required.")
+            .MaximumLength(320).WithMessage("Email address must not exceed 320 characters.")
+            .EmailAddress().WithMessage("Enter a valid email address.");
     }
 }

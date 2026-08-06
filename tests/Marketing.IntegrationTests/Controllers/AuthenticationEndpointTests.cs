@@ -22,14 +22,12 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
     /// <summary>Ties every awaited call to the test runner's cancellation, so a hung request fails fast.</summary>
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private sealed record Envelope<TData>(TData Data, string? Message, bool Success);
+    private sealed record Envelope<TData>(TData Data, string? Message, string TraceId);
 
     private sealed record AuthPayload(
         string AccessToken,
-        DateTimeOffset AccessTokenExpiresAtUtc,
         string RefreshToken,
-        DateTimeOffset RefreshTokenExpiresAtUtc,
-        JsonElement User);
+        DateTimeOffset ExpiresAtUtc);
 
     private static async Task<AuthPayload> SignInAsync(HttpClient client)
     {
@@ -54,7 +52,7 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
 
         payload.AccessToken.Should().NotBeNullOrWhiteSpace();
         payload.RefreshToken.Should().NotBeNullOrWhiteSpace();
-        payload.AccessTokenExpiresAtUtc.Should().BeAfter(DateTimeOffset.UtcNow);
+        payload.ExpiresAtUtc.Should().BeAfter(DateTimeOffset.UtcNow);
     }
 
     [Fact]
@@ -87,7 +85,7 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
         var body = await (await client.GetAsync("/api/v1/auth/me", Ct)).Content.ReadAsStringAsync(Ct);
 
         body.Should().Contain(Roles.SuperAdmin);
-        body.Should().Contain(Permissions.Platform.All);
+        body.Should().Contain(Permissions.Platform.Tenants);
     }
 
     [Fact]
@@ -104,7 +102,7 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
         response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
 
         var body = await response.Content.ReadAsStringAsync(Ct);
-        body.Should().Contain("errorCode");
+        body.Should().Contain("errorCode").And.Contain("traceId");
     }
 
     [Fact]
@@ -141,7 +139,8 @@ public sealed class AuthenticationEndpointTests : IClassFixture<ApiFactory>
             new { email = "not-an-email", password = string.Empty },
             Ct);
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        // 422, not 400: the client renders 422 as inline field errors instead of a toast.
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
 
         var body = await response.Content.ReadAsStringAsync(Ct);
         body.Should().Contain("errors").And.Contain("validation_failed");

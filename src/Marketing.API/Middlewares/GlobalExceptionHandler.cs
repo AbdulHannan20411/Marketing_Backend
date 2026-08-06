@@ -62,7 +62,10 @@ public sealed partial class GlobalExceptionHandler : IExceptionHandler
         httpContext.Response.Headers[AppConstants.Headers.ExceptionId] = exceptionId;
 
         problemDetails.Instance = httpContext.Request.Path;
-        problemDetails.Extensions["correlationId"] = correlationId;
+
+        // traceId is the name the client's error interceptor reads. It is the same value the
+        // success envelope carries, so a user can quote one id whatever the outcome was.
+        problemDetails.Extensions["traceId"] = correlationId;
         problemDetails.Extensions["exceptionId"] = exceptionId;
 
         if (_environment.IsDevelopment())
@@ -108,8 +111,10 @@ public sealed partial class GlobalExceptionHandler : IExceptionHandler
         var problem = new ValidationProblemDetails(
             exception.Errors.ToDictionary(entry => entry.Key, entry => entry.Value))
         {
-            Status = StatusCodes.Status400BadRequest,
-            Title = "One or more validation errors occurred",
+            // Taken from the exception rather than hard-coded, so the status and the client's
+            // inline-versus-toast behaviour stay defined in exactly one place.
+            Status = (int)exception.StatusCode,
+            Title = "Validation failed",
             Type = $"{ProblemTypeBase}{exception.ErrorCode}",
         };
 

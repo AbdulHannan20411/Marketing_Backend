@@ -90,7 +90,7 @@ public sealed class PagingAndSortingTests
     [Fact]
     public void Paged_result_reports_navigation_counters_correctly()
     {
-        var page = new PagedResult<Row>([new Row("Alice", 10)], totalCount: 45, pageNumber: 2, pageSize: 20);
+        var page = new PagedResult<Row>([new Row("Alice", 10)], totalItems: 45, page: 2, pageSize: 20);
 
         page.TotalPages.Should().Be(3);
         page.HasPreviousPage.Should().BeTrue();
@@ -98,11 +98,13 @@ public sealed class PagingAndSortingTests
     }
 
     [Fact]
-    public void An_empty_page_reports_zero_pages_and_no_navigation()
+    public void An_empty_page_still_reports_one_page()
     {
-        var page = PagedResults.Empty<Row>(pageNumber: 1, pageSize: 25);
+        var page = PagedResults.Empty<Row>(page: 1, pageSize: 25);
 
-        page.TotalPages.Should().Be(0);
+        // One, not zero: the client renders "Page 1 of 1" for an empty result rather than
+        // "Page 1 of 0". Required by the front-end contract.
+        page.TotalPages.Should().Be(1);
         page.HasPreviousPage.Should().BeFalse();
         page.HasNextPage.Should().BeFalse();
         page.Items.Should().BeEmpty();
@@ -111,13 +113,13 @@ public sealed class PagingAndSortingTests
     [Fact]
     public void Mapping_a_page_preserves_its_counters()
     {
-        var page = new PagedResult<Row>([new Row("Alice", 10)], totalCount: 45, pageNumber: 2, pageSize: 20);
+        var page = new PagedResult<Row>([new Row("Alice", 10)], totalItems: 45, page: 2, pageSize: 20);
 
         var mapped = page.Map(row => row.Name);
 
         mapped.Items.Should().ContainSingle().Which.Should().Be("Alice");
-        mapped.TotalCount.Should().Be(45);
-        mapped.PageNumber.Should().Be(2);
+        mapped.TotalItems.Should().Be(45);
+        mapped.Page.Should().Be(2);
         mapped.TotalPages.Should().Be(3);
     }
 }

@@ -1,4 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Text.Json;
 using System.Security.Claims;
 using Marketing.Common.Constants;
 using Marketing.Shared.Abstractions;
@@ -51,15 +52,47 @@ public sealed class HttpContextCurrentUser : ICurrentUser
         ?? Principal?.FindFirstValue(ClaimTypes.Email);
 
     /// <inheritdoc />
-    public string? DisplayName => Principal?.FindFirstValue(AppConstants.Claims.DisplayName);
+    public Guid? SessionId =>
+        Guid.TryParse(Principal?.FindFirstValue(AppConstants.Claims.SessionId), out var sessionId)
+            ? sessionId
+            : null;
+
+    /// <inheritdoc />
+    public string? DisplayName => Principal?.FindFirstValue(AppConstants.Claims.Name);
 
     /// <inheritdoc />
     public IReadOnlyCollection<string> Roles =>
         Principal?.FindAll(ClaimTypes.Role).Select(claim => claim.Value).ToArray() ?? [];
 
-    /// <inheritdoc />
-    public IReadOnlyCollection<string> Permissions =>
-        Principal?.FindAll(AppConstants.Claims.Permission).Select(claim => claim.Value).ToArray() ?? [];
+    /// <summary>
+    /// Permissions carried by the token.
+    /// <para>
+    /// The claim holds a JSON array in a single claim value, so it is parsed rather than collected
+    /// from repeated claims. A malformed value yields an empty set: failing closed here means a
+    /// corrupt token grants nothing instead of throwing on every authorisation check.
+    /// </para>
+    /// </summary>
+    public IReadOnlyCollection<string> Permissions
+    {
+        get
+        {
+            var raw = Principal?.FindFirstValue(AppConstants.Claims.Permissions);
+
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return [];
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<string[]>(raw) ?? [];
+            }
+            catch (JsonException)
+            {
+                return [];
+            }
+        }
+    }
 
     /// <inheritdoc />
     public bool IsAuthenticated => Principal?.Identity?.IsAuthenticated == true && UserId is not null;
@@ -75,20 +108,5 @@ public sealed class HttpContextCurrentUser : ICurrentUser
 
     /// <inheritdoc />
     public bool HasPermission(string permission) =>
-        Permissions.Contains(permission, StringComparer.Ordinal)
-        || Permissions.Any(granted => IsWildcardMatch(granted, permission));
-
-    /// <summary>
-    /// Matches a wildcard grant such as <c>tenant:*</c> against a concrete permission.
-    /// </summary>
-    private static bool IsWildcardMatch(string granted, string requested)
-    {
-        if (!granted.EndsWith(":*", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var prefix = granted[..^1];
-        return requested.StartsWith(prefix, StringComparison.Ordinal);
-    }
+        Marketing.Common.Constants.Permissions.IsSatisfiedBy(Permissions, permission);
 }

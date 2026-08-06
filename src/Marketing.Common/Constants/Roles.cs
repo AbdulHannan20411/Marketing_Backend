@@ -43,6 +43,33 @@ public static class Roles
     /// <summary>Roles permitted to administer a tenant.</summary>
     public static readonly IReadOnlyList<string> TenantAdministrators = [SuperAdmin, Admin];
 
+    /// <summary>
+    /// Reduces a set of role assignments to the single role the token carries.
+    /// <para>
+    /// The client's <c>role</c> claim is one string, not a list. Picking the most privileged
+    /// assignment keeps that contract satisfiable even if the data model ever allows two, and
+    /// fails safe in the sense that it never silently downgrades someone mid-session.
+    /// </para>
+    /// </summary>
+    /// <param name="assigned">Roles assigned to the user.</param>
+    /// <returns>The most privileged known role, or <see cref="Employee"/> when none match.</returns>
+    public static string Primary(IEnumerable<string> assigned)
+    {
+        ArgumentNullException.ThrowIfNull(assigned);
+
+        var roles = assigned as IReadOnlyCollection<string> ?? [.. assigned];
+
+        foreach (var role in All)
+        {
+            if (roles.Contains(role, StringComparer.Ordinal))
+            {
+                return role;
+            }
+        }
+
+        return Employee;
+    }
+
     /// <summary>Returns whether a role name is one the platform recognises.</summary>
     /// <param name="role">Candidate role name.</param>
     public static bool IsKnown(string? role) =>

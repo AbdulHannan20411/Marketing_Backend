@@ -3,100 +3,54 @@ namespace Marketing.Common.Responses;
 /// <summary>
 /// Envelope returned by every successful endpoint.
 /// <para>
-/// Failures are <em>not</em> wrapped in this type—they return RFC 7807
-/// <c>ProblemDetails</c>, allowing clients to branch on the response
-/// content type instead of inspecting a success flag.
+/// The shape is fixed by the front-end contract: <c>ApiService</c> unwraps <c>data</c> centrally,
+/// so an unwrapped body breaks every screen. Failures are deliberately <em>not</em> wrapped - they
+/// return RFC 7807 problem documents, letting the client branch on content type rather than
+/// inspecting a success flag.
 /// </para>
 /// </summary>
 /// <typeparam name="TData">Payload type.</typeparam>
 public sealed class ApiResponse<TData>
 {
-    internal ApiResponse(
-        TData data,
-        string? message,
-        IReadOnlyDictionary<string, object?>? meta)
+    internal ApiResponse(TData data, string? message, string traceId)
     {
         Data = data;
         Message = message;
-        Meta = meta;
+        TraceId = traceId;
     }
 
-    /// <summary>
-    /// Gets the response payload.
-    /// </summary>
+    /// <summary>The payload, or <see langword="null"/> for endpoints that return nothing.</summary>
     public TData Data { get; }
 
     /// <summary>
-    /// Gets an optional human-readable message suitable for display to users.
+    /// Optional message surfaced to the user as a success toast.
+    /// <para>
+    /// Set it to confirm a write ("Plan \"Growth\" saved."); leave it null on reads, or the user
+    /// gets a toast every time a list refreshes.
+    /// </para>
     /// </summary>
     public string? Message { get; }
 
-    /// <summary>
-    /// Gets optional out-of-band metadata such as paging information.
-    /// </summary>
-    public IReadOnlyDictionary<string, object?>? Meta { get; }
-
-    /// <summary>
-    /// Always <see langword="true"/> for successful responses.
-    /// </summary>
-    public bool Success => true;
+    /// <summary>Correlation id, echoed in the logs so a support report can be traced to a request.</summary>
+    public string TraceId { get; }
 }
 
-/// <summary>
-/// Factory methods for creating <see cref="ApiResponse{TData}"/> instances.
-/// </summary>
+/// <summary>Factory methods for <see cref="ApiResponse{TData}"/>.</summary>
 public static class ApiResponse
 {
-    /// <summary>
-    /// Wraps a payload in a successful response.
-    /// </summary>
-    public static ApiResponse<TData> Ok<TData>(
-        TData data,
-        string? message = null)
-    {
-        return new ApiResponse<TData>(
-            data,
-            message,
-            meta: null);
-    }
+    /// <summary>Wraps a payload.</summary>
+    /// <typeparam name="TData">Payload type.</typeparam>
+    /// <param name="data">Payload.</param>
+    /// <param name="traceId">Correlation id for this request.</param>
+    /// <param name="message">Optional success message.</param>
+    public static ApiResponse<TData> Ok<TData>(TData data, string traceId, string? message = null) =>
+        new(data, message, traceId);
 
     /// <summary>
-    /// Wraps a payload together with metadata.
+    /// Wraps an empty payload, for endpoints the contract defines as returning <c>null</c> data.
     /// </summary>
-    public static ApiResponse<TData> Ok<TData>(
-        TData data,
-        IReadOnlyDictionary<string, object?> meta,
-        string? message = null)
-    {
-        return new ApiResponse<TData>(
-            data,
-            message,
-            meta);
-    }
-
-    /// <summary>
-    /// Wraps a paged result and exposes paging information through
-    /// <see cref="ApiResponse{TData}.Meta"/>.
-    /// </summary>
-    public static ApiResponse<IReadOnlyList<TItem>> OkPage<TItem>(
-        PagedResult<TItem> page,
-        string? message = null)
-    {
-        ArgumentNullException.ThrowIfNull(page);
-
-        var meta = new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["pageNumber"] = page.PageNumber,
-            ["pageSize"] = page.PageSize,
-            ["totalCount"] = page.TotalCount,
-            ["totalPages"] = page.TotalPages,
-            ["hasPreviousPage"] = page.HasPreviousPage,
-            ["hasNextPage"] = page.HasNextPage,
-        };
-
-        return new ApiResponse<IReadOnlyList<TItem>>(
-            page.Items,
-            message,
-            meta);
-    }
+    /// <param name="traceId">Correlation id for this request.</param>
+    /// <param name="message">Optional success message.</param>
+    public static ApiResponse<object?> Empty(string traceId, string? message = null) =>
+        new(null, message, traceId);
 }

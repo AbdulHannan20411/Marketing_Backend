@@ -70,7 +70,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
     }
 
     /// <inheritdoc />
-    public async Task<AuthenticationResponse> LoginAsync(
+    public async Task<AuthTokens> LoginAsync(
         LoginRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -108,6 +108,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
         }
 
         EnsureAccountUsable(user);
+        EnsurePortalMatches(user, request.Portal);
 
         if (requiresRehash)
         {
@@ -132,7 +133,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
     }
 
     /// <inheritdoc />
-    public async Task<AuthenticationResponse> RefreshAsync(
+    public async Task<AuthTokens> RefreshAsync(
         RefreshTokenRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -190,25 +191,32 @@ public sealed partial class AuthenticationService : IAuthenticationService
     }
 
     /// <inheritdoc />
-    public async Task LogoutAsync(RevokeTokenRequest request, CancellationToken cancellationToken = default)
+    public async Task LogoutAsync(CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-
-        var presentedHash = _tokenService.HashRefreshToken(request.RefreshToken);
-        var stored = await _refreshTokenRepository.FindByHashAsync(presentedHash, cancellationToken);
-
-        // Signing out is idempotent and never reports whether the token existed. A 200 for an
-        // unknown token is correct: the caller's session is not active either way, and saying
-        // otherwise would confirm a token's existence to whoever holds it.
-        if (stored is null || stored.RevokedOn is not null)
+        // The session comes from the access token's sid claim, not from a body the caller controls.
+        // Accepting a refresh token here would let anyone holding one end someone else's session.
+        if (_currentUser.SessionId is not { } sessionId)
         {
             return;
         }
 
-        stored.RevokedOn = _dateTimeProvider.UtcNow;
-        stored.RevokedReason = "Signed out.";
+        var tokens = await _refreshTokenRepository.FindBySessionAsync(sessionId, cancellationToken);
+        var utcNow = _dateTimeProvider.UtcNow;
+        var revoked = 0;
 
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        foreach (var token in tokens.Where(token => token.RevokedOn is null))
+        {
+            token.RevokedOn = utcNow;
+            token.RevokedReason = "Signed out.";
+            revoked++;
+        }
+
+        // Idempotent, and never reports whether the session existed: the caller is signed out
+        // either way, and saying otherwise discloses session state.
+        if (revoked > 0)
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
     }
 
     /// <inheritdoc />
@@ -238,6 +246,31 @@ public sealed partial class AuthenticationService : IAuthenticationService
     }
 
     /// <inheritdoc />
+    public async Task ForgotPasswordAsync(
+        ForgotPasswordRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var normalizedEmail = request.Email.ToNormalisedEmail();
+        var user = await _userRepository.FindForAuthenticationAsync(normalizedEmail, cancellationToken);
+
+        // Same observable outcome either way - no exception, no timing branch worth measuring -
+        // so the endpoint cannot be used to discover which addresses are registered.
+        if (user is null)
+        {
+            LogPasswordResetRequestedForUnknownAddress(_requestContext.CorrelationId);
+            return;
+        }
+
+        LogPasswordResetRequested(user.Id, _requestContext.CorrelationId);
+
+        // NOTE: issuing and mailing the reset link is not implemented. It needs a reset-token
+        // entity and an email sender, both of which arrive with the email module. Until then this
+        // records the request and sends nothing - do not present it to users as working.
+    }
+
+    /// <inheritdoc />
     public async Task<CurrentUserResponse> GetCurrentUserAsync(CancellationToken cancellationToken = default)
     {
         var userId = _currentUser.UserId
@@ -250,7 +283,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
     }
 
     /// <summary>Mints a token pair for a user and stages the refresh-token row.</summary>
-    private AuthenticationResponse IssueSession(User user, Guid sessionId)
+    private AuthTokens IssueSession(User user, Guid sessionId)
     {
         var roles = user.UserRoles.Select(userRole => userRole.Role.Name).Distinct(StringComparer.Ordinal).ToList();
 
@@ -263,11 +296,15 @@ public sealed partial class AuthenticationService : IAuthenticationService
             user.Id,
             user.Email,
             user.DisplayName,
+            // One role string, as the client contract requires.
+            Roles.Primary(roles),
+            permissions,
+            // The organisation's display name, never its identifier.
+            user.Tenant?.Name,
+            AvatarUrl: null,
             user.TenantId,
             user.Tenant?.Slug,
-            sessionId,
-            roles,
-            permissions));
+            sessionId));
 
         var refreshToken = _tokenService.CreateRefreshToken();
 
@@ -286,12 +323,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
             UserAgent = Truncate(_requestContext.UserAgent, 512),
         });
 
-        return new AuthenticationResponse(
-            accessToken.Value,
-            accessToken.ExpiresAtUtc,
-            refreshToken.Value,
-            refreshToken.ExpiresAtUtc,
-            BuildProfile(user, roles, permissions));
+        return new AuthTokens(accessToken.Value, refreshToken.Value, accessToken.ExpiresAtUtc);
     }
 
     private async Task RecordFailedAttemptAsync(User user, DateTimeOffset utcNow, CancellationToken cancellationToken)
@@ -328,6 +360,35 @@ public sealed partial class AuthenticationService : IAuthenticationService
         {
             token.RevokedOn = utcNow;
             token.RevokedReason = "Concurrent session limit exceeded.";
+        }
+    }
+
+    /// <summary>
+    /// Rejects an account signing in at the wrong entrance.
+    /// <para>
+    /// Platform staff belong at the super-admin portal and tenant users at the admin portal.
+    /// The client already enforces this, but a client-side check is bypassable with any HTTP tool,
+    /// so it is repeated here where it counts. Skipped when the caller omits the field, keeping
+    /// older clients working.
+    /// </para>
+    /// </summary>
+    private static void EnsurePortalMatches(User user, string? portal)
+    {
+        if (portal is null)
+        {
+            return;
+        }
+
+        var isPlatformStaff = user.UserRoles.Any(userRole =>
+            string.Equals(userRole.Role.Name, Roles.SuperAdmin, StringComparison.Ordinal));
+
+        var expected = isPlatformStaff ? LoginPortals.SuperAdmin : LoginPortals.Admin;
+
+        if (!string.Equals(portal, expected, StringComparison.Ordinal))
+        {
+            // Generic code, like every other sign-in failure, so the response does not reveal
+            // that the address exists at the other portal.
+            throw new AuthenticationException("invalid_credentials");
         }
     }
 
@@ -406,4 +467,15 @@ public sealed partial class AuthenticationService : IAuthenticationService
         Level = LogLevel.Warning,
         Message = "User {UserId} locked out until {LockoutEndsOn} after {Attempts} failed attempts.")]
     private partial void LogAccountLockedOut(Guid userId, DateTimeOffset? lockoutEndsOn, int attempts);
+    [LoggerMessage(
+        EventId = 2007,
+        Level = LogLevel.Information,
+        Message = "Password reset requested for an unknown address. CorrelationId: {CorrelationId}")]
+    private partial void LogPasswordResetRequestedForUnknownAddress(string correlationId);
+
+    [LoggerMessage(
+        EventId = 2008,
+        Level = LogLevel.Information,
+        Message = "Password reset requested for user {UserId}. CorrelationId: {CorrelationId}")]
+    private partial void LogPasswordResetRequested(Guid userId, string correlationId);
 }

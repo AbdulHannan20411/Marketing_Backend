@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Marketing.API.Configurations;
 using Marketing.API.Extensions;
@@ -60,10 +61,14 @@ try
         })
         .AddJsonOptions(options =>
         {
-            options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
-            // Enums cross the wire as names. An ordinal would silently change meaning the moment
-            // someone inserts a value into the middle of an enum.
-            options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+            // Nulls are meaningful in this contract - limit: null means unlimited, and the client
+            // renders it as an infinity glyph - so they must be serialised, not omitted.
+            options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.Never;
+
+            // Enums cross the wire as camelCase strings. Integers would break every badge and
+            // filter silently, because the client compares exact literals such as "subscribed".
+            options.JsonSerializerOptions.Converters.Add(
+                new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
         });
 
     // Model binding failures are turned into the same exception the rest of the stack throws, so

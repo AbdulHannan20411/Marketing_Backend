@@ -1,7 +1,9 @@
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Marketing.Common.Constants;
 using Marketing.Shared.Abstractions;
 using Marketing.Shared.Models;
@@ -80,16 +82,39 @@ public sealed class JwtTokenService : ITokenService
             new(JwtRegisteredClaimNames.Sub, descriptor.UserId.ToString()),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
             new(JwtRegisteredClaimNames.Email, descriptor.Email),
-            new(AppConstants.Claims.DisplayName, descriptor.DisplayName),
+            new(AppConstants.Claims.Name, descriptor.Name),
+
+            // Single-valued, matching the client contract. Also emitted under the framework's role
+            // claim type so [Authorize(Roles = ...)] and RequireRole keep working server-side.
+            new(AppConstants.Claims.Role, descriptor.Role),
+            new(ClaimTypes.Role, descriptor.Role),
+
             new(AppConstants.Claims.SessionId, descriptor.SessionId.ToString()),
             new(
                 JwtRegisteredClaimNames.Iat,
-                issuedAt.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                issuedAt.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture),
                 ClaimValueTypes.Integer64),
         };
 
-        // The tenant claim is the whole isolation boundary. It is written here from a value read
-        // out of the user's own row, and read back only through ITenantContext.
+        // Serialised as one JSON array claim rather than repeated string claims. Repeating them
+        // would collapse to an array for two or more values but stay a bare string for exactly
+        // one, and the client always indexes it as an array.
+        claims.Add(new Claim(
+            AppConstants.Claims.Permissions,
+            JsonSerializer.Serialize(descriptor.Permissions),
+            JsonClaimValueTypes.JsonArray));
+
+        // A display label, never an identifier. Present even when null so the client can read the
+        // key unconditionally.
+        claims.Add(new Claim(AppConstants.Claims.WorkspaceName, descriptor.WorkspaceName ?? string.Empty));
+
+        if (!string.IsNullOrWhiteSpace(descriptor.AvatarUrl))
+        {
+            claims.Add(new Claim(AppConstants.Claims.AvatarUrl, descriptor.AvatarUrl));
+        }
+
+        // The tenant claim is the whole isolation boundary. Written from the user's own row and
+        // read back only through ITenantContext; no endpoint ever accepts one from a request.
         if (descriptor.TenantId is { } tenantId)
         {
             claims.Add(new Claim(AppConstants.Claims.TenantId, tenantId.ToString()));
@@ -99,10 +124,6 @@ public sealed class JwtTokenService : ITokenService
         {
             claims.Add(new Claim(AppConstants.Claims.TenantSlug, descriptor.TenantSlug));
         }
-
-        claims.AddRange(descriptor.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
-        claims.AddRange(descriptor.Permissions.Select(
-            permission => new Claim(AppConstants.Claims.Permission, permission)));
 
         var token = new JwtSecurityToken(
             issuer: _options.Issuer,

@@ -3,220 +3,273 @@ namespace Marketing.Common.Constants;
 /// <summary>
 /// The permission catalogue.
 /// <para>
-/// Roles answer "who is this person"; permissions answer "what may they do". Authorising against
-/// permissions rather than role names means a customer asking for "employees who can export
-/// reports but not edit contacts" is a data change, not a code change - no new role constant, no
-/// new policy, no redeploy.
+/// <b>This list is a contract with the Angular client.</b> Every string here appears in the
+/// <c>permissions</c> JWT claim and maps to a UI affordance and a route guard in
+/// <c>permission.model.ts</c>. The client compares exact literals, so a typo or a rename silently
+/// hides a feature rather than failing loudly. Add values; never rename one.
 /// </para>
 /// <para>
-/// Format is <c>resource:action</c>. A grant ending in <c>:*</c> covers every action on that
-/// resource, and <see cref="Platform.All"/> covers everything. Permissions are stored on the role
-/// row as a text array and flattened into the token at sign-in, so a permission check is a claim
-/// lookup rather than a database round trip.
+/// Format is <c>area.action</c>, dot separated. The API enforces these independently of the UI -
+/// the client hiding a control is convenience, not security.
 /// </para>
 /// </summary>
 public static class Permissions
 {
-    /// <summary>Separator between the resource and the action.</summary>
-    public const string Separator = ":";
-
-    /// <summary>Suffix marking a grant that covers every action on a resource.</summary>
-    public const string WildcardSuffix = ":*";
-
-    /// <summary>Platform-wide grants. Reserved for <see cref="Roles.SuperAdmin"/>.</summary>
-    public static class Platform
+    /// <summary>Dashboard and headline analytics.</summary>
+    public static class Dashboard
     {
-        /// <summary>Unrestricted access to everything, across every tenant.</summary>
-        public const string All = "platform:*";
+        /// <summary>View the dashboard.</summary>
+        public const string View = "dashboard.view";
 
-        /// <summary>Read the tenant register.</summary>
-        public const string TenantsRead = "platform:tenants:read";
+        /// <summary>View detailed statistics.</summary>
+        public const string Statistics = "dashboard.statistics";
 
-        /// <summary>Create, suspend and cancel tenants.</summary>
-        public const string TenantsWrite = "platform:tenants:write";
-
-        /// <summary>Read platform-wide audit logs across tenants.</summary>
-        public const string AuditRead = "platform:audit:read";
-
-        /// <summary>Read infrastructure health and monitoring detail.</summary>
-        public const string MonitoringRead = "platform:monitoring:read";
-
-        /// <summary>Adjust tenant quotas and entitlements.</summary>
-        public const string QuotasWrite = "platform:quotas:write";
+        /// <summary>Export dashboard data.</summary>
+        public const string Export = "dashboard.export";
     }
 
-    /// <summary>Grants covering a tenant's own administration.</summary>
-    public static class Tenant
-    {
-        /// <summary>Every action within the caller's own tenant.</summary>
-        public const string All = "tenant:*";
-
-        /// <summary>View tenant settings and profile.</summary>
-        public const string SettingsRead = "tenant:settings:read";
-
-        /// <summary>Change tenant settings and profile.</summary>
-        public const string SettingsWrite = "tenant:settings:write";
-
-        /// <summary>View billing and subscription detail.</summary>
-        public const string BillingRead = "tenant:billing:read";
-
-        /// <summary>Change plan and payment details.</summary>
-        public const string BillingWrite = "tenant:billing:write";
-    }
-
-    /// <summary>Grants over user accounts within a tenant.</summary>
-    public static class Users
-    {
-        /// <summary>List and view users.</summary>
-        public const string Read = "users:read";
-
-        /// <summary>Invite, edit and disable users.</summary>
-        public const string Write = "users:write";
-
-        /// <summary>Grant and revoke roles. Separated from <see cref="Write"/> because privilege
-        /// escalation is a different risk from ordinary account maintenance.</summary>
-        public const string ManageRoles = "users:roles:manage";
-    }
-
-    /// <summary>Grants over the contact book.</summary>
+    /// <summary>Contact book, groups and tags.</summary>
     public static class Contacts
     {
         /// <summary>List, search and view contacts.</summary>
-        public const string Read = "contacts:read";
+        public const string View = "contacts.view";
 
-        /// <summary>Create and edit contacts.</summary>
-        public const string Write = "contacts:write";
+        /// <summary>Create contacts.</summary>
+        public const string Create = "contacts.create";
+
+        /// <summary>Edit contacts.</summary>
+        public const string Edit = "contacts.edit";
 
         /// <summary>Delete contacts.</summary>
-        public const string Delete = "contacts:delete";
+        public const string Delete = "contacts.delete";
 
-        /// <summary>Run the CSV import wizard and bulk operations.</summary>
-        public const string Import = "contacts:import";
+        /// <summary>Run the CSV import wizard.</summary>
+        public const string Import = "contacts.import";
 
-        /// <summary>Export contacts. Separated from <see cref="Read"/> because bulk extraction of
-        /// personal data is the action a data-protection reviewer will ask about.</summary>
-        public const string Export = "contacts:export";
-    }
+        /// <summary>
+        /// Export contacts. Separate from <see cref="View"/> because bulk extraction of personal
+        /// data is the action a data-protection reviewer asks about.
+        /// </summary>
+        public const string Export = "contacts.export";
 
-    /// <summary>Grants over segmentation.</summary>
-    public static class Groups
-    {
-        /// <summary>View groups and their membership.</summary>
-        public const string Read = "groups:read";
-
-        /// <summary>Create, edit and delete groups.</summary>
-        public const string Write = "groups:write";
-    }
-
-    /// <summary>Grants over tags.</summary>
-    public static class Tags
-    {
-        /// <summary>View tags.</summary>
-        public const string Read = "tags:read";
+        /// <summary>Create, edit and delete contact groups.</summary>
+        public const string GroupsManage = "groups.manage";
 
         /// <summary>Create, edit and delete tags.</summary>
-        public const string Write = "tags:write";
+        public const string TagsManage = "tags.manage";
     }
 
-    /// <summary>Grants over the Meta WhatsApp Business Account connection.</summary>
+    /// <summary>WhatsApp connection, templates and campaigns.</summary>
     public static class WhatsApp
     {
-        /// <summary>View connection status, phone numbers and business profile.</summary>
-        public const string Read = "whatsapp:read";
+        /// <summary>Run Embedded Signup and connect a number.</summary>
+        public const string Connect = "whatsapp.connect";
 
-        /// <summary>Run Embedded Signup, connect and disconnect the account.</summary>
-        public const string Connect = "whatsapp:connect";
-    }
+        /// <summary>Disconnect the WhatsApp Business Account.</summary>
+        public const string Disconnect = "whatsapp.disconnect";
 
-    /// <summary>Grants over message templates.</summary>
-    public static class Templates
-    {
-        /// <summary>View templates and their review status.</summary>
-        public const string Read = "templates:read";
+        /// <summary>View message templates.</summary>
+        public const string TemplatesView = "whatsapp.templates.view";
 
-        /// <summary>Create, edit and submit templates for review.</summary>
-        public const string Write = "templates:write";
+        /// <summary>Trigger a template synchronisation with Meta.</summary>
+        public const string TemplatesSync = "whatsapp.templates.sync";
 
-        /// <summary>Trigger a synchronisation with Meta.</summary>
-        public const string Sync = "templates:sync";
-    }
+        /// <summary>Create campaigns.</summary>
+        public const string CampaignsCreate = "whatsapp.campaigns.create";
 
-    /// <summary>Grants over campaigns.</summary>
-    public static class Campaigns
-    {
-        /// <summary>View campaigns and their progress.</summary>
-        public const string Read = "campaigns:read";
+        /// <summary>Edit campaigns.</summary>
+        public const string CampaignsEdit = "whatsapp.campaigns.edit";
 
-        /// <summary>Create and edit campaigns.</summary>
-        public const string Write = "campaigns:write";
+        /// <summary>Delete campaigns.</summary>
+        public const string CampaignsDelete = "whatsapp.campaigns.delete";
 
-        /// <summary>Send or schedule a campaign. Separated from <see cref="Write"/> so drafting and
-        /// dispatch can be split between an operator and an approver.</summary>
-        public const string Send = "campaigns:send";
+        /// <summary>Schedule a campaign for later dispatch.</summary>
+        public const string CampaignsSchedule = "whatsapp.campaigns.schedule";
+
+        /// <summary>
+        /// Dispatch a campaign. Deliberately separate from <see cref="CampaignsCreate"/> so
+        /// drafting and sending can be split between an operator and an approver.
+        /// </summary>
+        public const string CampaignsSend = "whatsapp.campaigns.send";
+
+        /// <summary>Pause a running campaign.</summary>
+        public const string CampaignsPause = "whatsapp.campaigns.pause";
 
         /// <summary>Cancel a scheduled or running campaign.</summary>
-        public const string Cancel = "campaigns:cancel";
+        public const string CampaignsCancel = "whatsapp.campaigns.cancel";
+
+        /// <summary>View campaign delivery reports.</summary>
+        public const string CampaignsReports = "whatsapp.campaigns.reports";
     }
 
-    /// <summary>Grants over reporting.</summary>
+    /// <summary>Email channel.</summary>
+    public static class Email
+    {
+        /// <summary>Connect an email sending account.</summary>
+        public const string Connect = "email.connect";
+
+        /// <summary>Create and edit email templates.</summary>
+        public const string TemplatesManage = "email.templates.manage";
+
+        /// <summary>Create email campaigns.</summary>
+        public const string CampaignsCreate = "email.campaigns.create";
+
+        /// <summary>Send email campaigns.</summary>
+        public const string CampaignsSend = "email.campaigns.send";
+
+        /// <summary>View email analytics.</summary>
+        public const string AnalyticsView = "email.analytics.view";
+    }
+
+    /// <summary>Social channels.</summary>
+    public static class Social
+    {
+        /// <summary>Connect a social account.</summary>
+        public const string AccountsConnect = "social.accounts.connect";
+
+        /// <summary>Create posts.</summary>
+        public const string PostsCreate = "social.posts.create";
+
+        /// <summary>Schedule posts.</summary>
+        public const string PostsSchedule = "social.posts.schedule";
+
+        /// <summary>Publish posts.</summary>
+        public const string PostsPublish = "social.posts.publish";
+
+        /// <summary>Delete posts.</summary>
+        public const string PostsDelete = "social.posts.delete";
+
+        /// <summary>View social analytics.</summary>
+        public const string AnalyticsView = "social.analytics.view";
+    }
+
+    /// <summary>Reporting.</summary>
     public static class Reports
     {
-        /// <summary>View dashboards and reports.</summary>
-        public const string Read = "reports:read";
+        /// <summary>View reports.</summary>
+        public const string View = "reports.view";
 
         /// <summary>Export report data.</summary>
-        public const string Export = "reports:export";
+        public const string Export = "reports.export";
+
+        /// <summary>Download a report as CSV.</summary>
+        public const string DownloadCsv = "reports.download.csv";
+
+        /// <summary>Download a report as Excel.</summary>
+        public const string DownloadExcel = "reports.download.excel";
+
+        /// <summary>Download a report as PDF.</summary>
+        public const string DownloadPdf = "reports.download.pdf";
     }
 
-    /// <summary>Grants over the scheduler.</summary>
-    public static class Scheduler
+    /// <summary>Organisation settings.</summary>
+    public static class Settings
     {
-        /// <summary>View job definitions, schedules and run history.</summary>
-        public const string Read = "scheduler:read";
+        /// <summary>Company profile and branding.</summary>
+        public const string Company = "settings.company";
 
-        /// <summary>Trigger, pause and resume jobs.</summary>
-        public const string Manage = "scheduler:manage";
+        /// <summary>Invite and manage employees and permission sets.</summary>
+        public const string Employees = "settings.employees";
+
+        /// <summary>View invoices, payments and renewals.</summary>
+        public const string Billing = "settings.billing";
+
+        /// <summary>View and change the subscription.</summary>
+        public const string Subscription = "settings.subscription";
+
+        /// <summary>Manage third-party integrations.</summary>
+        public const string Integrations = "settings.integrations";
+
+        /// <summary>Issue and revoke API keys.</summary>
+        public const string ApiKeys = "settings.apikeys";
     }
+
+    /// <summary>Platform administration. Granted to <see cref="Roles.SuperAdmin"/> only.</summary>
+    public static class Platform
+    {
+        /// <summary>Manage tenant organisations.</summary>
+        public const string Tenants = "platform.tenants";
+
+        /// <summary>Read the platform-wide audit log.</summary>
+        public const string Audit = "platform.audit";
+
+        /// <summary>View infrastructure health and monitoring.</summary>
+        public const string Monitoring = "platform.monitoring";
+
+        /// <summary>Create and edit subscription plans.</summary>
+        public const string Plans = "platform.plans";
+    }
+
+    /// <summary>Every permission the platform recognises.</summary>
+    public static readonly IReadOnlyList<string> All =
+    [
+        Dashboard.View, Dashboard.Statistics, Dashboard.Export,
+
+        Contacts.View, Contacts.Create, Contacts.Edit, Contacts.Delete,
+        Contacts.Import, Contacts.Export, Contacts.GroupsManage, Contacts.TagsManage,
+
+        WhatsApp.Connect, WhatsApp.Disconnect, WhatsApp.TemplatesView, WhatsApp.TemplatesSync,
+        WhatsApp.CampaignsCreate, WhatsApp.CampaignsEdit, WhatsApp.CampaignsDelete,
+        WhatsApp.CampaignsSchedule, WhatsApp.CampaignsSend, WhatsApp.CampaignsPause,
+        WhatsApp.CampaignsCancel, WhatsApp.CampaignsReports,
+
+        Email.Connect, Email.TemplatesManage, Email.CampaignsCreate, Email.CampaignsSend,
+        Email.AnalyticsView,
+
+        Social.AccountsConnect, Social.PostsCreate, Social.PostsSchedule, Social.PostsPublish,
+        Social.PostsDelete, Social.AnalyticsView,
+
+        Reports.View, Reports.Export, Reports.DownloadCsv, Reports.DownloadExcel, Reports.DownloadPdf,
+
+        Settings.Company, Settings.Employees, Settings.Billing, Settings.Subscription,
+        Settings.Integrations, Settings.ApiKeys,
+
+        Platform.Tenants, Platform.Audit, Platform.Monitoring, Platform.Plans,
+    ];
+
+    /// <summary>Permissions reserved for platform staff.</summary>
+    public static readonly IReadOnlyList<string> PlatformOnly =
+        [Platform.Tenants, Platform.Audit, Platform.Monitoring, Platform.Plans];
 
     /// <summary>
-    /// Default grants for each role, used by the seeder and by the role management screen.
+    /// Default grant for each role, used by the seeder and the role management screen.
+    /// <para>
+    /// An Admin gets everything except the platform group. An Employee starts small - the contract
+    /// describes it as "a small permission grant that an Admin extends" - and deliberately excludes
+    /// deletion, export, dispatch, billing and user management.
+    /// </para>
     /// </summary>
+    /// <param name="role">Role name from <see cref="Roles"/>.</param>
     public static IReadOnlyList<string> ForRole(string role) => role switch
     {
-        Roles.SuperAdmin => [Platform.All],
+        Roles.SuperAdmin => All,
 
-        Roles.Admin =>
-        [
-            Tenant.All,
-            Users.Read, Users.Write, Users.ManageRoles,
-            Contacts.Read, Contacts.Write, Contacts.Delete, Contacts.Import, Contacts.Export,
-            Groups.Read, Groups.Write,
-            Tags.Read, Tags.Write,
-            WhatsApp.Read, WhatsApp.Connect,
-            Templates.Read, Templates.Write, Templates.Sync,
-            Campaigns.Read, Campaigns.Write, Campaigns.Send, Campaigns.Cancel,
-            Reports.Read, Reports.Export,
-            Scheduler.Read, Scheduler.Manage,
-        ],
+        Roles.Admin => [.. All.Except(PlatformOnly, StringComparer.Ordinal)],
 
-        // Deliberately excludes user management, billing, the WhatsApp connection, contact
-        // deletion and export, and campaign dispatch. An employee builds the work; an admin
-        // approves anything irreversible or involving bulk personal data.
         Roles.Employee =>
         [
-            Contacts.Read, Contacts.Write, Contacts.Import,
-            Groups.Read, Groups.Write,
-            Tags.Read, Tags.Write,
-            Templates.Read,
-            Campaigns.Read, Campaigns.Write,
-            Reports.Read,
+            Dashboard.View,
+            Contacts.View, Contacts.Create, Contacts.Edit, Contacts.Import,
+            Contacts.GroupsManage, Contacts.TagsManage,
+            WhatsApp.TemplatesView,
+            WhatsApp.CampaignsCreate, WhatsApp.CampaignsEdit, WhatsApp.CampaignsReports,
+            Reports.View,
         ],
 
         _ => [],
     };
 
+    /// <summary>Returns whether a string is a permission the platform recognises.</summary>
+    /// <param name="permission">Candidate permission.</param>
+    public static bool IsKnown(string? permission) =>
+        permission is not null && All.Contains(permission, StringComparer.Ordinal);
+
     /// <summary>
-    /// Returns whether a set of granted permissions satisfies a required one, honouring wildcards.
+    /// Returns whether a granted set satisfies a required permission.
+    /// <para>
+    /// Exact matching only. The catalogue is explicit and closed, so wildcard grants would create
+    /// a second, looser way to express authority and make "who can do X" harder to answer.
+    /// </para>
     /// </summary>
     /// <param name="granted">Permissions carried by the principal.</param>
     /// <param name="required">Permission being demanded.</param>
@@ -225,41 +278,6 @@ public static class Permissions
         ArgumentNullException.ThrowIfNull(granted);
         ArgumentException.ThrowIfNullOrWhiteSpace(required);
 
-        foreach (var grant in granted)
-        {
-            if (Matches(grant, required))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>Returns whether a single grant covers a required permission.</summary>
-    /// <param name="grant">A granted permission, possibly a wildcard.</param>
-    /// <param name="required">Permission being demanded.</param>
-    public static bool Matches(string grant, string required)
-    {
-        if (string.Equals(grant, required, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (string.Equals(grant, Platform.All, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (!grant.EndsWith(WildcardSuffix, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        // "contacts:*" covers "contacts:read"; the trailing '*' is dropped and the remaining
-        // "contacts:" prefix is matched, so "contacts:*" cannot accidentally match "contactsx:read".
-        var prefix = grant[..^1];
-
-        return required.StartsWith(prefix, StringComparison.Ordinal);
+        return granted.Contains(required, StringComparer.Ordinal);
     }
 }

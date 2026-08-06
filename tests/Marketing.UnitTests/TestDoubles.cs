@@ -52,6 +52,8 @@ public sealed class StubCurrentUser : ICurrentUser
 {
     public Guid? UserId { get; set; }
 
+    public Guid? SessionId { get; set; }
+
     public string? Email { get; set; }
 
     public string? DisplayName { get; set; }

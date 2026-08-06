@@ -107,10 +107,10 @@ public sealed class AuthenticationServiceTests
 
         response.AccessToken.Should().Be("access-token");
         response.RefreshToken.Should().Be("refresh-token");
-        response.User.TenantName.Should().Be("Acme");
-
-        // The tenant identifier must never reach the client; the organisation is named instead.
-        response.User.GetType().GetProperty("TenantId").Should().BeNull();
+        // The token pair carries no profile at all - identity, role and permissions come from the
+        // decoded access token, so there is no second copy that can disagree with it.
+        typeof(AuthTokens).GetProperty("User").Should().BeNull();
+        typeof(AuthTokens).GetProperty("TenantId").Should().BeNull();
 
         _refreshTokens.Received(1).Add(Arg.Is<RefreshToken>(token =>
             token!.UserId == UserId
@@ -339,13 +339,12 @@ public sealed class AuthenticationServiceTests
     }
 
     [Fact]
-    public async Task Signing_out_with_an_unknown_token_succeeds_without_disclosing_anything()
+    public async Task Signing_out_without_a_session_claim_succeeds_without_disclosing_anything()
     {
-        _tokenService.HashRefreshToken("unknown").Returns("unknown-hash");
-        _refreshTokens.FindByHashAsync("unknown-hash", Arg.Any<CancellationToken>())
-            .Returns((RefreshToken?)null);
 
-        var act = async () => await CreateService().LogoutAsync(new RevokeTokenRequest("unknown"));
+        _currentUser.SessionId = null;
+
+        var act = async () => await CreateService().LogoutAsync(TestContext.Current.CancellationToken);
 
         await act.Should().NotThrowAsync();
         await _unitOfWork.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
