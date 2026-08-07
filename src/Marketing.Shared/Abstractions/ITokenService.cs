@@ -25,6 +25,20 @@ public interface ITokenService
     public string HashRefreshToken(string refreshToken);
 
     /// <summary>
+    /// Generates a single-use token for an emailed link - an invitation or a password reset.
+    /// <para>
+    /// The plaintext is returned once, to be put in the link; only the hash is persisted, so a
+    /// database disclosure does not hand out working reset links for every account.
+    /// </para>
+    /// </summary>
+    /// <param name="lifetime">How long the token stays valid.</param>
+    public SecureToken CreateSecureToken(TimeSpan lifetime);
+
+    /// <summary>Hashes an emailed token so it can be matched against the stored hash.</summary>
+    /// <param name="token">Plaintext token taken from the link.</param>
+    public string HashSecureToken(string token);
+
+    /// <summary>
     /// Validates an expired access token's signature and returns its claims, ignoring lifetime.
     /// Used by the refresh flow to bind a refresh token to the access token it was paired with.
     /// </summary>

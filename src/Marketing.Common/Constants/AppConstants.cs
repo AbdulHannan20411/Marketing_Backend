@@ -289,6 +289,16 @@ public static class AppConstants
         Deleted = 2,
     }
 
+    /// <summary>What an emailed single-use token authorises.</summary>
+    public enum UserTokenPurpose
+    {
+        /// <summary>Activates an invited account and sets its first password.</summary>
+        Invitation,
+
+        /// <summary>Sets a new password on an existing account.</summary>
+        PasswordReset,
+    }
+
     /// <summary>Outcome of a scheduled job execution.</summary>
     public enum JobOutcome
     {

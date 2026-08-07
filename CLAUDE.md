@@ -162,6 +162,41 @@ public sealed class EmailDispatchJob : ScheduledJobBase
 - Errors are RFC 7807 problem documents with a stable `errorCode`, a `correlationId`, and an
   `exceptionId` for server faults. Stack traces appear in Development only.
 
+## Authentication flow
+
+Complete end to end. The paths, in the order a user meets them:
+
+| Endpoint | Notes |
+| --- | --- |
+| `POST /auth/login` | Optional `portal` field, enforced server-side when present |
+| `POST /auth/accept-invitation` | Redeems the invitation token, sets the first password, signs the user in |
+| `POST /auth/forgot-password` | Always 200. Issues a token and emails a link when the account is usable |
+| `POST /auth/reset-password` | Redeems the reset token; **revokes every session** |
+| `POST /auth/change-password` | Requires the current password; keeps the caller's session, ends the rest |
+| `POST /auth/refresh` · `/logout` · `/logout-everywhere` · `GET /auth/me` | |
+
+Rules that are easy to get wrong and are therefore fixed here:
+
+- **An invited account cannot sign in until it is activated.** Invitations create a user with an
+  unusable password hash; the emailed token is the only way in. Both `POST /employees/invite` and
+  `POST /superadmin/admins` issue one in the same transaction as the account, so an account with no
+  way to activate it cannot exist.
+- **Tokens are single-use, hashed, and superseded.** Only the SHA-256 hash is stored. Issuing a new
+  token of the same purpose deletes any outstanding one, so three reset requests do not leave three
+  live links in an inbox.
+- **Purpose is checked on redemption.** An invitation token (72 h) cannot be used as a password
+  reset (1 h) - otherwise the longer window becomes an account-takeover window.
+- **Every redemption failure returns the same error.** Unknown, wrong purpose, expired, already
+  used: identical response, because the caller is unauthenticated and could otherwise probe.
+- **A reset revokes every session**; leaving an attacker signed in would make it cosmetic. A change
+  keeps the caller's own session and ends the others.
+- **Password strength lives in `IPasswordPolicy`, nowhere else.** Validators check presence and
+  length only, so the rules cannot drift between accept, reset and change.
+- **Activation implies verification.** Redeeming a token sent to the address proves control of it,
+  so `EmailConfirmed` is set there and no separate confirmation step exists.
+- **Link base URLs come from `Email:ClientBaseUrl`, never the request `Host` header** - building a
+  reset link from an inbound header is a host-header injection.
+
 ## Resilience and caching
 
 - Redis is **fail-open**. A cache outage produces misses, never exceptions; reads fall through to
@@ -276,6 +311,10 @@ the level is enabled, which CA1873 rejects as a build error. The generated metho
 
 - No migration has been generated yet — run `dotnet ef migrations add InitialSchema` with
   PostgreSQL running.
+- **No email provider.** `IEmailSender` is implemented by `LoggingEmailSender`, which writes the
+  message and its link at warning level instead of delivering it. Invitations and resets work end
+  to end - copy the link out of the log - but nothing reaches a real inbox until a provider is
+  registered. Same seam pattern as `IPaymentGateway`.
 - **AutoMapper licence is an open decision.** Every version below 15.1.1 carries a high-severity
   advisory and the last MIT release (14.0.0) is inside that range, so the pinned 16.2.0 is patched
   but commercially licensed. The solution has one mapping profile; dropping the dependency is

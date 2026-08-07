@@ -43,6 +43,11 @@ public static class InfrastructureServiceCollectionExtensions
         // billing flow works end to end; swapping in a provider replaces this one registration.
         services.AddScoped<Application.Interfaces.IPaymentGateway, ManualPaymentGateway>();
 
+        // No mail provider is configured. The logging sender records the message and its link
+        // so invitations and resets can be completed end to end; swapping in SMTP or a provider
+        // replaces this one registration.
+        services.AddSingleton<IEmailSender, Email.LoggingEmailSender>();
+
         return services;
     }
 

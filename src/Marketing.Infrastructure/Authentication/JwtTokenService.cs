@@ -151,17 +151,38 @@ public sealed class JwtTokenService : ITokenService
     }
 
     /// <inheritdoc />
-    public string HashRefreshToken(string refreshToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(refreshToken);
+    public string HashRefreshToken(string refreshToken) => HashOpaqueToken(refreshToken);
 
-        // A plain SHA-256, not a password hash. The input is 512 bits of entropy from a CSPRNG, so
-        // it is not brute-forceable and a deliberately slow KDF would only add latency to every
-        // refresh for no security gain.
-        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(refreshToken));
+    /// <summary>
+    /// Hashes an opaque token.
+    /// <para>
+    /// A plain SHA-256, not a password hash. The input is 512 bits of entropy from a CSPRNG, so it
+    /// is not brute-forceable and a deliberately slow KDF would only add latency to every refresh
+    /// for no security gain.
+    /// </para>
+    /// </summary>
+    private static string HashOpaqueToken(string token)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(token);
+
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(token));
 
         return Convert.ToHexStringLower(digest);
     }
+
+    /// <inheritdoc />
+    public SecureToken CreateSecureToken(TimeSpan lifetime)
+    {
+        // Same 512-bit CSPRNG material as a refresh token. An invitation or reset link is a
+        // bearer credential in an inbox and deserves the same entropy.
+        var bytes = RandomNumberGenerator.GetBytes(RefreshTokenByteLength);
+        var value = Base64UrlEncoder.Encode(bytes);
+
+        return new SecureToken(value, HashSecureToken(value), _dateTimeProvider.UtcNow.Add(lifetime));
+    }
+
+    /// <inheritdoc />
+    public string HashSecureToken(string token) => HashOpaqueToken(token);
 
     /// <inheritdoc />
     public ClaimsPrincipal? GetPrincipalFromExpiredToken(string accessToken)

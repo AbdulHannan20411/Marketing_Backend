@@ -51,6 +51,37 @@ public interface IAuthenticationService
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task ForgotPasswordAsync(ForgotPasswordRequest request, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Activates an invited account: sets its first password and signs the user in.
+    /// <para>
+    /// Redeeming the token proves the user controls the address it was sent to, so the account is
+    /// marked email-confirmed here and no separate verification step is needed.
+    /// </para>
+    /// </summary>
+    /// <param name="request">Token and chosen password.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<AuthTokens> AcceptInvitationAsync(
+        AcceptInvitationRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sets a new password from a reset link and ends every existing session.
+    /// <para>
+    /// Ending sessions is the point of a reset: if the account was compromised, leaving the
+    /// attacker signed in would make the reset cosmetic.
+    /// </para>
+    /// </summary>
+    /// <param name="request">Token and new password.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task ResetPasswordAsync(ResetPasswordRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Changes the signed-in user's password, keeping their current session and ending the rest.
+    /// </summary>
+    /// <param name="request">Current and new password.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task ChangePasswordAsync(ChangePasswordRequest request, CancellationToken cancellationToken = default);
+
     /// <summary>Returns the profile of the signed-in user.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<CurrentUserResponse> GetCurrentUserAsync(CancellationToken cancellationToken = default);

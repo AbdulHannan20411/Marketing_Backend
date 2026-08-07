@@ -26,6 +26,10 @@ public sealed class AuthenticationServiceTests
     private readonly IPasswordHasher _passwordHasher = Substitute.For<IPasswordHasher>();
     private readonly ITokenService _tokenService = Substitute.For<ITokenService>();
     private readonly StubCurrentUser _currentUser = new();
+    private readonly IRepository<UserToken> _userTokens = Substitute.For<IRepository<UserToken>>();
+    private readonly IAccountActivationService _activation = Substitute.For<IAccountActivationService>();
+    private readonly IPasswordPolicy _passwordPolicy =
+        new PasswordPolicy(Options.Create(new AuthenticationPolicyOptions()));
     private readonly FixedDateTimeProvider _clock = new(Now);
 
     private readonly AuthenticationPolicyOptions _policy = new()
@@ -70,6 +74,9 @@ public sealed class AuthenticationServiceTests
             _clock,
             new StubRequestContext(),
             _currentUser,
+            _userTokens,
+            _activation,
+            _passwordPolicy,
             Options.Create(_policy),
             NullLogger<AuthenticationService>.Instance);
     }
@@ -348,5 +355,222 @@ public sealed class AuthenticationServiceTests
 
         await act.Should().NotThrowAsync();
         await _unitOfWork.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+    // ---------------------------------------------------------------------------------------
+    // Invitation, reset and change password
+    // ---------------------------------------------------------------------------------------
+
+    private UserToken StageToken(UserTokenPurpose purpose, User user, DateTimeOffset? expiresOn = null)
+    {
+        var token = new UserToken
+        {
+            Id = Guid.NewGuid(),
+            TenantId = user.TenantId,
+            UserId = user.Id,
+            Purpose = purpose,
+            TokenHash = "presented-hash",
+            ExpiresOn = expiresOn ?? Now.AddHours(1),
+        };
+
+        _tokenService.HashSecureToken("presented").Returns("presented-hash");
+
+        _userTokens.FirstOrDefaultAsync(
+            Arg.Any<System.Linq.Expressions.Expression<Func<UserToken, bool>>>(),
+            Arg.Any<CancellationToken>()).Returns(token);
+
+        _userTokens.GetForUpdateAsync(token.Id, Arg.Any<CancellationToken>()).Returns(token);
+        _users.GetForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
+
+        return token;
+    }
+
+    [Fact]
+    public async Task Accepting_an_invitation_activates_the_account_and_signs_the_user_in()
+    {
+        var user = ActiveUser();
+        user.Status = UserStatus.Invited;
+        user.EmailConfirmed = false;
+
+        var token = StageToken(UserTokenPurpose.Invitation, user);
+        _passwordHasher.Hash("correct horse battery 9").Returns("new-hash");
+
+        var tokens = await CreateService().AcceptInvitationAsync(
+            new AcceptInvitationRequest("presented", "correct horse battery 9"),
+            TestContext.Current.CancellationToken);
+
+        tokens.AccessToken.Should().Be("access-token");
+
+        user.Status.Should().Be(UserStatus.Active);
+        user.PasswordHash.Should().Be("new-hash");
+
+        // Redeeming a token sent to the address proves control of it, so no separate verification
+        // step is demanded.
+        user.EmailConfirmed.Should().BeTrue();
+
+        // Single use: the token is spent, so a forwarded invitation link cannot activate twice.
+        token.ConsumedOn.Should().Be(Now);
+    }
+
+    [Fact]
+    public async Task An_invitation_token_cannot_be_used_for_a_password_reset()
+    {
+        var user = ActiveUser();
+        StageToken(UserTokenPurpose.Invitation, user);
+
+        // Purpose is checked, so a long-lived invitation link cannot be repurposed as a reset -
+        // which would otherwise be a 72-hour window to take over an account.
+        var act = async () => await CreateService().ResetPasswordAsync(
+            new ResetPasswordRequest("presented", "correct horse battery 9"),
+            TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<AuthenticationException>();
+    }
+
+    [Fact]
+    public async Task An_expired_token_is_refused()
+    {
+        var user = ActiveUser();
+        StageToken(UserTokenPurpose.PasswordReset, user, expiresOn: Now.AddMinutes(-1));
+
+        var act = async () => await CreateService().ResetPasswordAsync(
+            new ResetPasswordRequest("presented", "correct horse battery 9"),
+            TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<AuthenticationException>();
+    }
+
+    [Fact]
+    public async Task An_already_used_token_is_refused()
+    {
+        var user = ActiveUser();
+        var token = StageToken(UserTokenPurpose.PasswordReset, user);
+        token.ConsumedOn = Now.AddMinutes(-5);
+
+        var act = async () => await CreateService().ResetPasswordAsync(
+            new ResetPasswordRequest("presented", "correct horse battery 9"),
+            TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<AuthenticationException>();
+    }
+
+    [Fact]
+    public async Task A_weak_password_is_refused_before_the_token_is_spent()
+    {
+        var user = ActiveUser();
+        var token = StageToken(UserTokenPurpose.PasswordReset, user);
+
+        var act = async () => await CreateService().ResetPasswordAsync(
+            new ResetPasswordRequest("presented", "abc"),
+            TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<ValidationException>();
+
+        // The token survives a rejected password, so the user can retry with the same link rather
+        // than having to request a new one.
+        token.ConsumedOn.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Resetting_a_password_revokes_every_session_and_clears_a_lockout()
+    {
+        var user = ActiveUser();
+        user.LockoutEndsOn = Now.AddMinutes(10);
+        user.FailedLoginAttempts = 3;
+
+        var originalStamp = user.SecurityStamp;
+        StageToken(UserTokenPurpose.PasswordReset, user);
+        _passwordHasher.Hash(Arg.Any<string>()).Returns("new-hash");
+
+        await CreateService().ResetPasswordAsync(
+            new ResetPasswordRequest("presented", "correct horse battery 9"),
+            TestContext.Current.CancellationToken);
+
+        user.PasswordHash.Should().Be("new-hash");
+        user.SecurityStamp.Should().NotBe(originalStamp);
+
+        // Proving control of the address is stronger evidence than waiting out a lockout timer.
+        user.LockoutEndsOn.Should().BeNull();
+        user.FailedLoginAttempts.Should().Be(0);
+
+        // Leaving an attacker's session alive would make the reset cosmetic.
+        await _refreshTokens.Received(1).RevokeAllForUserAsync(
+            user.Id, Arg.Any<string>(), Now, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Changing_a_password_requires_the_current_one()
+    {
+        var user = ActiveUser();
+        _currentUser.UserId = UserId;
+        _users.GetForUpdateAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+        _passwordHasher.Verify("wrong", "stored-hash").Returns((false, false));
+
+        var act = async () => await CreateService().ChangePasswordAsync(
+            new ChangePasswordRequest("wrong", "correct horse battery 9"),
+            TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<ValidationException>();
+    }
+
+    [Fact]
+    public async Task Changing_a_password_keeps_the_current_session_and_ends_the_others()
+    {
+        var user = ActiveUser();
+        var currentSession = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        var otherSession = Guid.Parse("66666666-6666-6666-6666-666666666666");
+
+        _currentUser.UserId = UserId;
+        _currentUser.SessionId = currentSession;
+        _users.GetForUpdateAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+        _passwordHasher.Verify("stored", "stored-hash").Returns((true, false));
+        _passwordHasher.Hash(Arg.Any<string>()).Returns("new-hash");
+
+        var mine = new RefreshToken { UserId = UserId, SessionId = currentSession, TokenHash = "a", ExpiresOn = Now.AddDays(1) };
+        var theirs = new RefreshToken { UserId = UserId, SessionId = otherSession, TokenHash = "b", ExpiresOn = Now.AddDays(1) };
+
+        _refreshTokens.GetActiveSessionsAsync(UserId, Now, Arg.Any<CancellationToken>())
+            .Returns([mine, theirs]);
+
+        await CreateService().ChangePasswordAsync(
+            new ChangePasswordRequest("stored", "correct horse battery 9"),
+            TestContext.Current.CancellationToken);
+
+        // The caller keeps working: signing someone out of the tab they just used to change their
+        // password is hostile, so their session is re-stamped rather than revoked.
+        mine.RevokedOn.Should().BeNull();
+        mine.SecurityStamp.Should().Be(user.SecurityStamp);
+
+        theirs.RevokedOn.Should().Be(Now);
+    }
+
+    [Fact]
+    public async Task Forgot_password_does_not_send_a_link_to_a_disabled_account()
+    {
+        var user = ActiveUser();
+        user.Status = UserStatus.Disabled;
+
+        _users.FindForAuthenticationAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(user);
+
+        await CreateService().ForgotPasswordAsync(
+            new ForgotPasswordRequest("operator@acme.test"),
+            TestContext.Current.CancellationToken);
+
+        // Otherwise a dismissed employee could restore their own access with a reset link.
+        await _activation.DidNotReceive().SendPasswordResetAsync(
+            Arg.Any<User>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Forgot_password_reports_success_for_an_unknown_address()
+    {
+        _users.FindForAuthenticationAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns((User?)null);
+
+        var act = async () => await CreateService().ForgotPasswordAsync(
+            new ForgotPasswordRequest("nobody@acme.test"),
+            TestContext.Current.CancellationToken);
+
+        // Reporting otherwise would turn the endpoint into an account-enumeration oracle.
+        await act.Should().NotThrowAsync();
     }
 }

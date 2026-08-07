@@ -119,6 +119,9 @@ public class ApplicationDbContext : DbContext
     /// <summary>Notifications.</summary>
     public DbSet<Notification> Notifications => Set<Notification>();
 
+    /// <summary>Single-use invitation and password-reset tokens.</summary>
+    public DbSet<UserToken> UserTokens => Set<UserToken>();
+
     /// <summary>Staged CSV import batches.</summary>
     public DbSet<ContactImportBatch> ContactImportBatches => Set<ContactImportBatch>();
 

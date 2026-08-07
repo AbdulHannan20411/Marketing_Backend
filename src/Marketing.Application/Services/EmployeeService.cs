@@ -26,6 +26,7 @@ public sealed class EmployeeService : IEmployeeService
     private readonly IPasswordHasher _passwordHasher;
     private readonly ITenantContext _tenantContext;
     private readonly IDateTimeProvider _clock;
+    private readonly IAccountActivationService _activation;
 
     /// <summary>Initialises a new instance.</summary>
     public EmployeeService(
@@ -39,7 +40,8 @@ public sealed class EmployeeService : IEmployeeService
         IUnitOfWork unitOfWork,
         IPasswordHasher passwordHasher,
         ITenantContext tenantContext,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IAccountActivationService activation)
     {
         _users = users;
         _overrides = overrides;
@@ -52,6 +54,7 @@ public sealed class EmployeeService : IEmployeeService
         _passwordHasher = passwordHasher;
         _tenantContext = tenantContext;
         _clock = clock;
+        _activation = activation;
     }
 
     /// <inheritdoc />
@@ -151,6 +154,10 @@ public sealed class EmployeeService : IEmployeeService
                 });
             }
         }
+
+        // Issued before the commit so the invitation token and the account are written in one
+        // transaction. An account with no way to activate it would be worse than no account.
+        await _activation.SendInvitationAsync(employee, null, cancellationToken);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 

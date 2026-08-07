@@ -26,6 +26,9 @@ public sealed partial class AuthenticationService : IAuthenticationService
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
     private readonly ICurrentUser _currentUser;
+    private readonly IRepository<UserToken> _userTokens;
+    private readonly IAccountActivationService _activation;
+    private readonly IPasswordPolicy _passwordPolicy;
     private readonly AuthenticationPolicyOptions _policy;
     private readonly ILogger<AuthenticationService> _logger;
 
@@ -50,6 +53,9 @@ public sealed partial class AuthenticationService : IAuthenticationService
         IDateTimeProvider dateTimeProvider,
         IRequestContext requestContext,
         ICurrentUser currentUser,
+        IRepository<UserToken> userTokens,
+        IAccountActivationService activation,
+        IPasswordPolicy passwordPolicy,
         IOptions<AuthenticationPolicyOptions> policy,
         ILogger<AuthenticationService> logger)
     {
@@ -63,6 +69,9 @@ public sealed partial class AuthenticationService : IAuthenticationService
         _dateTimeProvider = dateTimeProvider;
         _requestContext = requestContext;
         _currentUser = currentUser;
+        _userTokens = userTokens;
+        _activation = activation;
+        _passwordPolicy = passwordPolicy;
         _policy = policy.Value;
         _logger = logger;
 
@@ -263,11 +272,181 @@ public sealed partial class AuthenticationService : IAuthenticationService
             return;
         }
 
-        LogPasswordResetRequested(user.Id, _requestContext.CorrelationId);
+        // Only usable accounts get a link. Sending one to a disabled account would let a
+        // dismissed employee restore their own access.
+        if (user.Status is AppConstants.UserStatus.Disabled)
+        {
+            LogPasswordResetRequestedForUnknownAddress(_requestContext.CorrelationId);
+            return;
+        }
 
-        // NOTE: issuing and mailing the reset link is not implemented. It needs a reset-token
-        // entity and an email sender, both of which arrive with the email module. Until then this
-        // records the request and sends nothing - do not present it to users as working.
+        await _activation.SendPasswordResetAsync(user, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        LogPasswordResetRequested(user.Id, _requestContext.CorrelationId);
+    }
+
+    /// <inheritdoc />
+    public async Task<AuthTokens> AcceptInvitationAsync(
+        AcceptInvitationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        _passwordPolicy.Validate(request.Password);
+
+        var (token, user) = await RedeemAsync(
+            request.Token,
+            AppConstants.UserTokenPurpose.Invitation,
+            cancellationToken);
+
+        user.PasswordHash = _passwordHasher.Hash(request.Password);
+        user.Status = AppConstants.UserStatus.Active;
+
+        // Redeeming a token sent to the address proves the user controls it, so confirmation is
+        // implied rather than demanded again.
+        user.EmailConfirmed = true;
+        user.SecurityStamp = Guid.NewGuid();
+        user.LastLoginOn = _dateTimeProvider.UtcNow;
+
+        token.ConsumedOn = _dateTimeProvider.UtcNow;
+
+        EnsureAccountUsable(user);
+
+        var tokens = IssueSession(user, Guid.NewGuid());
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        LogInvitationAccepted(user.Id, _requestContext.CorrelationId);
+
+        return tokens;
+    }
+
+    /// <inheritdoc />
+    public async Task ResetPasswordAsync(
+        ResetPasswordRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        _passwordPolicy.Validate(request.Password);
+
+        var (token, user) = await RedeemAsync(
+            request.Token,
+            AppConstants.UserTokenPurpose.PasswordReset,
+            cancellationToken);
+
+        var utcNow = _dateTimeProvider.UtcNow;
+
+        user.PasswordHash = _passwordHasher.Hash(request.Password);
+        user.SecurityStamp = Guid.NewGuid();
+
+        // A reset also clears a lockout. Someone locked out after failed attempts has just proved
+        // control of the address, which is stronger evidence than waiting out the timer.
+        user.FailedLoginAttempts = 0;
+        user.LockoutEndsOn = null;
+
+        token.ConsumedOn = utcNow;
+
+        // Every session goes. If the account was compromised, leaving the attacker signed in
+        // would make the reset cosmetic.
+        await _refreshTokenRepository.RevokeAllForUserAsync(
+            user.Id,
+            "Password reset.",
+            utcNow,
+            cancellationToken);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        LogPasswordReset(user.Id, _requestContext.CorrelationId);
+    }
+
+    /// <inheritdoc />
+    public async Task ChangePasswordAsync(
+        ChangePasswordRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var userId = _currentUser.UserId ?? throw new AuthenticationException("not_authenticated");
+
+        var user = await _userRepository.GetForUpdateAsync(userId, cancellationToken)
+                   ?? throw new NotFoundException(nameof(User), userId);
+
+        var (isValid, _) = _passwordHasher.Verify(request.CurrentPassword, user.PasswordHash);
+
+        if (!isValid)
+        {
+            // Not a generic sign-in failure: the caller is already authenticated, so naming the
+            // wrong field is helpful and discloses nothing they do not already know.
+            throw new ValidationException(nameof(request.CurrentPassword), "That is not your current password.");
+        }
+
+        _passwordPolicy.Validate(request.NewPassword, nameof(request.NewPassword));
+
+        var utcNow = _dateTimeProvider.UtcNow;
+        var currentSessionId = _currentUser.SessionId;
+
+        user.PasswordHash = _passwordHasher.Hash(request.NewPassword);
+        user.SecurityStamp = Guid.NewGuid();
+
+        // Other sessions end; the caller's own survives, because signing someone out of the tab
+        // they just used to change their password is hostile and teaches nothing.
+        var sessions = await _refreshTokenRepository.GetActiveSessionsAsync(user.Id, utcNow, cancellationToken);
+
+        foreach (var session in sessions)
+        {
+            if (currentSessionId is { } keep && session.SessionId == keep)
+            {
+                // Re-stamped so it survives the rotation that just invalidated everything else.
+                session.SecurityStamp = user.SecurityStamp;
+                continue;
+            }
+
+            session.RevokedOn = utcNow;
+            session.RevokedReason = "Password changed.";
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        LogPasswordChanged(user.Id, _requestContext.CorrelationId);
+    }
+
+    /// <summary>
+    /// Looks up and validates an emailed token.
+    /// <para>
+    /// Every failure - unknown, wrong purpose, expired, already used - returns the same error. The
+    /// caller is unauthenticated, and distinguishing them would let someone probe which tokens
+    /// exist.
+    /// </para>
+    /// </summary>
+    private async Task<(UserToken Token, User User)> RedeemAsync(
+        string presented,
+        AppConstants.UserTokenPurpose purpose,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(presented))
+        {
+            throw new AuthenticationException("invalid_token");
+        }
+
+        var hash = _tokenService.HashSecureToken(presented);
+
+        var token = await _userTokens.FirstOrDefaultAsync(entry => entry.TokenHash == hash, cancellationToken)
+                    ?? throw new AuthenticationException("invalid_token");
+
+        if (token.Purpose != purpose || !token.IsUsable(_dateTimeProvider.UtcNow))
+        {
+            throw new AuthenticationException("invalid_token");
+        }
+
+        var tracked = await _userTokens.GetForUpdateAsync(token.Id, cancellationToken)
+                      ?? throw new AuthenticationException("invalid_token");
+
+        var user = await _userRepository.GetForUpdateAsync(token.UserId, cancellationToken)
+                   ?? throw new AuthenticationException("invalid_token");
+
+        return (tracked, user);
     }
 
     /// <inheritdoc />
@@ -477,4 +656,21 @@ public sealed partial class AuthenticationService : IAuthenticationService
         Level = LogLevel.Information,
         Message = "Password reset requested for user {UserId}. CorrelationId: {CorrelationId}")]
     private partial void LogPasswordResetRequested(Guid userId, string correlationId);
+    [LoggerMessage(
+        EventId = 2009,
+        Level = LogLevel.Information,
+        Message = "User {UserId} accepted an invitation and activated their account. CorrelationId: {CorrelationId}")]
+    private partial void LogInvitationAccepted(Guid userId, string correlationId);
+
+    [LoggerMessage(
+        EventId = 2010,
+        Level = LogLevel.Warning,
+        Message = "Password reset completed for user {UserId}; all sessions revoked. CorrelationId: {CorrelationId}")]
+    private partial void LogPasswordReset(Guid userId, string correlationId);
+
+    [LoggerMessage(
+        EventId = 2011,
+        Level = LogLevel.Information,
+        Message = "User {UserId} changed their password. CorrelationId: {CorrelationId}")]
+    private partial void LogPasswordChanged(Guid userId, string correlationId);
 }

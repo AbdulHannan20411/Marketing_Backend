@@ -463,3 +463,29 @@ public sealed class ContactImportRowConfiguration : BaseEntityConfiguration<Cont
         builder.HasIndex(row => new { row.ContactImportBatchId, row.RowNumber });
     }
 }
+
+/// <summary>Fluent configuration for <see cref="UserToken"/>.</summary>
+public sealed class UserTokenConfiguration : BaseEntityConfiguration<UserToken>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<UserToken> builder)
+    {
+        builder.ToTable("user_tokens");
+
+        // 64 hex characters for a SHA-256 digest.
+        builder.Property(token => token.TokenHash).IsRequired().HasMaxLength(64).IsFixedLength();
+        builder.Property(token => token.Purpose).IsRequired().HasMaxLength(24).HasConversion<string>();
+        builder.Property(token => token.RequestedByIp).HasMaxLength(45);
+
+        // Redemption looks a token up by hash and nothing else, so this index is the whole plan.
+        builder.HasIndex(token => token.TokenHash).IsUnique();
+
+        // Supports invalidating a user's outstanding tokens when a new one is issued.
+        builder.HasIndex(token => new { token.UserId, token.Purpose, token.ConsumedOn });
+
+        builder.HasOne(token => token.User)
+            .WithMany()
+            .HasForeignKey(token => token.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}

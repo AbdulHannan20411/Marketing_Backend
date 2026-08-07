@@ -47,6 +47,7 @@ public sealed class AdminAccountService : IAdminAccountService
     private readonly IPasswordHasher _passwordHasher;
     private readonly IPlatformService _platform;
     private readonly IDateTimeProvider _clock;
+    private readonly IAccountActivationService _activation;
 
     /// <summary>Initialises a new instance.</summary>
     public AdminAccountService(
@@ -59,7 +60,8 @@ public sealed class AdminAccountService : IAdminAccountService
         IUnitOfWork unitOfWork,
         IPasswordHasher passwordHasher,
         IPlatformService platform,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IAccountActivationService activation)
     {
         _users = users;
         _tenants = tenants;
@@ -71,6 +73,7 @@ public sealed class AdminAccountService : IAdminAccountService
         _passwordHasher = passwordHasher;
         _platform = platform;
         _clock = clock;
+        _activation = activation;
     }
 
     /// <inheritdoc />
@@ -145,6 +148,10 @@ public sealed class AdminAccountService : IAdminAccountService
             UserId = admin.Id,
             RoleId = adminRole.Id,
         });
+
+        // Same transaction as the account and the organisation, so a created admin always has a
+        // usable activation link.
+        await _activation.SendInvitationAsync(admin, tenant.Name, cancellationToken);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 

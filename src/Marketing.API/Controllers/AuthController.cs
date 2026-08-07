@@ -119,6 +119,75 @@ public sealed class AuthController : ApiControllerBase
         return SuccessEmpty("If that address is registered, a reset link is on its way.");
     }
 
+    /// <summary>Activates an invited account and signs the user in.</summary>
+    /// <remarks>
+    /// Exchanges the single-use token from the invitation email for an active account with a
+    /// password the user chooses, and returns a token pair so they land signed in. The token
+    /// cannot be reused.
+    /// </remarks>
+    /// <param name="request">Token and chosen password.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The account is active and a token pair is returned.</response>
+    /// <response code="401">The token is unknown, expired or already used.</response>
+    /// <response code="422">The password does not meet policy.</response>
+    [HttpPost("accept-invitation")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<AuthTokens>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> AcceptInvitationAsync(
+        [FromBody] AcceptInvitationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var tokens = await _authenticationService.AcceptInvitationAsync(request, cancellationToken);
+
+        return Success(tokens, "Your account is ready.");
+    }
+
+    /// <summary>Sets a new password from a reset link.</summary>
+    /// <remarks>
+    /// Ends every existing session, including any an attacker may hold. The user signs in again
+    /// with the new password.
+    /// </remarks>
+    /// <param name="request">Token and new password.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The password was changed.</response>
+    /// <response code="401">The token is unknown, expired or already used.</response>
+    /// <response code="422">The password does not meet policy.</response>
+    [HttpPost("reset-password")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ResetPasswordAsync(
+        [FromBody] ResetPasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        await _authenticationService.ResetPasswordAsync(request, cancellationToken);
+
+        return SuccessEmpty("Your password has been changed. Sign in with your new password.");
+    }
+
+    /// <summary>Changes the signed-in user's own password.</summary>
+    /// <remarks>
+    /// Requires the current password. Ends the user's other sessions but keeps the one making the
+    /// request, so they are not signed out of the tab they are using.
+    /// </remarks>
+    /// <param name="request">Current and new password.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The password was changed.</response>
+    /// <response code="422">The current password is wrong, or the new one does not meet policy.</response>
+    [HttpPost("change-password")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ChangePasswordAsync(
+        [FromBody] ChangePasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        await _authenticationService.ChangePasswordAsync(request, cancellationToken);
+
+        return SuccessEmpty("Your password has been changed. Other devices have been signed out.");
+    }
+
     /// <summary>Returns the signed-in user's profile.</summary>
     /// <remarks>
     /// Supplementary to the token, which is the client's primary source for identity, role and

@@ -34,6 +34,13 @@ public static class ApplicationServiceCollectionExtensions
         // checks, and a singleton holding a scoped DbContext would be a captive dependency.
         services.AddValidatorsFromAssembly(assembly, ServiceLifetime.Scoped, includeInternalTypes: false);
 
+        services.AddOptions<EmailOptions>()
+            .Bind(configuration.GetSection(EmailOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddSingleton<IPasswordPolicy, PasswordPolicy>();
+        services.AddScoped<IAccountActivationService, AccountActivationService>();
         services.AddScoped<IAuthenticationService, AuthenticationService>();
         services.AddScoped<ISessionMaintenanceService, SessionMaintenanceService>();
         services.AddScoped<ITenantScopeResolver, TenantScopeResolver>();

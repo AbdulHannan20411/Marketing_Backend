@@ -42,3 +42,12 @@ public sealed record AccessToken(string Value, DateTimeOffset ExpiresAtUtc);
 /// <param name="Hash">SHA-256 hash of the plaintext, hex encoded.</param>
 /// <param name="ExpiresAtUtc">Absolute expiry in UTC.</param>
 public sealed record RefreshTokenMaterial(string Value, string Hash, DateTimeOffset ExpiresAtUtc);
+
+/// <summary>
+/// A single-use token for an emailed link. <paramref name="Value"/> goes in the link and is never
+/// stored; <paramref name="Hash"/> is what the database keeps.
+/// </summary>
+/// <param name="Value">Plaintext token.</param>
+/// <param name="Hash">SHA-256 hash of the plaintext, hex encoded.</param>
+/// <param name="ExpiresAtUtc">Absolute expiry in UTC.</param>
+public sealed record SecureToken(string Value, string Hash, DateTimeOffset ExpiresAtUtc);
