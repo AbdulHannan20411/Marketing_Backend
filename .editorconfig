@@ -12,7 +12,9 @@ trim_trailing_whitespace = true
 indent_size = 2
 
 [*.cs]
+
 # --- Language conventions -------------------------------------------------
+
 csharp_style_namespace_declarations = file_scoped:error
 csharp_using_directive_placement = outside_namespace:error
 csharp_prefer_braces = true:warning
@@ -24,9 +26,11 @@ csharp_style_prefer_pattern_matching = true:suggestion
 csharp_style_throw_expression = true:suggestion
 
 dotnet_style_readonly_field = true:error
-# "always" also covers interface members, which are implicitly public. Verbose, but the rule is
-# all-or-nothing: the analyzer reports explicit modifiers as *unnecessary* under the alternative,
-# so a mixed codebase cannot compile warning-free either way. Consistency wins.
+
+# "always" also covers interface members, which are implicitly public.
+
+# Consistency is preferred across the solution.
+
 dotnet_style_require_accessibility_modifiers = always:error
 dotnet_style_qualification_for_field = false:error
 dotnet_style_qualification_for_property = false:error
@@ -36,38 +40,90 @@ dotnet_style_coalesce_expression = true:suggestion
 dotnet_style_null_propagation = true:suggestion
 
 # --- Naming ---------------------------------------------------------------
+
+# Interfaces must start with I.
+
 dotnet_naming_rule.interfaces_start_with_i.severity = error
 dotnet_naming_rule.interfaces_start_with_i.symbols = interface_symbol
 dotnet_naming_rule.interfaces_start_with_i.style = prefix_i_style
+
 dotnet_naming_symbols.interface_symbol.applicable_kinds = interface
+
 dotnet_naming_style.prefix_i_style.required_prefix = I
 dotnet_naming_style.prefix_i_style.capitalization = pascal_case
 
-dotnet_naming_rule.private_fields_underscore.severity = error
+# Private fields should use _camelCase.
+
+#
+
+# This is intentionally a suggestion rather than an error because
+
+# C# constants are also represented as fields. This prevents constants
+
+# such as "private const char Separator = '_';" from breaking builds.
+
+dotnet_naming_rule.private_fields_underscore.severity = suggestion
 dotnet_naming_rule.private_fields_underscore.symbols = private_field_symbol
 dotnet_naming_rule.private_fields_underscore.style = underscore_camel_style
+
 dotnet_naming_symbols.private_field_symbol.applicable_kinds = field
 dotnet_naming_symbols.private_field_symbol.applicable_accessibilities = private
+
 dotnet_naming_style.underscore_camel_style.required_prefix = _
 dotnet_naming_style.underscore_camel_style.capitalization = camel_case
+
+# Types, methods, properties, events, etc. should use PascalCase.
 
 dotnet_naming_rule.types_pascal_case.severity = error
 dotnet_naming_rule.types_pascal_case.symbols = type_symbol
 dotnet_naming_rule.types_pascal_case.style = pascal_style
+
 dotnet_naming_symbols.type_symbol.applicable_kinds = class,struct,interface,enum,delegate,method,property,event
+
 dotnet_naming_style.pascal_style.capitalization = pascal_case
 
 # --- Analyzer severities --------------------------------------------------
-dotnet_diagnostic.CA1062.severity = none      # null checks handled by nullable reference types
-dotnet_diagnostic.CA2007.severity = none      # ConfigureAwait not required in ASP.NET Core
-dotnet_diagnostic.CA1848.severity = none      # LoggerMessage source-gen not enforced everywhere
+
+# Nullable reference types handle null checks.
+
+dotnet_diagnostic.CA1062.severity = none
+
+# ConfigureAwait is not required in ASP.NET Core.
+
+dotnet_diagnostic.CA2007.severity = none
+
+# LoggerMessage source generation is not enforced everywhere.
+
+dotnet_diagnostic.CA1848.severity = none
+
+# Avoid primary-constructor enforcement.
+
 dotnet_diagnostic.IDE0290.severity = suggestion
-dotnet_diagnostic.CA1515.severity = none      # public types are intentional across layers
-# CA1716 flags "Shared" and "Scheduler" namespace segments because they collide with reserved
-# words in other .NET languages (VB's Shared). Nothing consumes this solution from VB, and the
-# names describe the layers accurately, so the interop concern does not apply.
+
+# Naming suggestions should never block compilation or EF migrations.
+
+dotnet_diagnostic.IDE1006.severity = suggestion
+
+# Public types are intentional across application layers.
+
+dotnet_diagnostic.CA1515.severity = none
+
+# "Shared" and "Scheduler" namespace segments are intentional.
+
 dotnet_diagnostic.CA1716.severity = none
 
+# Avoid constant array allocations passed to methods.
+
+# This should not block builds or EF Core migrations.
+
+dotnet_diagnostic.CA1861.severity = none
+
+# --- Tests ----------------------------------------------------------------
+
 [tests/**/*.cs]
+
 dotnet_diagnostic.CS1591.severity = none
-dotnet_diagnostic.CA1707.severity = none      # underscores in test method names are idiomatic
+
+# Underscores in test method names are intentional and idiomatic.
+
+dotnet_diagnostic.CA1707.severity = none

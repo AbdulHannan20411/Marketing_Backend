@@ -59,6 +59,9 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<ICatalogService, CatalogService>();
         services.AddScoped<ICampaignWriteService, CampaignWriteService>();
         services.AddScoped<IAdminAccountService, AdminAccountService>();
+        services.AddScoped<IWhatsAppConnectionService, WhatsAppConnectionService>();
+        services.AddScoped<ICampaignDispatchService, CampaignDispatchService>();
+        services.AddScoped<IWhatsAppWebhookService, WhatsAppWebhookService>();
 
         return services;
     }

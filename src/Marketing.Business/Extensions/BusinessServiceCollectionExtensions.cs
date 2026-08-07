@@ -26,6 +26,8 @@ public static class BusinessServiceCollectionExtensions
         services.AddScoped<ISqlQueryExecutor, SqlQueryExecutor>();
         services.AddScoped<IQueryExecutor, QueryExecutor>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
+        services.AddScoped<IWhatsAppConnectionRepository, WhatsAppConnectionRepository>();
+        services.AddScoped<ICampaignMessageRepository, CampaignMessageRepository>();
 
         return services;
     }

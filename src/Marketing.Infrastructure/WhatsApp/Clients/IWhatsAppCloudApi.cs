@@ -42,6 +42,24 @@ public interface IWhatsAppCloudApi
         [AliasAs("after")] string? after = null,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Exchanges an Embedded Signup authorisation code for a business access token.
+    /// <para>
+    /// The only call on this client that is not authenticated by a tenant token - it is
+    /// authenticated by the app secret, and it is how a tenant gets a token in the first place.
+    /// </para>
+    /// </summary>
+    /// <param name="clientId">Meta app identifier.</param>
+    /// <param name="clientSecret">Meta app secret.</param>
+    /// <param name="code">Code returned by Embedded Signup.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [Get("/oauth/access_token")]
+    public Task<TokenExchangeResponse> ExchangeCodeAsync(
+        [AliasAs("client_id")] string clientId,
+        [AliasAs("client_secret")] string clientSecret,
+        [AliasAs("code")] string code,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Sends a message.</summary>
     /// <param name="phoneNumberId">Sending phone number identifier.</param>
     /// <param name="payload">

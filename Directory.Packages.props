@@ -1,5 +1,4 @@
 <Project>
-
   <!--
     Central Package Management. Every version in the solution is pinned here exactly once.
     Upgrading the platform is a change to this file plus the TargetFramework in
@@ -14,8 +13,11 @@
     <AspNetCoreVersion>10.0.10</AspNetCoreVersion>
     <EfCoreVersion>10.0.10</EfCoreVersion>
   </PropertyGroup>
-
   <ItemGroup Label="Runtime and hosting">
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.FileExtensions" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="$(AspNetCoreVersion)" />
     <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="$(AspNetCoreVersion)" />
     <PackageVersion Include="Microsoft.Extensions.Options.DataAnnotations" Version="$(AspNetCoreVersion)" />
@@ -25,17 +27,15 @@
     <PackageVersion Include="Microsoft.AspNetCore.Cryptography.KeyDerivation" Version="$(AspNetCoreVersion)" />
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.22.0" />
   </ItemGroup>
-
   <ItemGroup Label="Data access">
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="$(EfCoreVersion)" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="$(EfCoreVersion)" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="$(EfCoreVersion)" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageVersion Include="Npgsql" Version="10.0.3" />
     <PackageVersion Include="EFCore.NamingConventions" Version="10.0.1" />
     <PackageVersion Include="Dapper" Version="2.1.79" />
   </ItemGroup>
-
   <ItemGroup Label="Cross-cutting infrastructure">
     <PackageVersion Include="StackExchange.Redis" Version="2.9.25" />
     <PackageVersion Include="Quartz" Version="3.19.1" />
@@ -60,7 +60,6 @@
     <PackageVersion Include="FluentValidation" Version="12.1.1" />
     <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
   </ItemGroup>
-
   <ItemGroup Label="Logging and observability">
     <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageVersion Include="Serilog.Enrichers.Environment" Version="3.0.1" />
@@ -72,7 +71,6 @@
     <PackageVersion Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
     <PackageVersion Include="AspNetCore.HealthChecks.UI.Client" Version="9.0.0" />
   </ItemGroup>
-
   <ItemGroup Label="API surface">
     <PackageVersion Include="Asp.Versioning.Mvc" Version="10.0.1" />
     <PackageVersion Include="Asp.Versioning.Mvc.ApiExplorer" Version="10.0.1" />
@@ -80,7 +78,6 @@
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="$(AspNetCoreVersion)" />
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="$(AspNetCoreVersion)" />
   </ItemGroup>
-
   <ItemGroup Label="Testing">
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
@@ -94,5 +91,4 @@
     <PackageVersion Include="Testcontainers.Redis" Version="4.13.0" />
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />
   </ItemGroup>
-
 </Project>

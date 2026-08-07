@@ -98,6 +98,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
             TemplateName = template.Name,
             Status = CampaignStatus.Draft,
             AudienceLabel = draft.AudienceLabel,
+            AudienceGroupIds = ParseGroupIds(draft.GroupIds),
             AudienceSize = await CountAudienceAsync(draft.GroupIds, cancellationToken),
             CreatedByName = _currentUser.DisplayName ?? "Unknown",
         };
@@ -133,6 +134,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
         campaign.MessageTemplateId = template.Id;
         campaign.TemplateName = template.Name;
         campaign.AudienceLabel = draft.AudienceLabel;
+        campaign.AudienceGroupIds = ParseGroupIds(draft.GroupIds);
         campaign.AudienceSize = await CountAudienceAsync(draft.GroupIds, cancellationToken);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -212,9 +214,13 @@ public sealed class CampaignWriteService : ICampaignWriteService
         campaign.Status = CampaignStatus.Sending;
         campaign.ScheduledAt ??= _clock.UtcNow;
 
-        // NOTE: the dispatcher itself is not built. This moves the campaign into the sending state
-        // and announces it; the scheduler job that walks the audience and calls Meta lands with
-        // the WhatsApp connection module, which is what supplies the per-tenant access token.
+        // A pause someone applied by hand is cleared here, so resuming a paused campaign does not
+        // leave a stale automatic-resume time that would restart it a second time.
+        campaign.ResumeAfter = null;
+
+        // The dispatcher takes it from here. Sending happens on the scheduler rather than on this
+        // request: fifty thousand round trips to Meta cannot happen inside an HTTP call, and a
+        // dropped connection must not abandon a campaign half sent.
         return await CommitAndPublishAsync(campaign, cancellationToken);
     }
 
@@ -316,12 +322,12 @@ public sealed class CampaignWriteService : ICampaignWriteService
         return template;
     }
 
-    /// <summary>Counts distinct contacts across the chosen groups.</summary>
-    private async Task<int> CountAudienceAsync(IReadOnlyList<string>? groupIds, CancellationToken cancellationToken)
+    /// <summary>Turns the client's prefixed group identifiers into keys, dropping anything unparseable.</summary>
+    private static List<Guid> ParseGroupIds(IReadOnlyList<string>? groupIds)
     {
         if (groupIds is not { Count: > 0 })
         {
-            return 0;
+            return [];
         }
 
         var parsed = new List<Guid>(groupIds.Count);
@@ -332,6 +338,19 @@ public sealed class CampaignWriteService : ICampaignWriteService
             {
                 parsed.Add(value);
             }
+        }
+
+        return parsed;
+    }
+
+    /// <summary>Counts distinct contacts across the chosen groups.</summary>
+    private async Task<int> CountAudienceAsync(IReadOnlyList<string>? groupIds, CancellationToken cancellationToken)
+    {
+        var parsed = ParseGroupIds(groupIds);
+
+        if (parsed.Count == 0)
+        {
+            return 0;
         }
 
         // Distinct, because a contact in two chosen groups is one recipient, not two - and the

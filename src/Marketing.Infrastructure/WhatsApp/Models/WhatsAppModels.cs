@@ -80,3 +80,60 @@ public sealed record GraphError(
     [property: JsonPropertyName("code")] int Code,
     [property: JsonPropertyName("error_subcode")] int? SubCode,
     [property: JsonPropertyName("fbtrace_id")] string? TraceId);
+
+/// <summary>Result of exchanging an Embedded Signup code.</summary>
+/// <param name="AccessToken">
+/// The business access token. A live credential - it is encrypted before it touches the database
+/// and never appears in a DTO, a log line or an audit row.
+/// </param>
+/// <param name="TokenType">Token type, always <c>bearer</c>.</param>
+/// <param name="ExpiresIn">Lifetime in seconds. Absent for long-lived system-user tokens.</param>
+public sealed record TokenExchangeResponse(
+    [property: JsonPropertyName("access_token")] string AccessToken,
+    [property: JsonPropertyName("token_type")] string? TokenType,
+    [property: JsonPropertyName("expires_in")] long? ExpiresIn);
+
+/// <summary>A template message to send, in the shape the Cloud API expects.</summary>
+/// <param name="To">Recipient in E.164 without the leading plus.</param>
+/// <param name="Template">Template name, language and components.</param>
+public sealed record SendTemplateMessageRequest(
+    [property: JsonPropertyName("to")] string To,
+    [property: JsonPropertyName("template")] TemplateMessagePayload Template)
+{
+    /// <summary>Always <c>whatsapp</c>; Meta rejects the request without it.</summary>
+    [JsonPropertyName("messaging_product")]
+    public string MessagingProduct { get; } = "whatsapp";
+
+    /// <summary>Always <c>template</c> for campaign sends.</summary>
+    [JsonPropertyName("type")]
+    public string Type { get; } = "template";
+}
+
+/// <summary>Template selection and its variable bindings.</summary>
+/// <param name="Name">Template name as registered with Meta.</param>
+/// <param name="Language">Language tag wrapper.</param>
+/// <param name="Components">Variable bindings, omitted when the template has no placeholders.</param>
+public sealed record TemplateMessagePayload(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("language")] TemplateLanguage Language,
+    [property: JsonPropertyName("components")] IReadOnlyList<TemplateComponent>? Components);
+
+/// <summary>Template language selector.</summary>
+/// <param name="Code">BCP 47 language tag, for example <c>en_GB</c>.</param>
+public sealed record TemplateLanguage([property: JsonPropertyName("code")] string Code);
+
+/// <summary>One component of a template message.</summary>
+/// <param name="Type">Component type, for example <c>body</c>.</param>
+/// <param name="Parameters">Ordered parameter values filling the placeholders.</param>
+public sealed record TemplateComponent(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("parameters")] IReadOnlyList<TemplateParameter> Parameters);
+
+/// <summary>One template parameter value.</summary>
+/// <param name="Text">The substituted text.</param>
+public sealed record TemplateParameter([property: JsonPropertyName("text")] string Text)
+{
+    /// <summary>Always <c>text</c>; media parameters are not used by campaigns yet.</summary>
+    [JsonPropertyName("type")]
+    public string Type { get; } = "text";
+}

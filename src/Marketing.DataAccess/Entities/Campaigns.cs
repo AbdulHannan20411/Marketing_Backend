@@ -38,8 +38,37 @@ public sealed class Campaign : BaseEntity, IRequiresTenant
     /// <summary>Messages that failed.</summary>
     public int FailedCount { get; set; }
 
+    /// <summary>
+    /// Groups making up the audience.
+    /// <para>
+    /// Persisted rather than recomputed from a label, because the dispatcher runs minutes or days
+    /// after the campaign was composed and has to be able to reconstruct exactly who was chosen.
+    /// </para>
+    /// </summary>
+    public List<Guid> AudienceGroupIds { get; set; } = [];
+
     /// <summary>Instant dispatch is scheduled for.</summary>
     public DateTimeOffset? ScheduledAt { get; set; }
+
+    /// <summary>
+    /// Instant the recipient rows were written.
+    /// <para>
+    /// The dispatcher materialises the audience once and works from that snapshot. Set means "do
+    /// not enumerate the groups again" - a contact added to a group mid-dispatch is not silently
+    /// pulled into a campaign that was already counted and billed.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? RecipientsQueuedOn { get; set; }
+
+    /// <summary>
+    /// Instant a rate-limited campaign becomes eligible again.
+    /// <para>
+    /// Set when the tenant's rolling 24-hour messaging allowance is exhausted mid-dispatch. The
+    /// poller resumes the campaign on its own once this passes, so nobody has to notice and press
+    /// send again.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? ResumeAfter { get; set; }
 
     /// <summary>Instant dispatch finished.</summary>
     public DateTimeOffset? CompletedAt { get; set; }

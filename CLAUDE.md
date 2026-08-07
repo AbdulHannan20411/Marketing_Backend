@@ -45,13 +45,20 @@ from a route, query string, header or request body, and never returned to a tena
 - `ITenantScoped` allows a null tenant, for platform-level rows (platform admin users, their role
   assignments and sessions). `IRequiresTenant` does not — use it for every domain entity.
 - The auditing interceptor refuses to let an update change an entity's `TenantId`.
-- `IgnoreQueryFilters()` appears in exactly three files and nowhere else — `UserRepository`,
-  `RefreshTokenRepository` and `DatabaseSeeder`. All three run either before authentication has
-  established a tenant (sign-in, refresh, startup seeding) or key off a value the caller already
-  holds (a user id from their own token, a 256-bit token hash). **Every one of them re-applies
-  `!IsDeleted` by hand**, because bypassing the filter bypasses the soft-delete predicate too.
-  A new call site outside these files needs justification in review; `grep -rn IgnoreQueryFilters src`
-  is the audit.
+- `IgnoreQueryFilters()` appears in exactly five files and nowhere else:
+  - `UserRepository`, `RefreshTokenRepository`, `DatabaseSeeder` — sign-in, refresh and startup
+    seeding all run *before* authentication has established a tenant, or key off a value the caller
+    already holds (a user id from their own token, a 256-bit token hash).
+  - `WhatsAppConnectionRepository` — a Meta webhook arrives with no principal at all. The phone
+    number id *is* how the tenant is discovered, and it is only trusted because the HMAC signature
+    was verified first.
+  - `CampaignMessageRepository` — the dispatcher's cross-tenant poll (which projects two
+    identifiers and nothing else, then enters each tenant properly) and the webhook's lookup by
+    Meta message id.
+
+  **Every one of them re-applies `!IsDeleted` by hand**, because bypassing the filter bypasses the
+  soft-delete predicate too. A new call site outside these files needs justification in review;
+  `grep -rn IgnoreQueryFilters src` is the audit.
 - Raw SQL bypasses query filters, so `ISqlQueryExecutor` injects `@TenantId` itself and **rejects
   any statement that does not reference it**, plus anything that is not a `SELECT`/`WITH`.
   Cross-tenant reporting goes through `QueryPlatformAsync`, which requires platform admin.
@@ -212,18 +219,64 @@ Rules that are easy to get wrong and are therefore fixed here:
 
 ## Meta Cloud API
 
-- Never call Graph from a controller. Use the typed `IWhatsAppCloudApi` Refit client through a
-  WhatsApp service.
+- Never call Graph from a controller, and never from a service either. Services depend on
+  `IWhatsAppGateway` (Application); `MetaWhatsAppGateway` (Infrastructure) is the only thing that
+  touches the `IWhatsAppCloudApi` Refit client. Same seam pattern as `IPaymentGateway` and
+  `IEmailSender` — it is what keeps Refit attributes, Graph payload shapes and the app credentials
+  out of the Application layer.
 - The Graph API version is pinned in configuration, not floated.
 - `GraphApiErrorHandler` converts error bodies to `ExternalServiceException` with an accurate
   `IsTransient`, and never returns Meta's message to the client — it echoes request parameters,
   which here means recipient phone numbers.
+- `TenantAccessTokenHandler` attaches the tenant's decrypted token to every Graph request, so no
+  call site can forget it and no token is passed around as a parameter. It resolves its repository
+  from a **fresh DI scope per send**: `IHttpClientFactory` builds handler pipelines from a scope
+  that lives as long as the pooled handler, so a `DbContext` injected into the constructor would
+  stay open for minutes across unrelated requests.
+- The token exchange endpoint (`oauth/access_token`) is the one path that skips the handler — it is
+  authenticated by the app secret and is how a tenant obtains a token in the first place.
+
+### Campaign dispatch
+
+- `CampaignWriteService` moves a campaign to `Sending` and stops. The scheduler does the work:
+  50 000 round trips to Meta cannot happen inside an HTTP request, and a dropped connection must
+  not abandon a campaign half sent.
+- `CampaignDispatchJob` polls every minute. `CampaignMessage` is the per-recipient log that makes
+  an interrupted dispatch resumable, and its unique index on `(CampaignId, ContactId)` is what
+  makes a re-run unable to send twice.
+- The rolling 24-hour allowance is **derived from the message log**, not from a stored counter. When
+  it is exhausted the campaign is paused with `ResumeAfter` set to the moment the oldest send in the
+  window ages out, and the poller resumes it without anyone pressing send again. A pause applied by
+  a person leaves `ResumeAfter` null and therefore stays paused.
+- A template carrying `{{n}}` placeholders is refused rather than sent with blanks.
+
+### Webhook
+
+- `/api/v1/whatsapp/webhook` is the only anonymous write endpoint in the platform. Meta has no
+  bearer token, so the HMAC-SHA256 signature over the **raw body bytes** is the entire
+  authentication story — verified before a single field is parsed, and computed over what was
+  received rather than over a re-serialised object.
+- The tenant is resolved from `metadata.phone_number_id`, then entered with
+  `ITenantContext.BeginScope` so every write below it is filtered normally.
+- Receipts are idempotent by ranking: `Pending < Sent < Delivered < Read < Failed`, and a receipt
+  that does not move a message forward is dropped. Meta redelivers until it gets a 2xx, so without
+  this a replay would double-count.
+- Anything signature-valid gets a 200, including payloads the parser does not recognise. Meta
+  retries a non-2xx for hours and disables a subscription that keeps failing.
 
 ## Configuration and secrets
 
 Secrets are never committed. `Database:ConnectionString`, `Authentication:Jwt:SigningKey`,
-`WhatsApp:AppSecret` and the `Bootstrap:*` credentials come from user secrets locally and the
-platform secret store elsewhere; `appsettings.json` ships them empty.
+`WhatsApp:AppSecret`, `WhatsApp:WebhookVerifyToken`, `Security:EncryptionKeys` and the
+`Bootstrap:*` credentials come from user secrets locally and the platform secret store elsewhere;
+`appsettings.json` ships them empty.
+
+Stored Meta access tokens are encrypted with AES-256-GCM (`ISecretProtector`). The ciphertext is
+`v1.{keyId}.{nonce}.{ciphertext}.{tag}` — the key id travels with the value, so rotation is: add a
+key, repoint `Security:ActiveKeyId`, leave the retired key configured until `RequiresRewrap`
+returns false everywhere. Deleting a key some ciphertext still names destroys that value. GCM
+rather than CBC because tampering throws instead of decrypting to different bytes, which matters
+for something about to be used as a bearer credential.
 
 `appsettings.Development.json` contains deliberately worthless values pointing at the local
 docker-compose stack, so a fresh clone runs. They protect nothing and must not be reused.
@@ -319,9 +372,13 @@ the level is enabled, which CA1873 rejects as a build error. The generated metho
   advisory and the last MIT release (14.0.0) is inside that range, so the pinned 16.2.0 is patched
   but commercially licensed. The solution has one mapping profile; dropping the dependency is
   viable. See the comment in `Directory.Packages.props`.
-- The Refit client has no per-tenant authorization handler. Access tokens are per-tenant and
-  encrypted at rest, so the handler lands with the WhatsApp connection module rather than being
-  faked now.
+- **Campaign personalisation is not implemented.** `CampaignDraft` has nowhere to put variable
+  bindings, so the dispatcher refuses a template with placeholders instead of sending blanks.
+- **Nothing learns Meta's messaging limit.** `WhatsAppConnection.MessagingLimit` is only ever read;
+  the account-tier webhook that would update it is not subscribed. Zero means "unknown", and is
+  treated as unlimited so a fresh connection is not stalled at zero.
+- **Integration tests need Docker.** They use Testcontainers for PostgreSQL and fail at fixture
+  construction when the daemon is not running. The unit suite has no such dependency.
 - Quartz uses the in-memory store, which is correct for a single instance. Multi-instance
   deployment needs the AdoJobStore with clustering enabled, or two replicas will both fire every
   trigger.

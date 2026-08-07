@@ -2,6 +2,7 @@ using Marketing.Infrastructure.Authentication;
 using Marketing.Infrastructure.Logging;
 using Marketing.Infrastructure.Payments;
 using Marketing.Infrastructure.Redis;
+using Marketing.Infrastructure.Security;
 using Marketing.Infrastructure.Resilience;
 using Marketing.Infrastructure.Time;
 using Marketing.Infrastructure.WhatsApp;
@@ -80,8 +81,16 @@ public static class InfrastructureServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.AddOptions<SecurityOptions>()
+            .Bind(configuration.GetSection(SecurityOptions.SectionName))
+            .ValidateDataAnnotations()
+            // Without a key, every stored WhatsApp token becomes unreadable. Better to refuse to
+            // start than to discover that on the first campaign send.
+            .ValidateOnStart();
+
         services.AddSingleton<ITokenService, JwtTokenService>();
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
+        services.AddSingleton<ISecretProtector, AesGcmSecretProtector>();
 
         return services;
     }
@@ -141,6 +150,14 @@ public static class InfrastructureServiceCollectionExtensions
             .ValidateOnStart();
 
         services.AddTransient<GraphApiErrorHandler>();
+        services.AddTransient<TenantAccessTokenHandler>();
+
+        // The seam the Application layer depends on. Everything above this line is Refit, Polly and
+        // Graph payload shapes; nothing above it is visible to a service.
+        services.AddScoped<Application.Interfaces.IWhatsAppGateway, MetaWhatsAppGateway>();
+
+        // Singleton: it holds only the app secret and does no per-request work.
+        services.AddSingleton<Application.Interfaces.IWhatsAppWebhookVerifier, MetaWebhookVerifier>();
 
         var whatsAppOptions = configuration
             .GetSection(WhatsAppOptions.SectionName)
@@ -154,6 +171,10 @@ public static class InfrastructureServiceCollectionExtensions
                 client.Timeout = TimeSpan.FromSeconds(whatsAppOptions.RequestTimeoutSeconds);
                 client.DefaultRequestHeaders.Add("Accept", "application/json");
             })
+            // Order matters. The token handler runs first so the credential is attached before the
+            // error handler sees the response, and the error handler is therefore the last thing
+            // between Meta and the caller.
+            .AddHttpMessageHandler<TenantAccessTokenHandler>()
             .AddHttpMessageHandler<GraphApiErrorHandler>();
 
         // Recycles pooled connection handlers so DNS changes are picked up; a handler pinned for

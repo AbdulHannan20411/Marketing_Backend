@@ -289,6 +289,25 @@ public static class AppConstants
         Deleted = 2,
     }
 
+    /// <summary>Where an individual campaign message has got to.</summary>
+    public enum CampaignMessageStatus
+    {
+        /// <summary>Queued, not yet handed to Meta.</summary>
+        Pending,
+
+        /// <summary>Accepted by Meta.</summary>
+        Sent,
+
+        /// <summary>Meta confirmed delivery to the handset.</summary>
+        Delivered,
+
+        /// <summary>The recipient opened it.</summary>
+        Read,
+
+        /// <summary>Send or delivery failed permanently.</summary>
+        Failed,
+    }
+
     /// <summary>What an emailed single-use token authorises.</summary>
     public enum UserTokenPurpose
     {

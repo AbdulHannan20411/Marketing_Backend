@@ -2,6 +2,7 @@ using Marketing.DataAccess.Context;
 using Marketing.Shared.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.Extensions.Configuration;
 
 namespace Marketing.DataAccess.Factories;
 
@@ -18,21 +19,42 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<App
 {
     private const string EnvironmentVariableName = "MARKETING_MIGRATIONS_CONNECTION";
 
-    private const string LocalDefault =
-        "Host=localhost;Port=5432;Database=marketing;Username=marketing;Password=marketing_dev_password";
-
-    /// <inheritdoc />
     public ApplicationDbContext CreateDbContext(string[] args)
     {
-        var connectionString = Environment.GetEnvironmentVariable(EnvironmentVariableName) ?? LocalDefault;
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(Directory.GetCurrentDirectory())
+            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
+            .AddJsonFile(
+                $"appsettings.{Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Development"}.json",
+                optional: true,
+                reloadOnChange: false)
+            .AddEnvironmentVariables()
+            .Build();
+
+        // Environment variable takes priority over appsettings.json.
+        var connectionString =
+            Environment.GetEnvironmentVariable(EnvironmentVariableName)
+            ?? configuration["Database:ConnectionString"];
+
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException(
+                "Database connection string was not found. " +
+                "Configure Database:ConnectionString in appsettings.json " +
+                $"or set the {EnvironmentVariableName} environment variable.");
+        }
 
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseNpgsql(connectionString, npgsql =>
-                npgsql.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName))
+            .UseNpgsql(
+                connectionString,
+                npgsql => npgsql.MigrationsAssembly(
+                    typeof(ApplicationDbContext).Assembly.FullName))
             .UseSnakeCaseNamingConvention()
             .Options;
 
-        return new ApplicationDbContext(options, new DesignTimeTenantContext());
+        return new ApplicationDbContext(
+            options,
+            new DesignTimeTenantContext());
     }
 
     /// <summary>

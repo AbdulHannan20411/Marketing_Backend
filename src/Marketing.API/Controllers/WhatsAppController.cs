@@ -18,12 +18,17 @@ namespace Marketing.API.Controllers;
 public sealed class WhatsAppController : ApiControllerBase
 {
     private readonly IWhatsAppService _whatsApp;
+    private readonly IWhatsAppConnectionService _connections;
     private readonly ITenantScopeResolver _scope;
 
     /// <summary>Initialises a new instance.</summary>
-    public WhatsAppController(IWhatsAppService whatsApp, ITenantScopeResolver scope)
+    public WhatsAppController(
+        IWhatsAppService whatsApp,
+        IWhatsAppConnectionService connections,
+        ITenantScopeResolver scope)
     {
         _whatsApp = whatsApp;
+        _connections = connections;
         _scope = scope;
     }
 
@@ -63,6 +68,78 @@ public sealed class WhatsAppController : ApiControllerBase
         return Success(
             await _whatsApp.SyncConnectionAsync(cancellationToken),
             "WhatsApp connection refreshed.");
+    }
+
+    /// <summary>Completes Meta Embedded Signup and links the chosen number.</summary>
+    /// <remarks>
+    /// The client sends the authorisation code Meta handed back; the exchange happens here because
+    /// it needs the app secret. The code is single-use, so a retried request fails at Meta rather
+    /// than silently reconnecting.
+    /// </remarks>
+    /// <param name="request">Signup callback values.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The connected account.</response>
+    /// <response code="422">The number could not be verified with Meta.</response>
+    [HttpPost("connect")]
+    [RequirePermission(Permissions.WhatsApp.Connect)]
+    [ProducesResponseType(typeof(ApiResponse<WhatsAppConnectionResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ConnectAsync(
+        [FromBody] ConnectWhatsAppRequest request,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(
+            await _connections.ConnectAsync(request, cancellationToken),
+            "WhatsApp Business Account connected.");
+    }
+
+    /// <summary>Links an account using a token supplied directly. Platform staff only.</summary>
+    /// <remarks>
+    /// An operator tool for exercising the messaging path before an app has passed Meta review.
+    /// Restricted to the Super Admin role because a token pasted here has arrived through a channel
+    /// nobody audited; tenant administrators onboard through Embedded Signup instead.
+    /// </remarks>
+    /// <param name="request">Token and account identifiers.</param>
+    /// <param name="adminId">Tenant to connect on behalf of.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The connected account.</response>
+    [HttpPost("connect/manual")]
+    [Authorize(Roles = Roles.SuperAdmin)]
+    [ProducesResponseType(typeof(ApiResponse<WhatsAppConnectionResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ConnectManuallyAsync(
+        [FromBody] ManualConnectWhatsAppRequest request,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(
+            await _connections.ConnectManuallyAsync(request, cancellationToken),
+            "WhatsApp Business Account connected.");
+    }
+
+    /// <summary>Disconnects the account and destroys the stored token.</summary>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The disconnected state.</response>
+    /// <response code="404">No account is connected.</response>
+    [HttpPost("disconnect")]
+    [RequirePermission(Permissions.WhatsApp.Disconnect)]
+    [ProducesResponseType(typeof(ApiResponse<WhatsAppConnectionResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DisconnectAsync(
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(
+            await _connections.DisconnectAsync(cancellationToken),
+            "WhatsApp Business Account disconnected.");
     }
 }
 

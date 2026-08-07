@@ -192,10 +192,11 @@ The enforcement points:
 | `RequireTenantId()` throws instead of returning null | A missing tenant silently widening a query |
 | No tenant id in any response DTO | The client replaying or tampering with a tenant key |
 
-`IgnoreQueryFilters()` appears in exactly three files — `UserRepository`, `RefreshTokenRepository`
-and `DatabaseSeeder` — because sign-in, refresh and startup seeding all run *before* a tenant
-exists. Each re-applies the soft-delete predicate by hand. `grep -rn IgnoreQueryFilters src` is
-the audit.
+`IgnoreQueryFilters()` appears in exactly five files — `UserRepository`, `RefreshTokenRepository`
+and `DatabaseSeeder`, because sign-in, refresh and startup seeding all run *before* a tenant
+exists; plus `WhatsAppConnectionRepository` and `CampaignMessageRepository`, because a Meta webhook
+arrives with no principal and the phone number id is what resolves the tenant. Each re-applies the
+soft-delete predicate by hand. `grep -rn IgnoreQueryFilters src` is the audit.
 
 ---
 
@@ -377,6 +378,9 @@ locally and the platform secret store elsewhere.
 | `Database:ConnectionString` | Npgsql connection string |
 | `Authentication:Jwt:SigningKey` | HMAC-SHA256 key, minimum 32 bytes |
 | `WhatsApp:AppSecret` | Meta app secret — Embedded Signup and webhook signatures |
+| `WhatsApp:WebhookVerifyToken` | Echoed back on Meta's subscription handshake |
+| `Security:EncryptionKeys` | Base64 AES-256 keys (32 bytes each), keyed by id |
+| `Security:ActiveKeyId` | Which of those keys new secrets are encrypted with |
 | `Bootstrap:AdministratorPassword` | Initial platform administrator password |
 
 ```bash
@@ -385,6 +389,16 @@ dotnet user-secrets set "Authentication:Jwt:SigningKey" "<a-long-random-value>" 
 
 Options classes validate with data annotations and `ValidateOnStart()`, so a misconfigured host
 fails at startup rather than on the first request that needs the value.
+
+Stored WhatsApp access tokens are encrypted with AES-256-GCM under the active key, and the key id
+travels inside the ciphertext (`v1.{keyId}.{nonce}.{ciphertext}.{tag}`). That is what makes
+rotation possible without downtime: add a new key, point `ActiveKeyId` at it, and leave the retired
+key configured until every value has been re-wrapped — `ISecretProtector.RequiresRewrap` reports
+which ones still need it. Remove a key that some ciphertext still names and that value is gone.
+
+```bash
+dotnet user-secrets set "Security:EncryptionKeys:k1" "$(openssl rand -base64 32)" --project src/Marketing.API
+```
 
 > `appsettings.Development.json` contains values pointing at the local `docker-compose` stack. They
 > are intentionally worthless, protect nothing, and must not be reused anywhere shared.
@@ -403,6 +417,14 @@ Base path `/api/v1/`. Responses are wrapped in a success envelope; failures are
 | `POST` | `/api/v1/auth/logout` | Bearer | End one session |
 | `POST` | `/api/v1/auth/logout-everywhere` | Bearer | End every session |
 | `GET` | `/api/v1/auth/me` | Bearer | Signed-in user's profile |
+| `POST` | `/api/v1/whatsapp/connect` | `whatsapp.connect` | Complete Embedded Signup |
+| `POST` | `/api/v1/whatsapp/connect/manual` | SuperAdmin | Link with a supplied system-user token |
+| `POST` | `/api/v1/whatsapp/disconnect` | `whatsapp.disconnect` | Unlink and destroy the token |
+| `GET` | `/api/v1/whatsapp/connection` | `whatsapp.*` | Connection state |
+| `POST` | `/api/v1/whatsapp/connection/sync` | `whatsapp.connect` | Refresh from Meta |
+| `POST` | `/api/v1/templates/sync` | `whatsapp.templates.sync` | Pull templates from Meta |
+| `POST` | `/api/v1/campaigns/{id}/send` | `whatsapp.campaigns.send` | Hand a campaign to the dispatcher |
+| `GET`/`POST` | `/api/v1/whatsapp/webhook` | HMAC signature | Meta handshake and delivery receipts |
 | `GET` | `/health/live` | Anonymous | Liveness — no dependency checks |
 | `GET` | `/health/ready` | Anonymous | Readiness — PostgreSQL |
 | `GET` | `/health` | PlatformAdmin | Full dependency detail |
@@ -410,7 +432,8 @@ Base path `/api/v1/`. Responses are wrapped in a success envelope; failures are
 Errors carry a stable `errorCode`, a `correlationId`, and for server faults an `exceptionId` to
 quote to support. Stack traces appear in Development only.
 
-**Roles:** `PlatformAdmin` · `TenantOwner` · `TenantUser`
+**Roles:** `SuperAdmin` · `Admin` · `Employee`. Most endpoints authorise on a permission from
+`Permissions`, not on the role directly.
 
 ---
 
@@ -456,9 +479,9 @@ Domain modules, in the order they unblock each other:
 - [ ] **Tenants & Users** — onboarding, invitations, role management
 - [ ] **Contacts** — CSV import wizard, duplicate detection, bulk operations
 - [ ] **Groups & Tags** — segmentation
-- [ ] **WhatsApp connection** — Meta Embedded Signup, phone number and business profile sync
-- [ ] **Templates** — synchronisation and review status tracking
-- [ ] **Campaigns** — scheduling, dispatch, delivery and read receipts via webhook
+- [x] **WhatsApp connection** — Meta Embedded Signup, phone number and business profile sync
+- [x] **Templates** — synchronisation and review status tracking
+- [x] **Campaigns** — scheduling, dispatch, delivery and read receipts via webhook
 - [ ] **Reports** — Dapper-backed dashboards and analytics
 - [ ] **Admin portal** — tenant administration, audit log search, quotas, monitoring
 
@@ -471,9 +494,12 @@ Domain modules, in the order they unblock each other:
   is both free and patched. The pin is 16.2.0, which is patched but commercially licensed (free
   below a revenue threshold). With one mapping profile in the solution, dropping the dependency is
   a realistic alternative. See the comment in `Directory.Packages.props`.
-- **The Refit client has no per-tenant authorization handler.** Access tokens are per-tenant and
-  encrypted at rest, so the handler lands with the WhatsApp connection module rather than being
-  stubbed now.
+- **Campaign personalisation is not wired up.** The dispatcher refuses a template carrying `{{n}}`
+  placeholders rather than sending it with blanks, because the campaign draft has nowhere to put
+  variable bindings yet. Templates without placeholders send normally.
+- **Meta's messaging limit is read, never learned.** `MessagingLimit` is whatever the connection row
+  says; nothing yet updates it from Meta's account-tier webhook. A limit of zero is treated as
+  "unknown, let Meta enforce it" rather than "send nothing".
 - **Quartz uses the in-memory store.** Correct for a single instance; multi-instance deployment
   needs `AdoJobStore` with clustering enabled, or every replica fires every trigger.
 

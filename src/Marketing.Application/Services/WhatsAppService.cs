@@ -1,8 +1,11 @@
 using Marketing.Application.DTOs.WhatsApp;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Repositories.Interfaces;
+using Marketing.Common.Exceptions;
 using Marketing.Common.Helpers;
 using Marketing.DataAccess.Entities;
+using Marketing.Shared.Abstractions;
+using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Application.Services;
 
@@ -34,16 +37,25 @@ public sealed class WhatsAppService : IWhatsAppService
     private readonly IRepository<WhatsAppConnection> _connections;
     private readonly IRepository<MessageTemplate> _templates;
     private readonly IQueryExecutor _queries;
+    private readonly IWhatsAppGateway _gateway;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ITenantContext _tenantContext;
 
     /// <summary>Initialises a new instance.</summary>
     public WhatsAppService(
         IRepository<WhatsAppConnection> connections,
         IRepository<MessageTemplate> templates,
-        IQueryExecutor queries)
+        IQueryExecutor queries,
+        IWhatsAppGateway gateway,
+        IUnitOfWork unitOfWork,
+        ITenantContext tenantContext)
     {
         _connections = connections;
         _templates = templates;
         _queries = queries;
+        _gateway = gateway;
+        _unitOfWork = unitOfWork;
+        _tenantContext = tenantContext;
     }
 
     /// <inheritdoc />
@@ -70,13 +82,32 @@ public sealed class WhatsAppService : IWhatsAppService
     }
 
     /// <inheritdoc />
-    public Task<WhatsAppConnectionResponse> SyncConnectionAsync(CancellationToken cancellationToken = default)
+    public async Task<WhatsAppConnectionResponse> SyncConnectionAsync(CancellationToken cancellationToken = default)
     {
-        // NOTE: the Meta round trip is not wired up. It needs the per-tenant access token, which
-        // arrives with the WhatsApp connection module - see the note in Directory.Packages.props
-        // and CLAUDE.md. Returning stored state keeps the endpoint's shape honest in the meantime;
-        // it does not yet refresh anything.
-        return GetConnectionAsync(cancellationToken);
+        var connection = await _queries.FirstOrDefaultAsync(
+            _connections.Query(asNoTracking: false),
+            cancellationToken);
+
+        if (connection?.PhoneNumberId is not { Length: > 0 } phoneNumberId)
+        {
+            return WhatsAppConnectionResponse.Disconnected();
+        }
+
+        var number = await _gateway.GetPhoneNumberAsync(phoneNumberId, cancellationToken);
+
+        connection.DisplayPhoneNumber = number.DisplayPhoneNumber;
+        connection.VerifiedName = number.VerifiedName ?? connection.VerifiedName;
+        connection.QualityRating = Enum.TryParse<QualityRating>(number.QualityRating, true, out var rating)
+            ? rating
+            : connection.QualityRating;
+
+        // A successful round trip is itself the evidence the connection works, so the status is
+        // corrected here rather than left at whatever it was when it last failed.
+        connection.Status = ConnectionStatus.Connected;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return await GetConnectionAsync(cancellationToken);
     }
 
     /// <inheritdoc />
@@ -126,11 +157,59 @@ public sealed class WhatsAppService : IWhatsAppService
     }
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<MessageTemplateResponse>> SyncTemplatesAsync(
+    public async Task<IReadOnlyList<MessageTemplateResponse>> SyncTemplatesAsync(
         CancellationToken cancellationToken = default)
     {
-        // NOTE: as above - returns stored templates rather than refreshing from Meta, pending the
-        // per-tenant access token.
-        return GetTemplatesAsync(cancellationToken);
+        var connection = await _queries.FirstOrDefaultAsync(_connections.Query(), cancellationToken);
+
+        if (connection?.WabaId is not { Length: > 0 } wabaId)
+        {
+            throw new BusinessRuleException(
+                "whatsapp_not_connected",
+                "Connect a WhatsApp account before syncing templates.");
+        }
+
+        var remote = await _gateway.GetTemplatesAsync(wabaId, cancellationToken);
+        var tenantId = _tenantContext.RequireTenantId();
+
+        var existing = await _queries.ToListAsync(_templates.Query(asNoTracking: false), cancellationToken);
+
+        // Matched on name and language, which is what Meta treats as unique. Matching on Meta's id
+        // alone would duplicate every template created locally before its first sync.
+        foreach (var template in remote)
+        {
+            var local = existing.FirstOrDefault(entry =>
+                string.Equals(entry.Name, template.Name, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(entry.Language, template.Language, StringComparison.OrdinalIgnoreCase));
+
+            if (local is null)
+            {
+                local = new MessageTemplate
+                {
+                    Id = SequentialGuid.Create(),
+                    TenantId = tenantId,
+                    Name = template.Name,
+                    Language = template.Language,
+                    BodyText = string.Empty,
+                };
+
+                _templates.Add(local);
+            }
+
+            local.MetaTemplateId = template.Id;
+            local.Status = Enum.TryParse<TemplateStatus>(template.Status, true, out var status)
+                ? status
+                : TemplateStatus.Pending;
+            local.Category = Enum.TryParse<TemplateCategory>(template.Category, true, out var category)
+                ? category
+                : local.Category;
+        }
+
+        // Local templates Meta no longer knows about are left alone rather than deleted. A sync
+        // that silently removes a customer's work because of a transient paging problem is far
+        // worse than a stale row.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return await GetTemplatesAsync(cancellationToken);
     }
 }

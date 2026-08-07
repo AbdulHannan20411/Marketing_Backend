@@ -183,7 +183,16 @@ public sealed class CampaignConfiguration : BaseEntityConfiguration<Campaign>
         builder.Property(campaign => campaign.AudienceLabel).HasMaxLength(200);
         builder.Property(campaign => campaign.CreatedByName).HasMaxLength(150);
 
+        // uuid[], not a join table. The audience selection is read and written whole, never queried
+        // by element, so a child table would add a join to every read and buy nothing.
+        builder.Property(campaign => campaign.AudienceGroupIds)
+            .HasColumnType("uuid[]");
+
         builder.HasIndex(campaign => new { campaign.TenantId, campaign.Status, campaign.CreatedOn });
+
+        // The dispatcher's poll: campaigns due to start or due to resume, across every tenant.
+        // Status first because it is the selective column - most rows are drafts or completed.
+        builder.HasIndex(campaign => new { campaign.Status, campaign.ScheduledAt });
 
         builder.HasOne(campaign => campaign.MessageTemplate)
             .WithMany()
@@ -487,5 +496,43 @@ public sealed class UserTokenConfiguration : BaseEntityConfiguration<UserToken>
             .WithMany()
             .HasForeignKey(token => token.UserId)
             .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+/// <summary>Fluent configuration for <see cref="CampaignMessage"/>.</summary>
+public sealed class CampaignMessageConfiguration : BaseEntityConfiguration<CampaignMessage>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<CampaignMessage> builder)
+    {
+        builder.ToTable("campaign_messages");
+
+        builder.Property(message => message.PhoneNumber).IsRequired().HasMaxLength(32);
+        builder.Property(message => message.Status).IsRequired().HasMaxLength(16).HasConversion<string>();
+        builder.Property(message => message.MetaMessageId).HasMaxLength(128);
+        builder.Property(message => message.ErrorReason).HasMaxLength(500);
+
+        // One message per contact per campaign. This is the constraint that makes a re-run safe:
+        // a retried dispatch cannot create a second row and so cannot send twice.
+        builder.HasIndex(message => new { message.CampaignId, message.ContactId })
+            .IsUnique()
+            .HasFilter("is_deleted = false");
+
+        // The dispatcher claims the next batch with this index; without it every batch scans the
+        // whole campaign.
+        builder.HasIndex(message => new { message.CampaignId, message.Status });
+
+        // Webhook receipts arrive keyed by Meta's id and nothing else.
+        builder.HasIndex(message => message.MetaMessageId);
+
+        builder.HasOne(message => message.Campaign)
+            .WithMany()
+            .HasForeignKey(message => message.CampaignId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(message => message.Contact)
+            .WithMany()
+            .HasForeignKey(message => message.ContactId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

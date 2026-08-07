@@ -92,6 +92,9 @@ public class ApplicationDbContext : DbContext
     /// <summary>Campaigns.</summary>
     public DbSet<Campaign> Campaigns => Set<Campaign>();
 
+    /// <summary>Per-recipient campaign messages.</summary>
+    public DbSet<CampaignMessage> CampaignMessages => Set<CampaignMessage>();
+
     /// <summary>Delivery failures.</summary>
     public DbSet<DeliveryFailure> DeliveryFailures => Set<DeliveryFailure>();
 
