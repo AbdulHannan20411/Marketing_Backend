@@ -14,13 +14,13 @@ namespace Marketing.DataAccess.Entities;
 public sealed class AuditLog
 {
     /// <summary>Primary key, time-ordered so the table clusters chronologically.</summary>
-    public Guid Id { get; set; } = SequentialGuid.Create();
+    public long Id { get; set; }
 
     /// <summary>Tenant the change belongs to, or null for platform-level changes.</summary>
-    public Guid? TenantId { get; set; }
+    public long? TenantId { get; set; }
 
     /// <summary>User who made the change, or the system identity for background work.</summary>
-    public Guid UserId { get; set; }
+    public long UserId { get; set; }
 
     /// <summary>CLR name of the entity that changed.</summary>
     public required string EntityName { get; set; }

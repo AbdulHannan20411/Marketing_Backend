@@ -35,11 +35,11 @@ public class Repository<TEntity> : IRepository<TEntity>
         asNoTracking ? Set.AsNoTracking() : Set.AsQueryable();
 
     /// <inheritdoc />
-    public Task<TEntity?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+    public Task<TEntity?> GetByIdAsync(long id, CancellationToken cancellationToken = default) =>
         Set.AsNoTracking().FirstOrDefaultAsync(entity => entity.Id == id, cancellationToken);
 
     /// <inheritdoc />
-    public Task<TEntity?> GetForUpdateAsync(Guid id, CancellationToken cancellationToken = default) =>
+    public Task<TEntity?> GetForUpdateAsync(long id, CancellationToken cancellationToken = default) =>
         Set.FirstOrDefaultAsync(entity => entity.Id == id, cancellationToken);
 
     /// <inheritdoc />

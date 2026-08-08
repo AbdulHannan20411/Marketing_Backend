@@ -91,7 +91,6 @@ public sealed class CampaignWriteService : ICampaignWriteService
 
         var campaign = new Campaign
         {
-            Id = SequentialGuid.Create(),
             TenantId = tenantId,
             Name = draft.Name.Trim(),
             MessageTemplateId = template.Id,
@@ -323,14 +322,14 @@ public sealed class CampaignWriteService : ICampaignWriteService
     }
 
     /// <summary>Turns the client's prefixed group identifiers into keys, dropping anything unparseable.</summary>
-    private static List<Guid> ParseGroupIds(IReadOnlyList<string>? groupIds)
+    private static List<long> ParseGroupIds(IReadOnlyList<string>? groupIds)
     {
         if (groupIds is not { Count: > 0 })
         {
             return [];
         }
 
-        var parsed = new List<Guid>(groupIds.Count);
+        var parsed = new List<long>(groupIds.Count);
 
         foreach (var groupId in groupIds)
         {

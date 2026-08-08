@@ -140,7 +140,6 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         {
             connection = new WhatsAppConnection
             {
-                Id = SequentialGuid.Create(),
                 TenantId = tenantId,
             };
 
@@ -211,17 +210,17 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         EventId = 2601,
         Level = LogLevel.Information,
         Message = "Tenant {TenantId} connected WhatsApp number {PhoneNumberId}. Manual: {IsManual}.")]
-    private partial void LogConnected(Guid tenantId, string phoneNumberId, bool isManual);
+    private partial void LogConnected(long tenantId, string phoneNumberId, bool isManual);
 
     [LoggerMessage(
         EventId = 2602,
         Level = LogLevel.Warning,
         Message = "Could not verify WhatsApp number {PhoneNumberId} for tenant {TenantId}.")]
-    private partial void LogVerificationFailed(Exception exception, Guid tenantId, string phoneNumberId);
+    private partial void LogVerificationFailed(Exception exception, long tenantId, string phoneNumberId);
 
     [LoggerMessage(
         EventId = 2603,
         Level = LogLevel.Warning,
         Message = "Tenant {TenantId} disconnected WhatsApp; the stored token was destroyed.")]
-    private partial void LogDisconnected(Guid tenantId);
+    private partial void LogDisconnected(long tenantId);
 }

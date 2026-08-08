@@ -13,7 +13,7 @@ public sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.ToTable("audit_logs");
 
         builder.HasKey(log => log.Id);
-        builder.Property(log => log.Id).ValueGeneratedNever();
+        builder.Property(log => log.Id).UseIdentityAlwaysColumn();
 
         builder.Property(log => log.EntityName).IsRequired().HasMaxLength(128);
         builder.Property(log => log.EntityId).IsRequired().HasMaxLength(64);

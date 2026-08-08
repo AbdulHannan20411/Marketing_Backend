@@ -18,7 +18,7 @@ namespace Marketing.DataAccess.Entities;
 public sealed class UserToken : BaseEntity, ITenantScoped
 {
     /// <summary>User the token belongs to.</summary>
-    public Guid UserId { get; set; }
+    public long UserId { get; set; }
 
     /// <summary>What the token authorises.</summary>
     public UserTokenPurpose Purpose { get; set; }

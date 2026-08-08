@@ -98,7 +98,6 @@ public sealed partial class DatabaseSeeder
 
             _context.Roles.Add(new Role
             {
-                Id = SequentialGuid.Create(),
                 Name = name,
                 NormalizedName = normalized,
                 Description = descriptions[name],
@@ -149,7 +148,6 @@ public sealed partial class DatabaseSeeder
 
         var user = new User
         {
-            Id = SequentialGuid.Create(),
             TenantId = null, // Platform staff are deliberately outside every tenant.
             Email = email.Trim(),
             NormalizedEmail = normalizedEmail,
@@ -161,10 +159,13 @@ public sealed partial class DatabaseSeeder
         };
 
         _context.Users.Add(user);
+
+        // The user's key is assigned by the database, so it is still zero here. Relating the two
+        // through the navigation property lets Entity Framework order the inserts and fill the
+        // foreign key in afterwards; assigning UserId directly would persist a zero.
         _context.UserRoles.Add(new UserRole
         {
-            Id = SequentialGuid.Create(),
-            UserId = user.Id,
+            User = user,
             RoleId = superAdminRole.Id,
         });
 

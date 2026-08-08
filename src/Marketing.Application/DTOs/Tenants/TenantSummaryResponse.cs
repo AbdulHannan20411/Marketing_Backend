@@ -22,7 +22,7 @@ namespace Marketing.Application.DTOs.Tenants;
 /// <param name="CreatedOn">Creation instant.</param>
 /// <param name="ActivatedOn">Instant onboarding completed.</param>
 public sealed record TenantSummaryResponse(
-    Guid Id,
+    long Id,
     string Name,
     string Slug,
     TenantStatus Status,

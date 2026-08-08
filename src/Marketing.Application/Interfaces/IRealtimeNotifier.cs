@@ -22,7 +22,7 @@ public interface IRealtimeNotifier
     /// <param name="notification">The notification.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task NotifyUserAsync(
-        Guid userId,
+        long userId,
         AppNotification notification,
         CancellationToken cancellationToken = default);
 
@@ -31,7 +31,7 @@ public interface IRealtimeNotifier
     /// <param name="notification">The notification.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task NotifyTenantAsync(
-        Guid tenantId,
+        long tenantId,
         AppNotification notification,
         CancellationToken cancellationToken = default);
 
@@ -46,7 +46,7 @@ public interface IRealtimeNotifier
     /// <param name="campaign">Current campaign state.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task PublishCampaignProgressAsync(
-        Guid tenantId,
+        long tenantId,
         CampaignResponse campaign,
         CancellationToken cancellationToken = default);
 }

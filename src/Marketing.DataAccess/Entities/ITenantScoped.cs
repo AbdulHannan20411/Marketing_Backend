@@ -19,7 +19,7 @@ namespace Marketing.DataAccess.Entities;
 public interface ITenantScoped
 {
     /// <summary>Owning tenant, or null for a platform-level row.</summary>
-    public Guid? TenantId { get; set; }
+    public long? TenantId { get; set; }
 }
 
 /// <summary>

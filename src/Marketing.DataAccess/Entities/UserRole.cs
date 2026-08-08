@@ -11,10 +11,10 @@ namespace Marketing.DataAccess.Entities;
 public sealed class UserRole : BaseEntity, ITenantScoped
 {
     /// <summary>User receiving the role.</summary>
-    public Guid UserId { get; set; }
+    public long UserId { get; set; }
 
     /// <summary>Role being granted.</summary>
-    public Guid RoleId { get; set; }
+    public long RoleId { get; set; }
 
     /// <summary>User navigation.</summary>
     public User User { get; set; } = null!;

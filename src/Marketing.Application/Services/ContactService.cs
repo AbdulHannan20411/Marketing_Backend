@@ -3,10 +3,11 @@ using Marketing.Application.DTOs.Contacts;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Extensions;
 using Marketing.Business.Repositories.Interfaces;
+using Marketing.Common.Exceptions;
 using Marketing.Common.Helpers;
+using Marketing.Common.Requests;
 using Marketing.Common.Responses;
 using Marketing.DataAccess.Entities;
-using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Application.Services;
 
@@ -29,6 +30,9 @@ public sealed class ContactService : IContactService
             ["createdAt"] = contact => contact.CreatedOn,
             ["lastMessagedAt"] = contact => contact.LastMessagedAt,
         };
+
+    /// <summary>Duplicate groups examined per request, bounding a pathological data set.</summary>
+    private const int MaxDuplicateScan = 5000;
 
     private readonly IRepository<Contact> _contacts;
     private readonly IRepository<ContactGroup> _groups;
@@ -55,47 +59,113 @@ public sealed class ContactService : IContactService
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        var source = _contacts.Query();
-
-        source = source.WhereMatchesSearch(query.Search);
-        source = ApplyStatusFilter(source, query.Status);
-        source = ApplyGroupFilter(source, query.GroupId);
+        var source = ContactProjection.ApplyFilters(_contacts.Query(), query);
 
         // Projected in the database, so only the columns the list needs cross the wire and no
         // entity can escape this layer. Identifiers stay as keys here and are formatted after
         // materialisation, because PublicId is C# the provider cannot translate.
-        var projected = source
-            .ApplySort(query, SortableColumns, contact => contact.CreatedOn)
-            .Select(contact => new ContactRow(
-                contact.Id,
-                contact.FullName,
-                contact.PhoneNumber,
-                contact.Email,
-                contact.Country,
-                contact.Status,
-                contact.TagAssignments.Where(assignment => !assignment.IsDeleted)
-                    .Select(assignment => assignment.ContactTagId).ToList(),
-                contact.GroupMemberships.Where(membership => !membership.IsDeleted)
-                    .Select(membership => membership.ContactGroupId).ToList(),
-                contact.OptedInAt,
-                contact.LastMessagedAt,
-                contact.CreatedOn));
+        var projected = ContactProjection.Project(
+            source.ApplySort(query, SortableColumns, contact => contact.CreatedOn));
 
-        var page = await _queries.ToPagedAsync(projected, query.PageNumber, query.PageSize, cancellationToken);
+        var page = await _queries.ToPagedAsync(projected, query.Page, query.PageSize, cancellationToken);
 
-        return page.Map(row => new ContactResponse(
-            PublicId.From(PublicId.Contact, row.Id),
-            row.FullName,
-            Initials.From(row.FullName),
-            row.PhoneNumber,
-            row.Email,
-            row.Country,
-            row.Status,
-            [.. row.TagIds.Select(id => PublicId.From(PublicId.Tag, id))],
-            [.. row.GroupIds.Select(id => PublicId.From(PublicId.Group, id))],
-            row.OptedInAt,
-            row.LastMessagedAt,
-            row.CreatedOn));
+        return page.Map(ContactProjection.ToResponse);
+    }
+
+    /// <inheritdoc />
+    public async Task<ContactResponse> GetContactAsync(
+        string contactId,
+        CancellationToken cancellationToken = default)
+    {
+        var id = PublicId.Parse(PublicId.Contact, contactId, "contact");
+
+        var row = await _queries.FirstOrDefaultAsync(
+            ContactProjection.Project(_contacts.Query().Where(contact => contact.Id == id)),
+            cancellationToken);
+
+        // The tenant filter has already excluded another tenant's row, so "not found" and "not
+        // yours" arrive here identically - which is the point. Distinguishing them would confirm
+        // that an identifier exists somewhere else on the platform.
+        return row is null
+            ? throw new NotFoundException("Contact", contactId)
+            : ContactProjection.ToResponse(row);
+    }
+
+    /// <inheritdoc />
+    public async Task<PagedResult<ContactResponse>> GetGroupMembersAsync(
+        string groupId,
+        PageRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var id = PublicId.Parse(PublicId.Group, groupId, "group");
+
+        await EnsureGroupExistsAsync(id, groupId, cancellationToken);
+
+        var source = _contacts.Query()
+            .Where(contact => contact.GroupMemberships.Any(membership =>
+                !membership.IsDeleted && membership.ContactGroupId == id))
+            .WhereMatchesSearch(request.Search);
+
+        return await PageAsync(source, request, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PagedResult<ContactResponse>> GetTagMembersAsync(
+        string tagId,
+        PageRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var id = PublicId.Parse(PublicId.Tag, tagId, "tag");
+
+        if (await _queries.CountAsync(_tags.Query().Where(tag => tag.Id == id), cancellationToken) == 0)
+        {
+            throw new NotFoundException("Tag", tagId);
+        }
+
+        var source = _contacts.Query()
+            .Where(contact => contact.TagAssignments.Any(assignment =>
+                !assignment.IsDeleted && assignment.ContactTagId == id))
+            .WhereMatchesSearch(request.Search);
+
+        return await PageAsync(source, request, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PagedResult<DuplicateGroupResponse>> GetDuplicatesAsync(
+        DuplicateQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        // Grouped in the database and materialised as keys only, so a tenant with a large contact
+        // book does not pull every row into memory to find the handful that collide.
+        var collisions = await CollidingKeysAsync(query.Strategy, cancellationToken);
+
+        var total = collisions.Count;
+        var pageKeys = collisions
+            .Skip((query.Page - 1) * query.PageSize)
+            .Take(query.PageSize)
+            .ToList();
+
+        if (pageKeys.Count == 0)
+        {
+            return PagedResults.Empty<DuplicateGroupResponse>(query.Page, query.PageSize);
+        }
+
+        var members = await LoadDuplicateMembersAsync(query.Strategy, pageKeys, cancellationToken);
+
+        var items = pageKeys
+            .Select(key => new DuplicateGroupResponse(
+                key,
+                query.Strategy,
+                [.. members.Where(entry => entry.Key == key).Select(entry => entry.Contact)]))
+            .ToList();
+
+        return new PagedResult<DuplicateGroupResponse>(items, total, query.Page, query.PageSize);
     }
 
     /// <inheritdoc />
@@ -152,51 +222,83 @@ public sealed class ContactService : IContactService
             row.CreatedOn))];
     }
 
-    /// <summary>Applies the status filter, treating <c>all</c> and anything unrecognised as no filter.</summary>
-    private static IQueryable<Contact> ApplyStatusFilter(IQueryable<Contact> source, string? status)
+    private async Task<PagedResult<ContactResponse>> PageAsync(
+        IQueryable<Contact> source,
+        PageRequest request,
+        CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(status)
-            || string.Equals(status, ContactQuery.All, StringComparison.OrdinalIgnoreCase)
-            || !Enum.TryParse<ContactStatus>(status, ignoreCase: true, out var parsed))
-        {
-            return source;
-        }
+        var projected = ContactProjection.Project(
+            source.ApplySort(request, SortableColumns, contact => contact.CreatedOn));
 
-        return source.Where(contact => contact.Status == parsed);
+        var page = await _queries.ToPagedAsync(projected, request.Page, request.PageSize, cancellationToken);
+
+        return page.Map(ContactProjection.ToResponse);
     }
 
-    /// <summary>Applies the group filter, treating <c>all</c> as no filter.</summary>
-    private static IQueryable<Contact> ApplyGroupFilter(IQueryable<Contact> source, string? groupId)
+    private async Task EnsureGroupExistsAsync(long id, string groupId, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(groupId)
-            || string.Equals(groupId, ContactQuery.All, StringComparison.OrdinalIgnoreCase))
+        if (await _queries.CountAsync(_groups.Query().Where(group => group.Id == id), cancellationToken) == 0)
         {
-            return source;
+            throw new NotFoundException("Group", groupId);
         }
-
-        // An unparseable group cannot match anything, so return an empty set rather than silently
-        // ignoring the filter and showing the caller every contact they have.
-        if (!PublicId.TryParse(PublicId.Group, groupId, out var parsed))
-        {
-            return source.Where(_ => false);
-        }
-
-        return source.Where(contact =>
-            contact.GroupMemberships.Any(membership =>
-                !membership.IsDeleted && membership.ContactGroupId == parsed));
     }
 
-    /// <summary>Database-shaped projection, before identifiers are formatted for the wire.</summary>
-    private sealed record ContactRow(
-        Guid Id,
-        string FullName,
-        string PhoneNumber,
-        string? Email,
-        string Country,
-        ContactStatus Status,
-        List<Guid> TagIds,
-        List<Guid> GroupIds,
-        DateTimeOffset? OptedInAt,
-        DateTimeOffset? LastMessagedAt,
-        DateTimeOffset CreatedOn);
+    /// <summary>Returns the values shared by two or more contacts, in a stable order.</summary>
+    private async Task<List<string>> CollidingKeysAsync(
+        DuplicateStrategy strategy,
+        CancellationToken cancellationToken)
+    {
+        var source = _contacts.Query();
+
+        var grouped = strategy switch
+        {
+            DuplicateStrategy.Email => source
+                .Where(contact => contact.Email != null && contact.Email != string.Empty)
+                .GroupBy(contact => contact.Email!),
+
+            DuplicateStrategy.Name => source.GroupBy(contact => contact.FullName),
+
+            // Phone is the default and the only strategy that can be trusted absolutely, because
+            // the normalised form is what uniqueness is enforced on.
+            _ => source.GroupBy(contact => contact.NormalizedPhoneNumber),
+        };
+
+        return [.. await _queries.ToListAsync(
+            grouped
+                .Where(group => group.Count() > 1)
+                .OrderBy(group => group.Key)
+                .Select(group => group.Key)
+                .Take(MaxDuplicateScan),
+            cancellationToken)];
+    }
+
+    /// <summary>Loads the contacts behind one page of duplicate keys.</summary>
+    private async Task<List<(string Key, ContactResponse Contact)>> LoadDuplicateMembersAsync(
+        DuplicateStrategy strategy,
+        List<string> keys,
+        CancellationToken cancellationToken)
+    {
+        var source = strategy switch
+        {
+            DuplicateStrategy.Email => _contacts.Query()
+                .Where(contact => contact.Email != null && keys.Contains(contact.Email)),
+            DuplicateStrategy.Name => _contacts.Query().Where(contact => keys.Contains(contact.FullName)),
+            _ => _contacts.Query().Where(contact => keys.Contains(contact.NormalizedPhoneNumber)),
+        };
+
+        var rows = await _queries.ToListAsync(
+            ContactProjection.Project(source.OrderBy(contact => contact.CreatedOn)),
+            cancellationToken);
+
+        // Regrouped here rather than in the query. The key is already on the row, and asking the
+        // provider to emit it a second time as a computed column buys nothing.
+        return [.. rows.Select(row => (KeyOf(strategy, row), ContactProjection.ToResponse(row)))];
+    }
+
+    private static string KeyOf(DuplicateStrategy strategy, ContactRow row) => strategy switch
+    {
+        DuplicateStrategy.Email => row.Email ?? string.Empty,
+        DuplicateStrategy.Name => row.FullName,
+        _ => row.NormalizedPhone,
+    };
 }

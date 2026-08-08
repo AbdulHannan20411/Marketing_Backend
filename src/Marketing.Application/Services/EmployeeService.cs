@@ -123,7 +123,6 @@ public sealed class EmployeeService : IEmployeeService
 
         var employee = new User
         {
-            Id = SequentialGuid.Create(),
             TenantId = tenantId,
             Email = request.Email.Trim(),
             NormalizedEmail = normalizedEmail,
@@ -146,9 +145,11 @@ public sealed class EmployeeService : IEmployeeService
             {
                 _overrides.Add(new UserPermissionOverride
                 {
-                    Id = SequentialGuid.Create(),
                     TenantId = tenantId,
-                    UserId = employee.Id,
+
+                    // By navigation: the employee is created in this same unit of work, so their
+                    // key does not exist until the insert.
+                    User = employee,
                     Permission = permission,
                     IsGranted = isGranted,
                 });
@@ -194,7 +195,6 @@ public sealed class EmployeeService : IEmployeeService
         {
             _overrides.Add(new UserPermissionOverride
             {
-                Id = SequentialGuid.Create(),
                 TenantId = employee.TenantId,
                 UserId = employee.Id,
                 Permission = permission,
@@ -286,7 +286,6 @@ public sealed class EmployeeService : IEmployeeService
 
         var set = new PermissionSet
         {
-            Id = SequentialGuid.Create(),
             TenantId = _tenantContext.RequireTenantId(),
             Name = draft.Name.Trim(),
             Description = draft.Description,
@@ -386,7 +385,7 @@ public sealed class EmployeeService : IEmployeeService
                ?? throw new NotFoundException("Permission set", permissionSetId);
     }
 
-    private async Task<EmployeeResponse> LoadOneAsync(Guid id, CancellationToken cancellationToken)
+    private async Task<EmployeeResponse> LoadOneAsync(long id, CancellationToken cancellationToken)
     {
         var employees = await GetEmployeesAsync(cancellationToken);
         var publicId = PublicId.From(PublicId.Employee, id);
@@ -422,7 +421,7 @@ public sealed class EmployeeService : IEmployeeService
     private sealed record OverrideRow(string Permission, bool IsGranted);
 
     private sealed record EmployeeRow(
-        Guid Id,
+        long Id,
         string DisplayName,
         string Email,
         string JobTitle,

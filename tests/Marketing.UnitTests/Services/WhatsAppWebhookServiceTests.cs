@@ -17,7 +17,7 @@ public sealed class WhatsAppWebhookServiceTests
     private const string PhoneNumberId = "123456789012345";
     private const string MetaMessageId = "wamid.HBgLMTIzNDU2Nzg5MAA=";
 
-    private static readonly Guid TenantId = Guid.CreateVersion7();
+    private const long TenantId = 7001;
     private static readonly DateTimeOffset Now = new(2026, 8, 8, 12, 0, 0, TimeSpan.Zero);
 
     private readonly ICampaignMessageRepository _messages = Substitute.For<ICampaignMessageRepository>();
@@ -33,7 +33,7 @@ public sealed class WhatsAppWebhookServiceTests
 
     private readonly Campaign _campaign = new()
     {
-        Id = Guid.CreateVersion7(),
+        Id = 8001,
         TenantId = TenantId,
         Name = "Loyalty reminder",
         TemplateName = "loyalty_reminder",
@@ -44,7 +44,7 @@ public sealed class WhatsAppWebhookServiceTests
 
     private readonly WhatsAppConnection _connection = new()
     {
-        Id = Guid.CreateVersion7(),
+        Id = 9001,
         TenantId = TenantId,
         PhoneNumberId = PhoneNumberId,
         Status = ConnectionStatus.Connected,
@@ -82,10 +82,10 @@ public sealed class WhatsAppWebhookServiceTests
     {
         var message = new CampaignMessage
         {
-            Id = Guid.CreateVersion7(),
+            Id = 8101,
             TenantId = TenantId,
             CampaignId = _campaign.Id,
-            ContactId = Guid.CreateVersion7(),
+            ContactId = 8201,
             PhoneNumber = "+441234567890",
             MetaMessageId = MetaMessageId,
             Status = status,
@@ -256,6 +256,6 @@ public sealed class WhatsAppWebhookServiceTests
     {
         // Not webhook behaviour, but the same contract: nothing Meta sends becomes a client-visible
         // identifier without going through the prefix helper.
-        PublicId.From(PublicId.Campaign, _campaign.Id).Should().StartWith("cmp_");
+        PublicId.From(PublicId.Campaign, _campaign.Id).Should().Be("cmp_8001");
     }
 }

@@ -35,7 +35,7 @@ public sealed class UserRepository : Repository<User>, IUserRepository
             .FirstOrDefaultAsync(cancellationToken);
 
     /// <inheritdoc />
-    public Task<User?> FindWithRolesAsync(Guid userId, CancellationToken cancellationToken = default) =>
+    public Task<User?> FindWithRolesAsync(long userId, CancellationToken cancellationToken = default) =>
         Set
             .IgnoreQueryFilters()
             .Where(user => !user.IsDeleted && user.Id == userId)
@@ -51,7 +51,7 @@ public sealed class UserRepository : Repository<User>, IUserRepository
     /// <inheritdoc />
     public Task<bool> IsEmailTakenAsync(
         string normalizedEmail,
-        Guid? excludingUserId = null,
+        long? excludingUserId = null,
         CancellationToken cancellationToken = default) =>
         Set
             // Addresses are unique platform-wide, so uniqueness has to be checked platform-wide.
@@ -65,7 +65,7 @@ public sealed class UserRepository : Repository<User>, IUserRepository
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<string>> GetRoleNamesAsync(
-        Guid userId,
+        long userId,
         CancellationToken cancellationToken = default) =>
         await Context.UserRoles
             .AsNoTracking()

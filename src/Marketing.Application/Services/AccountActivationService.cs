@@ -152,9 +152,12 @@ public sealed class AccountActivationService : IAccountActivationService
 
         _tokens.Add(new UserToken
         {
-            Id = SequentialGuid.Create(),
             TenantId = user.TenantId,
-            UserId = user.Id,
+
+            // By navigation, because this is also called for a user created in the same unit of
+            // work - a new admin account being invited - whose key does not exist yet. For a user
+            // already in the database it resolves to the same thing.
+            User = user,
             Purpose = purpose,
             TokenHash = material.Hash,
             ExpiresOn = material.ExpiresAtUtc,

@@ -83,6 +83,18 @@ public sealed class AdminAccountService : IAdminAccountService
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // Wrapped explicitly because creating an admin now takes two saves - the tenant has to be
+        // inserted before its key can be written onto the role assignment. Without the transaction
+        // a failure between them would leave an organisation nobody can sign in to.
+        return await _unitOfWork.ExecuteInTransactionAsync(
+            token => CreateCoreAsync(request, token),
+            cancellationToken);
+    }
+
+    private async Task<AdminAccount> CreateCoreAsync(
+        CreateAdminAccountRequest request,
+        CancellationToken cancellationToken)
+    {
         var normalizedEmail = request.Email.ToNormalisedEmail();
 
         if (await _users.IsEmailTakenAsync(normalizedEmail, cancellationToken: cancellationToken))
@@ -105,7 +117,6 @@ public sealed class AdminAccountService : IAdminAccountService
         // nothing, and a tenant with no Admin cannot be reached - neither half is useful alone.
         var tenant = new Tenant
         {
-            Id = SequentialGuid.Create(),
             Name = request.Organisation.Trim(),
             Slug = slug,
             ContactEmail = request.Email.Trim(),
@@ -122,9 +133,14 @@ public sealed class AdminAccountService : IAdminAccountService
             cancellationToken)
             ?? throw new NotFoundException("The Admin role has not been seeded.");
 
+        // The tenant is inserted first so its key exists for the rows below. UserRole carries a
+        // tenant id with no navigation to relate through, so unlike the other cases in this file
+        // there is no way to defer it - and a role assignment landing with a null tenant would be
+        // indistinguishable from a platform administrator's.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
         var admin = new User
         {
-            Id = SequentialGuid.Create(),
             TenantId = tenant.Id,
             Email = request.Email.Trim(),
             NormalizedEmail = normalizedEmail,
@@ -143,9 +159,10 @@ public sealed class AdminAccountService : IAdminAccountService
 
         _userRoles.Add(new UserRole
         {
-            Id = SequentialGuid.Create(),
             TenantId = tenant.Id,
-            UserId = admin.Id,
+
+            // By navigation: the admin has not been inserted yet, so their key is still zero.
+            User = admin,
             RoleId = adminRole.Id,
         });
 
@@ -271,7 +288,7 @@ public sealed class AdminAccountService : IAdminAccountService
     }
 
     /// <summary>Reads the account back through the same projection the platform list uses.</summary>
-    private async Task<AdminAccount> LoadOneAsync(Guid adminId, CancellationToken cancellationToken)
+    private async Task<AdminAccount> LoadOneAsync(long adminId, CancellationToken cancellationToken)
     {
         var accounts = await _platform.GetAdminAccountsAsync(cancellationToken);
         var publicId = PublicId.From(PublicId.AdminAccount, adminId);

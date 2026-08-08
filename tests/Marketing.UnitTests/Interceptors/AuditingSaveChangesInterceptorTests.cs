@@ -11,8 +11,9 @@ namespace Marketing.UnitTests.Interceptors;
 public sealed class AuditingSaveChangesInterceptorTests : IDisposable
 {
     private static readonly DateTimeOffset Now = new(2026, 3, 14, 9, 30, 0, TimeSpan.Zero);
-    private static readonly Guid ActingUserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
-    private static readonly Guid TenantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly long ActingUserId = 1001;
+    private static readonly long TenantId = 2001;
+    private static readonly long ExistingUserId = 5001;
 
     private readonly StubTenantContext _tenantContext = new() { TenantId = TenantId };
     private readonly StubCurrentUser _currentUser = new() { UserId = ActingUserId };
@@ -46,7 +47,7 @@ public sealed class AuditingSaveChangesInterceptorTests : IDisposable
     [Fact]
     public void Explicitly_assigned_tenant_is_not_overwritten_by_the_ambient_tenant()
     {
-        var otherTenant = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var otherTenant = 3001;
         var user = NewUser();
         user.TenantId = otherTenant;
 
@@ -82,7 +83,7 @@ public sealed class AuditingSaveChangesInterceptorTests : IDisposable
     {
         var user = AttachExistingUser();
 
-        user.TenantId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        user.TenantId = 4001;
         _context.Entry(user).State = EntityState.Modified;
 
         var act = Intercept;
@@ -161,6 +162,11 @@ public sealed class AuditingSaveChangesInterceptorTests : IDisposable
     private User AttachExistingUser()
     {
         var user = NewUser();
+
+        // A real key, so Attach treats this as a row that already exists. Keys are database
+        // identities now, and a zero would read as "not yet inserted" - EF would give it a
+        // temporary value and refuse to mark it Modified.
+        user.Id = ExistingUserId;
         user.TenantId = TenantId;
         user.CreatedBy = ActingUserId;
         user.CreatedOn = Now.AddDays(-30);

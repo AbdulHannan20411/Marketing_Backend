@@ -52,7 +52,6 @@ public sealed class PlanManagementService : IPlanManagementService
 
         var plan = new SubscriptionPlan
         {
-            Id = SequentialGuid.Create(),
             Name = draft.Name,
             Tagline = draft.Tagline,
             MonthlyPrice = draft.MonthlyPrice,
@@ -136,7 +135,6 @@ public sealed class PlanManagementService : IPlanManagementService
 
         var copy = new SubscriptionPlan
         {
-            Id = SequentialGuid.Create(),
             Name = $"{source.Name} (copy)",
             Tagline = source.Tagline,
             MonthlyPrice = source.MonthlyPrice,

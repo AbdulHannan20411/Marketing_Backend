@@ -122,7 +122,6 @@ public sealed class AuditTrailInterceptor : SaveChangesInterceptor
 
             logs.Add(new AuditLog
             {
-                Id = SequentialGuid.Create(utcNow),
                 TenantId = entry.Entity.TenantId,
                 UserId = userId,
                 EntityName = entry.Entity.GetType().Name,

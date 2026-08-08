@@ -37,10 +37,10 @@ public sealed class RealtimeHub : Hub
     }
 
     /// <summary>Group name carrying everything addressed to one tenant.</summary>
-    public static string TenantGroup(Guid tenantId) => $"tenant:{tenantId:N}";
+    public static string TenantGroup(long tenantId) => $"tenant:{tenantId:N}";
 
     /// <summary>Group name carrying everything addressed to one user.</summary>
-    public static string UserGroup(Guid userId) => $"user:{userId:N}";
+    public static string UserGroup(long userId) => $"user:{userId:N}";
 
     /// <inheritdoc />
     public override async Task OnConnectedAsync()

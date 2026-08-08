@@ -96,7 +96,7 @@ public sealed class SubscriptionPlan : BaseEntity
 public sealed class TenantSubscription : BaseEntity, IRequiresTenant
 {
     /// <summary>Plan subscribed to.</summary>
-    public Guid SubscriptionPlanId { get; set; }
+    public long SubscriptionPlanId { get; set; }
 
     /// <summary>Subscription state.</summary>
     public SubscriptionStatus Status { get; set; } = SubscriptionStatus.Trial;
@@ -179,7 +179,7 @@ public sealed class Invoice : BaseEntity, IRequiresTenant
 public sealed class Payment : BaseEntity, IRequiresTenant
 {
     /// <summary>Invoice paid.</summary>
-    public Guid? InvoiceId { get; set; }
+    public long? InvoiceId { get; set; }
 
     /// <summary>Invoice number, denormalised for the payments list.</summary>
     public string InvoiceNumber { get; set; } = string.Empty;

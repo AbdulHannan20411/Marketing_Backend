@@ -11,7 +11,7 @@ namespace Marketing.Shared.Abstractions;
 public interface ITenantContext
 {
     /// <summary>Current tenant, or <see langword="null"/> for anonymous and platform-level work.</summary>
-    public Guid? TenantId { get; }
+    public long? TenantId { get; }
 
     /// <summary>Slug of the current tenant, carried for logging only.</summary>
     public string? TenantSlug { get; }
@@ -31,7 +31,7 @@ public interface ITenantContext
     /// it converts a silent cross-tenant query into a loud failure.
     /// </summary>
     /// <exception cref="Common.Exceptions.TenantResolutionException">No tenant is resolved.</exception>
-    public Guid RequireTenantId();
+    public long RequireTenantId();
 
     /// <summary>
     /// Runs work under an explicit tenant, restoring the previous ambient value on dispose.
@@ -43,5 +43,5 @@ public interface ITenantContext
     /// <param name="tenantId">Tenant to enter.</param>
     /// <param name="tenantSlug">Optional slug for log context.</param>
     /// <returns>A scope that restores the previous tenant when disposed.</returns>
-    public IDisposable BeginScope(Guid tenantId, string? tenantSlug = null);
+    public IDisposable BeginScope(long tenantId, string? tenantSlug = null);
 }

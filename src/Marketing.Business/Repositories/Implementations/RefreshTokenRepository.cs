@@ -33,7 +33,7 @@ public sealed class RefreshTokenRepository : Repository<RefreshToken>, IRefreshT
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<RefreshToken>> GetActiveSessionsAsync(
-        Guid userId,
+        long userId,
         DateTimeOffset utcNow,
         CancellationToken cancellationToken = default) =>
         await Set
@@ -49,7 +49,7 @@ public sealed class RefreshTokenRepository : Repository<RefreshToken>, IRefreshT
 
     /// <inheritdoc />
     public Task<int> RevokeAllForUserAsync(
-        Guid userId,
+        long userId,
         string reason,
         DateTimeOffset utcNow,
         CancellationToken cancellationToken = default) =>

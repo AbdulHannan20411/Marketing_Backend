@@ -21,7 +21,7 @@ public sealed class FixedDateTimeProvider : IDateTimeProvider
 /// <summary>Tenant context with directly settable state.</summary>
 public sealed class StubTenantContext : ITenantContext
 {
-    public Guid? TenantId { get; set; }
+    public long? TenantId { get; set; }
 
     public string? TenantSlug { get; set; }
 
@@ -29,10 +29,10 @@ public sealed class StubTenantContext : ITenantContext
 
     public bool CanAccessAllTenants { get; set; }
 
-    public Guid RequireTenantId() =>
+    public long RequireTenantId() =>
         TenantId ?? throw new Marketing.Common.Exceptions.TenantResolutionException();
 
-    public IDisposable BeginScope(Guid tenantId, string? tenantSlug = null)
+    public IDisposable BeginScope(long tenantId, string? tenantSlug = null)
     {
         var previous = TenantId;
         TenantId = tenantId;
@@ -50,7 +50,7 @@ public sealed class StubTenantContext : ITenantContext
 /// <summary>Principal with directly settable state.</summary>
 public sealed class StubCurrentUser : ICurrentUser
 {
-    public Guid? UserId { get; set; }
+    public long? UserId { get; set; }
 
     public Guid? SessionId { get; set; }
 
@@ -66,7 +66,7 @@ public sealed class StubCurrentUser : ICurrentUser
 
     public bool IsSuperAdmin => IsInRole(RoleCatalog.SuperAdmin);
 
-    public Guid AuditUserId => UserId ?? AppConstants.Platform.SystemUserId;
+    public long AuditUserId => UserId ?? AppConstants.Platform.SystemUserId;
 
     public bool IsInRole(string role) => Roles.Contains(role, StringComparer.Ordinal);
 

@@ -71,12 +71,13 @@ public static class PublicId
     /// <summary>Formats a key as its public identifier.</summary>
     /// <param name="prefix">One of the prefix constants on this type.</param>
     /// <param name="id">Internal key.</param>
-    public static string From(string prefix, Guid id) => $"{prefix}{Separator}{id:N}";
+    public static string From(string prefix, long id) =>
+        $"{prefix}{Separator}{id.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
 
     /// <summary>Formats a nullable key, returning null when there is none.</summary>
     /// <param name="prefix">One of the prefix constants on this type.</param>
     /// <param name="id">Internal key, or null.</param>
-    public static string? FromNullable(string prefix, Guid? id) =>
+    public static string? FromNullable(string prefix, long? id) =>
         id is { } value ? From(prefix, value) : null;
 
     /// <summary>Attempts to read a public identifier back into its key.</summary>
@@ -84,9 +85,9 @@ public static class PublicId
     /// <param name="value">Public identifier supplied by the caller.</param>
     /// <param name="id">The parsed key.</param>
     /// <returns>Whether the value was well formed and carried the expected prefix.</returns>
-    public static bool TryParse(string prefix, [NotNullWhen(true)] string? value, out Guid id)
+    public static bool TryParse(string prefix, [NotNullWhen(true)] string? value, out long id)
     {
-        id = Guid.Empty;
+        id = 0;
 
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -105,7 +106,11 @@ public static class PublicId
             return false;
         }
 
-        return Guid.TryParseExact(value[(separatorIndex + 1)..], "N", out id);
+        return long.TryParse(
+            value[(separatorIndex + 1)..],
+            System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out id) && id > 0;
     }
 
     /// <summary>Reads a public identifier back into its key, or throws.</summary>
@@ -113,7 +118,7 @@ public static class PublicId
     /// <param name="value">Public identifier supplied by the caller.</param>
     /// <param name="resourceName">Resource name used in the error message.</param>
     /// <exception cref="Exceptions.ValidationException">The value is malformed or misprefixed.</exception>
-    public static Guid Parse(string prefix, string? value, string resourceName)
+    public static long Parse(string prefix, string? value, string resourceName)
     {
         if (TryParse(prefix, value, out var id))
         {

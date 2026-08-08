@@ -32,7 +32,7 @@ public sealed class HttpContextCurrentUser : ICurrentUser
     private ClaimsPrincipal? Principal => _httpContextAccessor.HttpContext?.User;
 
     /// <inheritdoc />
-    public Guid? UserId
+    public long? UserId
     {
         get
         {
@@ -42,7 +42,7 @@ public sealed class HttpContextCurrentUser : ICurrentUser
             var raw = Principal?.FindFirstValue(JwtRegisteredClaimNames.Sub)
                       ?? Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
 
-            return Guid.TryParse(raw, out var userId) ? userId : null;
+            return long.TryParse(raw, out var userId) ? userId : null;
         }
     }
 
@@ -101,7 +101,7 @@ public sealed class HttpContextCurrentUser : ICurrentUser
     public bool IsSuperAdmin => IsInRole(RoleCatalog.SuperAdmin);
 
     /// <inheritdoc />
-    public Guid AuditUserId => UserId ?? AppConstants.Platform.SystemUserId;
+    public long AuditUserId => UserId ?? AppConstants.Platform.SystemUserId;
 
     /// <inheritdoc />
     public bool IsInRole(string role) => Principal?.IsInRole(role) == true;

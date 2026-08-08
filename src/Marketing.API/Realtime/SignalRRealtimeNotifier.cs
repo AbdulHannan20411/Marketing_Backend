@@ -20,7 +20,7 @@ public sealed partial class SignalRRealtimeNotifier : IRealtimeNotifier
 
     /// <inheritdoc />
     public Task NotifyUserAsync(
-        Guid userId,
+        long userId,
         AppNotification notification,
         CancellationToken cancellationToken = default) =>
         SendAsync(
@@ -31,7 +31,7 @@ public sealed partial class SignalRRealtimeNotifier : IRealtimeNotifier
 
     /// <inheritdoc />
     public Task NotifyTenantAsync(
-        Guid tenantId,
+        long tenantId,
         AppNotification notification,
         CancellationToken cancellationToken = default) =>
         SendAsync(
@@ -42,7 +42,7 @@ public sealed partial class SignalRRealtimeNotifier : IRealtimeNotifier
 
     /// <inheritdoc />
     public Task PublishCampaignProgressAsync(
-        Guid tenantId,
+        long tenantId,
         CampaignResponse campaign,
         CancellationToken cancellationToken = default) =>
         SendAsync(

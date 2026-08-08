@@ -17,8 +17,8 @@ namespace Marketing.UnitTests.Services;
 public sealed class AuthenticationServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 3, 14, 9, 30, 0, TimeSpan.Zero);
-    private static readonly Guid UserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
-    private static readonly Guid TenantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly long UserId = 1001;
+    private static readonly long TenantId = 2001;
 
     private readonly IUserRepository _users = Substitute.For<IUserRepository>();
     private readonly IRefreshTokenRepository _refreshTokens = Substitute.For<IRefreshTokenRepository>();
@@ -59,7 +59,7 @@ public sealed class AuthenticationServiceTests
         _tokenService.HashRefreshToken(Arg.Any<string>())
             .Returns(call => $"{call.Arg<string>()}-hash");
 
-        _refreshTokens.GetActiveSessionsAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        _refreshTokens.GetActiveSessionsAsync(Arg.Any<long>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns([]);
     }
 
@@ -364,7 +364,7 @@ public sealed class AuthenticationServiceTests
     {
         var token = new UserToken
         {
-            Id = Guid.NewGuid(),
+            Id = 4101,
             TenantId = user.TenantId,
             UserId = user.Id,
             Purpose = purpose,

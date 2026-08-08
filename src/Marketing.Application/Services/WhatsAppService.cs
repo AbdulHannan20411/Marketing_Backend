@@ -186,7 +186,6 @@ public sealed class WhatsAppService : IWhatsAppService
             {
                 local = new MessageTemplate
                 {
-                    Id = SequentialGuid.Create(),
                     TenantId = tenantId,
                     Name = template.Name,
                     Language = template.Language,

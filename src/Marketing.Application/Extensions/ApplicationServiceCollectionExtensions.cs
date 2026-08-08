@@ -44,6 +44,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IAuthenticationService, AuthenticationService>();
         services.AddScoped<ISessionMaintenanceService, SessionMaintenanceService>();
         services.AddScoped<ITenantScopeResolver, TenantScopeResolver>();
+        services.AddScoped<IPlanGuard, PlanGuard>();
         services.AddScoped<IContactService, ContactService>();
         services.AddScoped<IAnalyticsService, AnalyticsService>();
         services.AddScoped<ICampaignService, CampaignService>();

@@ -159,7 +159,7 @@ public static class AppConstants
     public static class Platform
     {
         /// <summary>Identifier stamped on rows written by the platform itself.</summary>
-        public static readonly Guid SystemUserId = new("00000000-0000-0000-0000-000000000001");
+        public const long SystemUserId = 1L;
 
         /// <summary>Display name shown for system-authored changes.</summary>
         public const string SystemDisplayName = "System";
@@ -200,31 +200,31 @@ public static class AppConstants
         private const string Root = "marketing";
 
         /// <summary>Prefix covering every entry owned by a tenant.</summary>
-        public static string TenantPrefix(Guid tenantId) => $"{Root}:t:{tenantId:N}:";
+        public static string TenantPrefix(long tenantId) => $"{Root}:t:{tenantId}:";
 
         /// <summary>Prefix covering entries that are not tenant-scoped.</summary>
         public static string PlatformPrefix() => $"{Root}:platform:";
 
         /// <summary>Cached permission set for a user, invalidated when their roles change.</summary>
-        public static string UserPermissions(Guid tenantId, Guid userId) =>
-            $"{TenantPrefix(tenantId)}user:{userId:N}:permissions";
+        public static string UserPermissions(long tenantId, long userId) =>
+            $"{TenantPrefix(tenantId)}user:{userId}:permissions";
 
         /// <summary>Cached tenant record, keyed by slug for the sign-in path.</summary>
         public static string TenantBySlug(string slug) =>
             $"{PlatformPrefix()}tenant:slug:{slug.ToLowerInvariant()}";
 
         /// <summary>Cached tenant record, keyed by identifier.</summary>
-        public static string TenantById(Guid tenantId) => $"{PlatformPrefix()}tenant:id:{tenantId:N}";
+        public static string TenantById(long tenantId) => $"{PlatformPrefix()}tenant:id:{tenantId}";
 
         /// <summary>Dashboard KPI payload for a tenant and a named period.</summary>
-        public static string DashboardKpis(Guid tenantId, string period) =>
+        public static string DashboardKpis(long tenantId, string period) =>
             $"{TenantPrefix(tenantId)}dashboard:kpis:{period}";
 
         /// <summary>Synced WhatsApp template list for a tenant.</summary>
-        public static string Templates(Guid tenantId) => $"{TenantPrefix(tenantId)}templates";
+        public static string Templates(long tenantId) => $"{TenantPrefix(tenantId)}templates";
 
         /// <summary>Tenant settings blob.</summary>
-        public static string TenantSettings(Guid tenantId) => $"{TenantPrefix(tenantId)}settings";
+        public static string TenantSettings(long tenantId) => $"{TenantPrefix(tenantId)}settings";
     }
 
     // -------------------------------------------------------------------------------------

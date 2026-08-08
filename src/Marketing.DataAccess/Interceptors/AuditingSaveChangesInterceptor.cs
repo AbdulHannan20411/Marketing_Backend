@@ -93,7 +93,7 @@ public sealed class AuditingSaveChangesInterceptor : SaveChangesInterceptor
         }
     }
 
-    private void StampCreation(EntityEntry<BaseEntity> entry, Guid userId, DateTimeOffset utcNow)
+    private void StampCreation(EntityEntry<BaseEntity> entry, long userId, DateTimeOffset utcNow)
     {
         entry.Entity.CreatedBy = userId;
         entry.Entity.CreatedOn = utcNow;
@@ -119,7 +119,7 @@ public sealed class AuditingSaveChangesInterceptor : SaveChangesInterceptor
         }
     }
 
-    private static void StampModification(EntityEntry<BaseEntity> entry, Guid userId, DateTimeOffset utcNow)
+    private static void StampModification(EntityEntry<BaseEntity> entry, long userId, DateTimeOffset utcNow)
     {
         // Reassigning a row to a different tenant is never a legitimate update. Blocking it here
         // means a mass-assignment bug in a DTO mapping cannot move data across the isolation
@@ -141,7 +141,7 @@ public sealed class AuditingSaveChangesInterceptor : SaveChangesInterceptor
         entry.Property(nameof(BaseEntity.CreatedOn)).IsModified = false;
     }
 
-    private static void ConvertToSoftDelete(EntityEntry<BaseEntity> entry, Guid userId, DateTimeOffset utcNow)
+    private static void ConvertToSoftDelete(EntityEntry<BaseEntity> entry, long userId, DateTimeOffset utcNow)
     {
         entry.State = EntityState.Modified;
 

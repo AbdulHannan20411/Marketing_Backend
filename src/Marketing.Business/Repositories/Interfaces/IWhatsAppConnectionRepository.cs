@@ -24,6 +24,6 @@ public interface IWhatsAppConnectionRepository : IRepository<WhatsAppConnection>
     /// <param name="tenantId">Tenant to load for.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<WhatsAppConnection?> FindForTenantAsync(
-        Guid tenantId,
+        long tenantId,
         CancellationToken cancellationToken = default);
 }

@@ -31,7 +31,7 @@ public interface ICampaignDispatchService
     /// </summary>
     /// <param name="campaignId">Campaign to advance.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public Task DispatchCampaignAsync(Guid campaignId, CancellationToken cancellationToken = default);
+    public Task DispatchCampaignAsync(long campaignId, CancellationToken cancellationToken = default);
 }
 
 /// <inheritdoc cref="ICampaignDispatchService" />
@@ -140,7 +140,7 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
     }
 
     /// <inheritdoc />
-    public async Task DispatchCampaignAsync(Guid campaignId, CancellationToken cancellationToken = default)
+    public async Task DispatchCampaignAsync(long campaignId, CancellationToken cancellationToken = default)
     {
         var campaign = await _campaigns.GetForUpdateAsync(campaignId, cancellationToken);
 
@@ -278,7 +278,6 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
             .Where(recipient => !existing.Contains(recipient.ContactId))
             .Select(recipient => new CampaignMessage
             {
-                Id = SequentialGuid.Create(),
                 TenantId = tenantId,
                 CampaignId = campaign.Id,
                 ContactId = recipient.ContactId,
@@ -353,7 +352,6 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
     {
         _failures.Add(new DeliveryFailure
         {
-            Id = SequentialGuid.Create(),
             TenantId = campaign.TenantId,
             CampaignId = campaign.Id,
             CampaignName = campaign.Name,
@@ -446,7 +444,6 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
 
         _failures.Add(new DeliveryFailure
         {
-            Id = SequentialGuid.Create(),
             TenantId = campaign.TenantId,
             CampaignId = campaign.Id,
             CampaignName = campaign.Name,
@@ -509,29 +506,29 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
         EventId = 2701,
         Level = LogLevel.Information,
         Message = "Queued {RecipientCount} recipients for campaign {CampaignId}.")]
-    private partial void LogRecipientsQueued(Guid campaignId, int recipientCount);
+    private partial void LogRecipientsQueued(long campaignId, int recipientCount);
 
     [LoggerMessage(
         EventId = 2702,
         Level = LogLevel.Warning,
         Message = "Campaign {CampaignId} hit the 24-hour messaging limit; resuming after {ResumeAfter}.")]
-    private partial void LogRateLimited(Guid campaignId, DateTimeOffset resumeAfter);
+    private partial void LogRateLimited(long campaignId, DateTimeOffset resumeAfter);
 
     [LoggerMessage(
         EventId = 2703,
         Level = LogLevel.Warning,
         Message = "Message {MessageId} failed on attempt {AttemptCount} and will be retried.")]
-    private partial void LogSendRetryable(Exception exception, Guid messageId, int attemptCount);
+    private partial void LogSendRetryable(Exception exception, long messageId, int attemptCount);
 
     [LoggerMessage(
         EventId = 2704,
         Level = LogLevel.Error,
         Message = "Campaign {CampaignId} for tenant {TenantId} could not be advanced.")]
-    private partial void LogCampaignFailed(Exception exception, Guid campaignId, Guid tenantId);
+    private partial void LogCampaignFailed(Exception exception, long campaignId, long tenantId);
 
     [LoggerMessage(
         EventId = 2705,
         Level = LogLevel.Warning,
         Message = "Campaign {CampaignId} was abandoned: {Reason}")]
-    private partial void LogCampaignAbandoned(Guid campaignId, string reason);
+    private partial void LogCampaignAbandoned(long campaignId, string reason);
 }

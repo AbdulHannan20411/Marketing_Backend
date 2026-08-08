@@ -78,3 +78,34 @@ public static class SearchQueryExtensions
             || EF.Functions.ILike(user.Email, $"%{term}%"));
     }
 }
+
+/// <summary>Provider-specific query fragments for groups and tags.</summary>
+public static class CatalogQueryExtensions
+{
+    /// <summary>
+    /// Matches a group name exactly but case-insensitively.
+    /// </summary>
+    /// <remarks>
+    /// <c>ILIKE</c> with no wildcards rather than <c>ToLower()</c>: the analyzer rejects the
+    /// latter, and <c>string.Equals(..., StringComparison)</c> - which it recommends instead - has
+    /// no SQL translation at all. This matches the partial unique index the database enforces.
+    /// </remarks>
+    /// <param name="source">Query being composed.</param>
+    /// <param name="name">Name to match.</param>
+    public static IQueryable<ContactGroup> WhereNameMatches(this IQueryable<ContactGroup> source, string name)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        return source.Where(group => EF.Functions.ILike(group.Name, name));
+    }
+
+    /// <summary>Matches a tag name exactly but case-insensitively.</summary>
+    /// <param name="source">Query being composed.</param>
+    /// <param name="name">Name to match.</param>
+    public static IQueryable<ContactTag> WhereNameMatches(this IQueryable<ContactTag> source, string name)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        return source.Where(tag => EF.Functions.ILike(tag.Name, name));
+    }
+}

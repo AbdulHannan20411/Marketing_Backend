@@ -17,35 +17,64 @@ public interface IContactWriteService
     /// <summary>Soft-deletes a contact.</summary>
     public Task DeleteAsync(string contactId, CancellationToken cancellationToken = default);
 
-    /// <summary>Soft-deletes several contacts.</summary>
+    /// <summary>Soft-deletes several contacts, reporting each one it could not.</summary>
     public Task<BulkOperationResult> BulkDeleteAsync(
         BulkContactRequest request,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Applies tags to several contacts, leaving existing tags in place.</summary>
+    /// <summary>Adds, removes or replaces tags on several contacts.</summary>
     public Task<BulkOperationResult> BulkTagAsync(BulkTagRequest request, CancellationToken cancellationToken = default);
 
-    /// <summary>Adds several contacts to groups, leaving existing memberships in place.</summary>
+    /// <summary>Adds, removes or replaces group memberships on several contacts.</summary>
     public Task<BulkOperationResult> BulkGroupAsync(
         BulkGroupRequest request,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Streams every contact as CSV.
+    /// Adds or removes members of one group.
+    /// <para>
+    /// The group detail screen's door into the same operation the contacts table reaches through
+    /// <see cref="BulkGroupAsync"/>. One implementation serves both, so their counts cannot drift.
+    /// </para>
+    /// </summary>
+    public Task<BulkOperationResult> SetGroupMembershipAsync(
+        string groupId,
+        MembershipRequest request,
+        BulkMode mode,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Adds or removes the contacts carrying one tag.</summary>
+    public Task<BulkOperationResult> SetTagMembershipAsync(
+        string tagId,
+        MembershipRequest request,
+        BulkMode mode,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Folds several contacts into one and deletes the rest.</summary>
+    public Task<ContactResponse> MergeAsync(
+        MergeContactsRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Streams matching contacts as CSV.
     /// <para>
     /// Streamed rather than buffered: an export of a large contact book would otherwise sit on the
     /// large object heap in its entirety before a single byte reached the client.
     /// </para>
     /// </summary>
-    public IAsyncEnumerable<string> ExportAsync(CancellationToken cancellationToken = default);
+    /// <param name="query">The same filters the list endpoint accepts, plus an explicit selection.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public IAsyncEnumerable<string> ExportAsync(
+        ContactExportQuery query,
+        CancellationToken cancellationToken = default);
 }
 
-/// <summary>The two-step CSV import wizard.</summary>
+/// <summary>The CSV import wizard: upload and preview, commit, then poll.</summary>
 public interface IContactImportService
 {
     /// <summary>
-    /// Parses an upload, stages it, and returns a preview with detected columns, sample rows and a
-    /// duplicate count.
+    /// Parses an upload, stages it, and returns a preview with detected columns, sample rows and
+    /// duplicate counts.
     /// </summary>
     /// <param name="fileName">Name of the uploaded file.</param>
     /// <param name="content">File contents.</param>
@@ -55,12 +84,15 @@ public interface IContactImportService
         string content,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Commits a staged batch using the operator's column mapping.</summary>
-    /// <param name="batchId">Batch returned by the preview call.</param>
-    /// <param name="request">Column mapping and options.</param>
+    /// <summary>Commits a staged upload using the operator's column mapping.</summary>
+    /// <param name="request">Upload identifier, mapping and options.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<ImportResult> CommitAsync(
-        string batchId,
-        CommitImportRequest request,
+        ImportCommitRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Re-reads the outcome of an import.</summary>
+    /// <param name="jobId">Identifier returned by the commit call.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<ImportResult> GetJobAsync(string jobId, CancellationToken cancellationToken = default);
 }

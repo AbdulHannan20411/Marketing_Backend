@@ -32,7 +32,7 @@ public interface IRefreshTokenRepository : IRepository<RefreshToken>
     /// <param name="utcNow">Instant used to exclude expired tokens.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<IReadOnlyList<RefreshToken>> GetActiveSessionsAsync(
-        Guid userId,
+        long userId,
         DateTimeOffset utcNow,
         CancellationToken cancellationToken = default);
 
@@ -46,7 +46,7 @@ public interface IRefreshTokenRepository : IRepository<RefreshToken>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Number of tokens revoked.</returns>
     public Task<int> RevokeAllForUserAsync(
-        Guid userId,
+        long userId,
         string reason,
         DateTimeOffset utcNow,
         CancellationToken cancellationToken = default);

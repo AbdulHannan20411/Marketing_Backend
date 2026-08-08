@@ -258,7 +258,6 @@ public sealed class BillingService : IBillingService
         // trace makes "why was I not billed" unanswerable.
         _payments.Add(new Payment
         {
-            Id = SequentialGuid.Create(),
             TenantId = invoice.TenantId,
             InvoiceId = invoice.Id,
             InvoiceNumber = invoice.Number,

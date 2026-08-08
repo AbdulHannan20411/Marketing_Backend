@@ -47,7 +47,7 @@ public sealed class CampaignMessageRepository : Repository<CampaignMessage>, ICa
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<CampaignMessage>> ClaimPendingAsync(
-        Guid campaignId,
+        long campaignId,
         int batchSize,
         CancellationToken cancellationToken = default) =>
         await Set
@@ -57,7 +57,7 @@ public sealed class CampaignMessageRepository : Repository<CampaignMessage>, ICa
             .ToListAsync(cancellationToken);
 
     /// <inheritdoc />
-    public Task<int> CountPendingAsync(Guid campaignId, CancellationToken cancellationToken = default) =>
+    public Task<int> CountPendingAsync(long campaignId, CancellationToken cancellationToken = default) =>
         Set
             .AsNoTracking()
             .CountAsync(
@@ -65,8 +65,8 @@ public sealed class CampaignMessageRepository : Repository<CampaignMessage>, ICa
                 cancellationToken);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<Guid>> GetQueuedContactIdsAsync(
-        Guid campaignId,
+    public async Task<IReadOnlyList<long>> GetQueuedContactIdsAsync(
+        long campaignId,
         CancellationToken cancellationToken = default) =>
         await Set
             .AsNoTracking()
@@ -76,7 +76,7 @@ public sealed class CampaignMessageRepository : Repository<CampaignMessage>, ICa
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<DateTimeOffset>> GetSendTimesSinceAsync(
-        Guid tenantId,
+        long tenantId,
         DateTimeOffset since,
         CancellationToken cancellationToken = default) =>
         await Set

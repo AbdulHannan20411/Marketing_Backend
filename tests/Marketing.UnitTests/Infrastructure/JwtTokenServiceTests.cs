@@ -26,8 +26,8 @@ public sealed class JwtTokenServiceTests
 
     private JwtTokenService CreateService() => new(Options.Create(DefaultOptions), _clock);
 
-    private static TokenSubject Subject(Guid? tenantId) => new(
-        UserId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
+    private static TokenSubject Subject(long? tenantId) => new(
+        UserId: 1001,
         Email: "operator@example.com",
         Name: "Operator",
         Role: tenantId is null ? Roles.SuperAdmin : Roles.Admin,
@@ -41,7 +41,7 @@ public sealed class JwtTokenServiceTests
     [Fact]
     public void An_access_token_carries_the_tenant_claim_for_a_tenant_user()
     {
-        var tenantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var tenantId = 2001;
         var token = CreateService().CreateAccessToken(Subject(tenantId));
 
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token.Value);
@@ -67,7 +67,7 @@ public sealed class JwtTokenServiceTests
     [Fact]
     public void The_decoded_payload_matches_the_shape_the_client_reads()
     {
-        var token = CreateService().CreateAccessToken(Subject(Guid.NewGuid()));
+        var token = CreateService().CreateAccessToken(Subject(5100));
 
         // Decoded the way the client does it - straight from the base64url payload - rather than
         // through JwtSecurityTokenHandler, which re-expands a JSON array claim back into repeated
@@ -116,7 +116,7 @@ public sealed class JwtTokenServiceTests
     [Fact]
     public void The_access_token_expires_at_the_configured_lifetime()
     {
-        var token = CreateService().CreateAccessToken(Subject(Guid.NewGuid()));
+        var token = CreateService().CreateAccessToken(Subject(5100));
 
         token.ExpiresAtUtc.Should().Be(Now.AddMinutes(DefaultOptions.AccessTokenLifetimeMinutes));
     }
@@ -141,7 +141,7 @@ public sealed class JwtTokenServiceTests
     public void An_expired_token_still_yields_its_claims_for_the_refresh_flow()
     {
         var service = CreateService();
-        var token = service.CreateAccessToken(Subject(Guid.NewGuid()));
+        var token = service.CreateAccessToken(Subject(5101));
 
         _clock.UtcNow = Now.AddHours(2);
 
@@ -149,7 +149,7 @@ public sealed class JwtTokenServiceTests
 
         principal.Should().NotBeNull();
         principal!.FindFirst(JwtRegisteredClaimNames.Sub)!.Value
-            .Should().Be("11111111-1111-1111-1111-111111111111");
+            .Should().Be("1001");
     }
 
     [Fact]
@@ -164,7 +164,7 @@ public sealed class JwtTokenServiceTests
             }),
             _clock);
 
-        var foreignToken = foreignService.CreateAccessToken(Subject(Guid.NewGuid()));
+        var foreignToken = foreignService.CreateAccessToken(Subject(5102));
 
         CreateService().GetPrincipalFromExpiredToken(foreignToken.Value).Should().BeNull();
     }

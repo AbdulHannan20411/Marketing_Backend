@@ -187,7 +187,7 @@ public sealed class AnalyticsService : IAnalyticsService
 
     private sealed record StatRow(DateOnly Date, int Sent, int Delivered, int Read, int Clicked, int Failed);
 
-    private sealed record ActivityRow(Guid Id, string Actor, string Action, string Subject, DateTimeOffset OccurredOn);
+    private sealed record ActivityRow(long Id, string Actor, string Action, string Subject, DateTimeOffset OccurredOn);
 }
 
 /// <inheritdoc cref="ICampaignService" />

@@ -11,7 +11,7 @@ namespace Marketing.Shared.Abstractions;
 public interface ICurrentUser
 {
     /// <summary>Identifier of the signed-in user, or <see langword="null"/> when anonymous.</summary>
-    public Guid? UserId { get; }
+    public long? UserId { get; }
 
     /// <summary>
     /// Session the access token belongs to, from its <c>sid</c> claim.
@@ -42,7 +42,7 @@ public interface ICurrentUser
 
     /// <summary>Identifier written to <c>CreatedBy</c> and <c>ModifiedBy</c> audit columns.</summary>
     /// <remarks>Falls back to a well-known system identity for background jobs and seeding.</remarks>
-    public Guid AuditUserId { get; }
+    public long AuditUserId { get; }
 
     /// <summary>Returns whether the principal holds the given role.</summary>
     public bool IsInRole(string role);

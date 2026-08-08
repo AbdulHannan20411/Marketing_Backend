@@ -12,7 +12,7 @@ public sealed class Campaign : BaseEntity, IRequiresTenant
     public required string TemplateName { get; set; }
 
     /// <summary>Template used.</summary>
-    public Guid? MessageTemplateId { get; set; }
+    public long? MessageTemplateId { get; set; }
 
     /// <summary>Lifecycle state.</summary>
     public CampaignStatus Status { get; set; } = CampaignStatus.Draft;
@@ -45,7 +45,7 @@ public sealed class Campaign : BaseEntity, IRequiresTenant
     /// after the campaign was composed and has to be able to reconstruct exactly who was chosen.
     /// </para>
     /// </summary>
-    public List<Guid> AudienceGroupIds { get; set; } = [];
+    public List<long> AudienceGroupIds { get; set; } = [];
 
     /// <summary>Instant dispatch is scheduled for.</summary>
     public DateTimeOffset? ScheduledAt { get; set; }
@@ -84,13 +84,13 @@ public sealed class Campaign : BaseEntity, IRequiresTenant
 public sealed class DeliveryFailure : BaseEntity, IRequiresTenant
 {
     /// <summary>Campaign the message belonged to.</summary>
-    public Guid? CampaignId { get; set; }
+    public long? CampaignId { get; set; }
 
     /// <summary>Campaign name, denormalised so the failures report needs no join.</summary>
     public string CampaignName { get; set; } = string.Empty;
 
     /// <summary>Contact the message was addressed to.</summary>
-    public Guid? ContactId { get; set; }
+    public long? ContactId { get; set; }
 
     /// <summary>Contact name, denormalised.</summary>
     public string ContactName { get; set; } = string.Empty;

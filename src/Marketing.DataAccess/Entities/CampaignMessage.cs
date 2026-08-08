@@ -19,10 +19,10 @@ namespace Marketing.DataAccess.Entities;
 public sealed class CampaignMessage : BaseEntity, IRequiresTenant
 {
     /// <summary>Campaign this message belongs to.</summary>
-    public Guid CampaignId { get; set; }
+    public long CampaignId { get; set; }
 
     /// <summary>Recipient.</summary>
-    public Guid ContactId { get; set; }
+    public long ContactId { get; set; }
 
     /// <summary>Recipient number at the time of sending, in case the contact later changes it.</summary>
     public required string PhoneNumber { get; set; }

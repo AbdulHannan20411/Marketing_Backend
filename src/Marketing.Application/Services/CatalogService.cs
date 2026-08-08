@@ -2,6 +2,7 @@ using Marketing.Application.DTOs.Campaigns;
 using Marketing.Application.DTOs.Contacts;
 using Marketing.Application.DTOs.WhatsApp;
 using Marketing.Application.Interfaces;
+using Marketing.Business.Extensions;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Exceptions;
 using Marketing.Common.Helpers;
@@ -29,8 +30,8 @@ public interface ICatalogService
     /// <summary>Replaces a tag.</summary>
     public Task<ContactTagResponse> UpdateTagAsync(string tagId, ContactTagDraft draft, CancellationToken cancellationToken = default);
 
-    /// <summary>Deletes a tag.</summary>
-    public Task DeleteTagAsync(string tagId, CancellationToken cancellationToken = default);
+    /// <summary>Deletes a tag and returns how many contacts carried it.</summary>
+    public Task<int> DeleteTagAsync(string tagId, CancellationToken cancellationToken = default);
 
     /// <summary>Creates a message template in the pending state.</summary>
     public Task<MessageTemplateResponse> CreateTemplateAsync(MessageTemplateDraft draft, CancellationToken cancellationToken = default);
@@ -79,12 +80,15 @@ public sealed class CatalogService : ICatalogService
     {
         ArgumentNullException.ThrowIfNull(draft);
 
+        var name = CatalogRules.NormaliseGroupName(draft.Name);
+
+        await EnsureGroupNameFreeAsync(name, null, cancellationToken);
+
         var group = new ContactGroup
         {
-            Id = SequentialGuid.Create(),
             TenantId = _tenantContext.RequireTenantId(),
-            Name = draft.Name.Trim(),
-            Description = draft.Description,
+            Name = name,
+            Description = CatalogRules.NormaliseDescription(draft.Description),
         };
 
         _groups.Add(group);
@@ -112,8 +116,12 @@ public sealed class CatalogService : ICatalogService
         var group = await _groups.GetForUpdateAsync(id, cancellationToken)
                     ?? throw new NotFoundException("Group", groupId);
 
-        group.Name = draft.Name.Trim();
-        group.Description = draft.Description;
+        var name = CatalogRules.NormaliseGroupName(draft.Name);
+
+        await EnsureGroupNameFreeAsync(name, id, cancellationToken);
+
+        group.Name = name;
+        group.Description = CatalogRules.NormaliseDescription(draft.Description);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -139,6 +147,26 @@ public sealed class CatalogService : ICatalogService
         var group = await _groups.GetForUpdateAsync(id, cancellationToken)
                     ?? throw new NotFoundException("Group", groupId);
 
+        // A campaign that has not gone out yet resolves its audience from this group at
+        // dispatch time. Deleting it now would silently turn a scheduled send into an empty
+        // one, which the operator would discover only when nobody received anything.
+        var scheduled = await _queries.FirstOrDefaultAsync(
+            _campaigns.Query()
+                .Where(campaign =>
+                    campaign.AudienceGroupIds.Contains(id)
+                    && (campaign.Status == CampaignStatus.Scheduled
+                        || campaign.Status == CampaignStatus.Sending))
+                .Select(campaign => campaign.Name),
+            cancellationToken);
+
+        if (scheduled is not null)
+        {
+            throw new BusinessRuleException(
+                "group_in_use",
+                $"\"{group.Name}\" is the audience for the campaign \"{scheduled}\". "
+                + "Cancel or reschedule that campaign first.");
+        }
+
         // Soft delete. Membership rows are cascaded by the relationship; the contacts themselves
         // are untouched, because deleting a segment must never delete the people in it.
         _groups.Remove(group);
@@ -153,11 +181,14 @@ public sealed class CatalogService : ICatalogService
     {
         ArgumentNullException.ThrowIfNull(draft);
 
+        var name = CatalogRules.NormaliseTagName(draft.Name);
+
+        await EnsureTagNameFreeAsync(name, null, cancellationToken);
+
         var tag = new ContactTag
         {
-            Id = SequentialGuid.Create(),
             TenantId = _tenantContext.RequireTenantId(),
-            Name = draft.Name.Trim(),
+            Name = name,
             Color = draft.Color,
         };
 
@@ -185,7 +216,11 @@ public sealed class CatalogService : ICatalogService
         var tag = await _tags.GetForUpdateAsync(id, cancellationToken)
                   ?? throw new NotFoundException("Tag", tagId);
 
-        tag.Name = draft.Name.Trim();
+        var name = CatalogRules.NormaliseTagName(draft.Name);
+
+        await EnsureTagNameFreeAsync(name, id, cancellationToken);
+
+        tag.Name = name;
         tag.Color = draft.Color;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -204,16 +239,59 @@ public sealed class CatalogService : ICatalogService
     }
 
     /// <inheritdoc />
-    public async Task DeleteTagAsync(string tagId, CancellationToken cancellationToken = default)
+    public async Task<int> DeleteTagAsync(string tagId, CancellationToken cancellationToken = default)
     {
         var id = PublicId.Parse(PublicId.Tag, tagId, "tag");
 
         var tag = await _tags.GetForUpdateAsync(id, cancellationToken)
                   ?? throw new NotFoundException("Tag", tagId);
 
+        // Counted before the delete so the confirmation can say how many contacts lost the
+        // label. Deleting a tag never touches a contact, but the operator still deserves to
+        // know the blast radius after the fact.
+        var affected = await _queries.CountAsync(
+            _tags.Query()
+                .Where(existing => existing.Id == id)
+                .SelectMany(existing => existing.Assignments.Where(assignment => !assignment.IsDeleted)),
+            cancellationToken);
+
         _tags.Remove(tag);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return affected;
+    }
+
+    /// <summary>Refuses a group name another live group already uses.</summary>
+    private async Task EnsureGroupNameFreeAsync(string name, long? excluding, CancellationToken cancellationToken)
+    {
+        var clash = await _queries.CountAsync(
+            _groups.Query().WhereNameMatches(name).Where(group => group.Id != excluding),
+            cancellationToken);
+
+        // Checked here as well as by the unique index, so the caller gets a message naming the
+        // group rather than the index's generic duplicate-record wording.
+        if (clash > 0)
+        {
+            throw new BusinessRuleException(
+                "group_name_taken",
+                $"A group called \"{name}\" already exists.");
+        }
+    }
+
+    /// <summary>Refuses a tag name another live tag already uses.</summary>
+    private async Task EnsureTagNameFreeAsync(string name, long? excluding, CancellationToken cancellationToken)
+    {
+        var clash = await _queries.CountAsync(
+            _tags.Query().WhereNameMatches(name).Where(tag => tag.Id != excluding),
+            cancellationToken);
+
+        if (clash > 0)
+        {
+            throw new BusinessRuleException(
+                "tag_name_taken",
+                $"A tag called \"{name}\" already exists.");
+        }
     }
 
     /// <inheritdoc />
@@ -225,7 +303,6 @@ public sealed class CatalogService : ICatalogService
 
         var template = new MessageTemplate
         {
-            Id = SequentialGuid.Create(),
             TenantId = _tenantContext.RequireTenantId(),
             Name = draft.Name.Trim(),
             Category = draft.Category,

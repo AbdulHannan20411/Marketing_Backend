@@ -135,7 +135,7 @@ public abstract class TenantScopedJobBase : ScheduledJobBase
     /// <param name="work">Work to perform inside the scope.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     protected async Task ForTenantAsync(
-        Guid tenantId,
+        long tenantId,
         Func<CancellationToken, Task> work,
         CancellationToken cancellationToken)
     {

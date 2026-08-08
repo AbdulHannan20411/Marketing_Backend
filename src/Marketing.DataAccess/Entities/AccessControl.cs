@@ -34,7 +34,7 @@ public sealed class PermissionSet : BaseEntity, IRequiresTenant
 public sealed class UserPermissionOverride : BaseEntity, IRequiresTenant
 {
     /// <summary>User the override applies to.</summary>
-    public Guid UserId { get; set; }
+    public long UserId { get; set; }
 
     /// <summary>Permission from the catalogue.</summary>
     public required string Permission { get; set; }
@@ -56,7 +56,7 @@ public sealed class Notification : BaseEntity, IRequiresTenant
     /// Recipient. Null means every member of the tenant sees it, which is how platform-wide
     /// warnings such as an expiring subscription are delivered without fanning out a row per user.
     /// </summary>
-    public Guid? UserId { get; set; }
+    public long? UserId { get; set; }
 
     /// <summary>What the notification is about.</summary>
     public NotificationKind Kind { get; set; }

@@ -16,6 +16,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The rule helpers are internal on purpose - they are not part of the layer's contract -
+         but their edge cases are exactly what needs covering, so the unit suite can see them. -->
+    <InternalsVisibleTo Include="Marketing.UnitTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="AutoMapper" />
     <PackageReference Include="FluentValidation" />
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />

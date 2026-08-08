@@ -65,14 +65,23 @@ public sealed record ContactTagResponse(
 /// the client sends when a filter is cleared, and both default to it when omitted.
 /// </para>
 /// </summary>
-public sealed class ContactQuery : PageRequest
+public class ContactQuery : PageRequest
 {
     /// <summary>Sentinel meaning "do not filter".</summary>
     public const string All = "all";
+
+    /// <summary>Rows the contacts table renders per page.</summary>
+    public const int TablePageSize = 12;
+
+    /// <summary>Initialises a new instance with the contacts table's page size.</summary>
+    public ContactQuery() => SetDefaultPageSize(TablePageSize);
 
     /// <summary>Consent state to filter by, or <c>all</c>.</summary>
     public string Status { get; init; } = All;
 
     /// <summary>Group to filter by, or <c>all</c>.</summary>
     public string GroupId { get; init; } = All;
+
+    /// <summary>Tag to filter by, or <c>all</c>.</summary>
+    public string TagId { get; init; } = All;
 }

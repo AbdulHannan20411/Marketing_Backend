@@ -488,7 +488,6 @@ public sealed partial class AuthenticationService : IAuthenticationService
 
         _refreshTokenRepository.Add(new RefreshToken
         {
-            Id = SequentialGuid.Create(),
             // Stamped explicitly rather than left to the ambient tenant: sign-in runs without an
             // authenticated tenant, so the interceptor has nothing to copy from.
             TenantId = user.TenantId,
@@ -525,7 +524,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
     /// <summary>
     /// Revokes the oldest sessions once a user exceeds the configured concurrent-session budget.
     /// </summary>
-    private async Task EnforceSessionLimitAsync(Guid userId, DateTimeOffset utcNow, CancellationToken cancellationToken)
+    private async Task EnforceSessionLimitAsync(long userId, DateTimeOffset utcNow, CancellationToken cancellationToken)
     {
         var active = await _refreshTokenRepository.GetActiveSessionsAsync(userId, utcNow, cancellationToken);
 
@@ -620,31 +619,31 @@ public sealed partial class AuthenticationService : IAuthenticationService
         EventId = 2002,
         Level = LogLevel.Warning,
         Message = "Sign-in rejected for locked account {UserId}. Lockout ends {LockoutEndsOn}.")]
-    private partial void LogLockedAccountRejected(Guid userId, DateTimeOffset lockoutEndsOn);
+    private partial void LogLockedAccountRejected(long userId, DateTimeOffset lockoutEndsOn);
 
     [LoggerMessage(
         EventId = 2003,
         Level = LogLevel.Information,
         Message = "User {UserId} signed in. CorrelationId: {CorrelationId}")]
-    private partial void LogSignInSucceeded(Guid userId, string correlationId);
+    private partial void LogSignInSucceeded(long userId, string correlationId);
 
     [LoggerMessage(
         EventId = 2004,
         Level = LogLevel.Warning,
         Message = "Refresh-token replay detected for user {UserId}, session {SessionId}. All sessions revoked.")]
-    private partial void LogRefreshTokenReplayDetected(Guid userId, Guid sessionId);
+    private partial void LogRefreshTokenReplayDetected(long userId, Guid sessionId);
 
     [LoggerMessage(
         EventId = 2005,
         Level = LogLevel.Information,
         Message = "All sessions revoked for user {UserId}.")]
-    private partial void LogAllSessionsRevoked(Guid userId);
+    private partial void LogAllSessionsRevoked(long userId);
 
     [LoggerMessage(
         EventId = 2006,
         Level = LogLevel.Warning,
         Message = "User {UserId} locked out until {LockoutEndsOn} after {Attempts} failed attempts.")]
-    private partial void LogAccountLockedOut(Guid userId, DateTimeOffset? lockoutEndsOn, int attempts);
+    private partial void LogAccountLockedOut(long userId, DateTimeOffset? lockoutEndsOn, int attempts);
     [LoggerMessage(
         EventId = 2007,
         Level = LogLevel.Information,
@@ -655,22 +654,22 @@ public sealed partial class AuthenticationService : IAuthenticationService
         EventId = 2008,
         Level = LogLevel.Information,
         Message = "Password reset requested for user {UserId}. CorrelationId: {CorrelationId}")]
-    private partial void LogPasswordResetRequested(Guid userId, string correlationId);
+    private partial void LogPasswordResetRequested(long userId, string correlationId);
     [LoggerMessage(
         EventId = 2009,
         Level = LogLevel.Information,
         Message = "User {UserId} accepted an invitation and activated their account. CorrelationId: {CorrelationId}")]
-    private partial void LogInvitationAccepted(Guid userId, string correlationId);
+    private partial void LogInvitationAccepted(long userId, string correlationId);
 
     [LoggerMessage(
         EventId = 2010,
         Level = LogLevel.Warning,
         Message = "Password reset completed for user {UserId}; all sessions revoked. CorrelationId: {CorrelationId}")]
-    private partial void LogPasswordReset(Guid userId, string correlationId);
+    private partial void LogPasswordReset(long userId, string correlationId);
 
     [LoggerMessage(
         EventId = 2011,
         Level = LogLevel.Information,
         Message = "User {UserId} changed their password. CorrelationId: {CorrelationId}")]
-    private partial void LogPasswordChanged(Guid userId, string correlationId);
+    private partial void LogPasswordChanged(long userId, string correlationId);
 }

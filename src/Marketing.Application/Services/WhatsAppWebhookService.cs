@@ -119,7 +119,7 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
             return 0;
         }
 
-        var touchedCampaigns = new Dictionary<Guid, Campaign>();
+        var touchedCampaigns = new Dictionary<long, Campaign>();
         var applied = 0;
 
         foreach (var receipt in statuses)
@@ -226,7 +226,6 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
 
                     _failures.Add(new DeliveryFailure
                     {
-                        Id = SequentialGuid.Create(),
                         TenantId = campaign.TenantId,
                         CampaignId = campaign.Id,
                         CampaignName = campaign.Name,
@@ -297,7 +296,6 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
         {
             stat = new MessageDailyStat
             {
-                Id = SequentialGuid.Create(),
                 TenantId = _tenantContext.TenantId,
                 Date = date,
             };
@@ -337,8 +335,8 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
             : null;
 
     private async Task<Campaign?> LoadCampaignAsync(
-        Dictionary<Guid, Campaign> cache,
-        Guid campaignId,
+        Dictionary<long, Campaign> cache,
+        long campaignId,
         CancellationToken cancellationToken)
     {
         if (cache.TryGetValue(campaignId, out var cached))

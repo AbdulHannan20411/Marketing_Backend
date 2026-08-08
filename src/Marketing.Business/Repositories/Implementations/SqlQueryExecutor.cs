@@ -126,7 +126,7 @@ public sealed class SqlQueryExecutor : ISqlQueryExecutor
         // RequireTenantId throws rather than returning null, so a statement can never run with the
         // tenant predicate silently satisfied by NULL - which in SQL matches nothing, or worse,
         // is mistaken for "no filter" by whoever wrote the query.
-        dynamicParameters.Add(TenantParameterName, _tenantContext.RequireTenantId(), DbType.Guid);
+        dynamicParameters.Add(TenantParameterName, _tenantContext.RequireTenantId(), DbType.Int64);
 
         return new CommandDefinition(
             sql,

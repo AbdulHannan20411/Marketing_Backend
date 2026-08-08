@@ -13,19 +13,43 @@ namespace Marketing.Common.Requests;
 public class PageRequest
 {
     /// <summary>Largest page a caller may request.</summary>
-    public const int MaxPageSize = 200;
+    public const int MaxPageSize = 100;
 
     /// <summary>Page size used when the caller does not specify one.</summary>
     public const int DefaultPageSize = 25;
 
-    private readonly int _pageNumber = 1;
-    private readonly int _pageSize = DefaultPageSize;
+    private int _pageNumber = 1;
+    private int _pageSize = DefaultPageSize;
 
-    /// <summary>One-based page number. Values below one are coerced to one.</summary>
-    public int PageNumber
+    /// <summary>
+    /// One-based page number, bound from <c>?page=</c>. Values below one are coerced to one.
+    /// </summary>
+    /// <remarks>
+    /// Named <c>Page</c> because query binding matches on the property name and <c>page</c> is what
+    /// the client sends - the previous name, <c>PageNumber</c>, silently never bound and every
+    /// request returned page one. <see cref="PageNumber"/> survives as an accepted alias; both
+    /// write the same value. No binding attribute is used, because that would drag an MVC
+    /// dependency into the innermost layer.
+    /// </remarks>
+    public int Page
     {
         get => _pageNumber;
         init => _pageNumber = value < 1 ? 1 : value;
+    }
+
+    /// <summary>Alias for <see cref="Page"/>, bound from <c>?pageNumber=</c>.</summary>
+    public int PageNumber
+    {
+        get => _pageNumber;
+        init
+        {
+            // Only an explicit value wins. Without this guard, a request carrying page=3 and no
+            // pageNumber would have the alias bind its default of 0 and silently reset the page.
+            if (value > 0)
+            {
+                _pageNumber = value;
+            }
+        }
     }
 
     /// <summary>Page size, clamped to <c>[1, <see cref="MaxPageSize"/>]</c>.</summary>
@@ -52,9 +76,14 @@ public class PageRequest
     /// <summary>Sort direction.</summary>
     public SortDirection SortDirection { get; init; } = SortDirection.Ascending;
 
-    /// <summary>Rows to skip, derived from <see cref="PageNumber"/> and <see cref="PageSize"/>.</summary>
-    public int Skip => (PageNumber - 1) * PageSize;
+    /// <summary>Rows to skip, derived from <see cref="Page"/> and <see cref="PageSize"/>.</summary>
+    public int Skip => (_pageNumber - 1) * _pageSize;
 
     /// <summary>Rows to take.</summary>
-    public int Take => PageSize;
+    public int Take => _pageSize;
+
+    /// <summary>Replaces the page size after binding, for endpoints with their own default.</summary>
+    /// <param name="pageSize">Desired size, clamped like the bound value.</param>
+    protected void SetDefaultPageSize(int pageSize) =>
+        _pageSize = pageSize is < 1 or > MaxPageSize ? DefaultPageSize : pageSize;
 }

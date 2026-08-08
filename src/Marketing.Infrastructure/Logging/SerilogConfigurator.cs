@@ -89,7 +89,7 @@ public static class SerilogConfigurator
         Serilog.IDiagnosticContext diagnosticContext,
         string correlationId,
         string? tenantSlug,
-        Guid? userId)
+        long? userId)
     {
         ArgumentNullException.ThrowIfNull(diagnosticContext);
 

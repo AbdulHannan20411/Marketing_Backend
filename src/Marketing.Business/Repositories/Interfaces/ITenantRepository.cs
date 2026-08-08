@@ -16,6 +16,6 @@ public interface ITenantRepository : IRepository<Tenant>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<bool> IsSlugTakenAsync(
         string slug,
-        Guid? excludingTenantId = null,
+        long? excludingTenantId = null,
         CancellationToken cancellationToken = default);
 }

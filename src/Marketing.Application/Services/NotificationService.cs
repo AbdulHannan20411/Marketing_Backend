@@ -106,7 +106,7 @@ public sealed class NotificationService : INotificationService
     /// delivered without writing one row per user.
     /// </para>
     /// </summary>
-    private IQueryable<Notification> Scoped(Guid? userId, bool tracked = false) =>
+    private IQueryable<Notification> Scoped(long? userId, bool tracked = false) =>
         _notifications.Query(asNoTracking: !tracked)
             .Where(notification => notification.UserId == null || notification.UserId == userId);
 

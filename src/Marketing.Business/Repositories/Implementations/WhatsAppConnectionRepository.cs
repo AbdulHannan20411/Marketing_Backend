@@ -29,7 +29,7 @@ public sealed class WhatsAppConnectionRepository : Repository<WhatsAppConnection
 
     /// <inheritdoc />
     public Task<WhatsAppConnection?> FindForTenantAsync(
-        Guid tenantId,
+        long tenantId,
         CancellationToken cancellationToken = default) =>
         Set
             .IgnoreQueryFilters()

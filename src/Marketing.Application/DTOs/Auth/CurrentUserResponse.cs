@@ -17,7 +17,7 @@ namespace Marketing.Application.DTOs.Auth;
 /// <param name="Roles">Role names held by the user.</param>
 /// <param name="Permissions">Fine-grained permissions granted by those roles.</param>
 public sealed record CurrentUserResponse(
-    Guid Id,
+    long Id,
     string Email,
     string DisplayName,
     string? TenantName,

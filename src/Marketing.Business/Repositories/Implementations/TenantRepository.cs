@@ -22,7 +22,7 @@ public sealed class TenantRepository : Repository<Tenant>, ITenantRepository
     /// <inheritdoc />
     public Task<bool> IsSlugTakenAsync(
         string slug,
-        Guid? excludingTenantId = null,
+        long? excludingTenantId = null,
         CancellationToken cancellationToken = default) =>
         Set.AsNoTracking()
             .AnyAsync(

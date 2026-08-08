@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
@@ -16,17 +17,18 @@ public partial class InitialCreate : Migration
             name: "activity_entries",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 actor = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: false),
                 action = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
                 subject = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                 occurred_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -40,9 +42,10 @@ public partial class InitialCreate : Migration
             name: "audit_logs",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                user_id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                user_id = table.Column<long>(type: "bigint", nullable: false),
                 entity_name = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
                 entity_id = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                 action = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
@@ -60,15 +63,16 @@ public partial class InitialCreate : Migration
             name: "contact_groups",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 name = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
                 description = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -82,7 +86,8 @@ public partial class InitialCreate : Migration
             name: "contact_import_batches",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 file_name = table.Column<string>(type: "character varying(260)", maxLength: 260, nullable: false),
                 columns = table.Column<List<string>>(type: "text[]", nullable: false),
                 total_rows = table.Column<int>(type: "integer", nullable: false),
@@ -92,12 +97,16 @@ public partial class InitialCreate : Migration
                 uploaded_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
                 committed_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 imported_count = table.Column<int>(type: "integer", nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                updated_count = table.Column<int>(type: "integer", nullable: false),
+                skipped_count = table.Column<int>(type: "integer", nullable: false),
+                failed_count = table.Column<int>(type: "integer", nullable: false),
+                row_errors = table.Column<List<string>>(type: "text[]", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -111,15 +120,16 @@ public partial class InitialCreate : Migration
             name: "contact_tags",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 name = table.Column<string>(type: "character varying(60)", maxLength: 60, nullable: false),
                 color = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -133,7 +143,8 @@ public partial class InitialCreate : Migration
             name: "contacts",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 full_name = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                 phone_number = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
                 normalized_phone_number = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
@@ -143,12 +154,12 @@ public partial class InitialCreate : Migration
                 lifecycle = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
                 opted_in_at = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 last_messaged_at = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -162,7 +173,8 @@ public partial class InitialCreate : Migration
             name: "invoices",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 number = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
                 plan_name = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
                 billing_cycle = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
@@ -175,12 +187,12 @@ public partial class InitialCreate : Migration
                 paid_at = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 period_start = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
                 period_end = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -194,19 +206,20 @@ public partial class InitialCreate : Migration
             name: "message_daily_stats",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 date = table.Column<DateOnly>(type: "date", nullable: false),
                 sent = table.Column<int>(type: "integer", nullable: false),
                 delivered = table.Column<int>(type: "integer", nullable: false),
                 read = table.Column<int>(type: "integer", nullable: false),
                 clicked = table.Column<int>(type: "integer", nullable: false),
                 failed = table.Column<int>(type: "integer", nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -220,7 +233,8 @@ public partial class InitialCreate : Migration
             name: "message_templates",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 meta_template_id = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
                 name = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
                 category = table.Column<string>(type: "character varying(24)", maxLength: 24, nullable: false),
@@ -234,12 +248,12 @@ public partial class InitialCreate : Migration
                 quality_score = table.Column<string>(type: "character varying(8)", maxLength: 8, nullable: false),
                 times_used = table.Column<int>(type: "integer", nullable: false),
                 rejection_reason = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -253,8 +267,9 @@ public partial class InitialCreate : Migration
             name: "notifications",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
-                user_id = table.Column<Guid>(type: "uuid", nullable: true),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
+                user_id = table.Column<long>(type: "bigint", nullable: true),
                 kind = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
                 title = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                 body = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: false),
@@ -264,12 +279,12 @@ public partial class InitialCreate : Migration
                 action_label = table.Column<string>(type: "character varying(60)", maxLength: 60, nullable: true),
                 action_route = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: true),
                 occurred_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -283,17 +298,18 @@ public partial class InitialCreate : Migration
             name: "permission_sets",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 name = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
                 description = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
                 is_system = table.Column<bool>(type: "boolean", nullable: false),
                 permissions = table.Column<List<string>>(type: "text[]", nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -307,7 +323,8 @@ public partial class InitialCreate : Migration
             name: "renewal_records",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 plan_name = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
                 billing_cycle = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
                 amount = table.Column<decimal>(type: "numeric(18,4)", precision: 18, scale: 4, nullable: false),
@@ -315,12 +332,12 @@ public partial class InitialCreate : Migration
                 renewed_at = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
                 period_end = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
                 automatic = table.Column<bool>(type: "boolean", nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -334,17 +351,18 @@ public partial class InitialCreate : Migration
             name: "roles",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 name = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                 normalized_name = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                 description = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: false),
                 is_system_role = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 permissions = table.Column<List<string>>(type: "text[]", nullable: false),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -358,7 +376,8 @@ public partial class InitialCreate : Migration
             name: "subscription_plans",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 name = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
                 tagline = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                 monthly_price = table.Column<decimal>(type: "numeric(18,4)", precision: 18, scale: 4, nullable: false),
@@ -385,11 +404,11 @@ public partial class InitialCreate : Migration
                 max_storage_mb = table.Column<int>(type: "integer", nullable: true),
                 daily_message_limit = table.Column<int>(type: "integer", nullable: true),
                 monthly_message_limit = table.Column<int>(type: "integer", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -403,7 +422,8 @@ public partial class InitialCreate : Migration
             name: "tenants",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 name = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                 slug = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                 status = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false, defaultValue: "Pending"),
@@ -417,11 +437,11 @@ public partial class InitialCreate : Migration
                 plan_band = table.Column<int>(type: "integer", nullable: false),
                 last_active_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 messages_this_month = table.Column<int>(type: "integer", nullable: false),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -435,7 +455,8 @@ public partial class InitialCreate : Migration
             name: "whatsapp_connections",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 status = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
                 waba_id = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
                 phone_number_id = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
@@ -451,12 +472,12 @@ public partial class InitialCreate : Migration
                 template_namespace_alias = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
                 encrypted_access_token = table.Column<string>(type: "character varying(2048)", maxLength: 2048, nullable: true),
                 token_expires_at = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -470,18 +491,19 @@ public partial class InitialCreate : Migration
             name: "contact_import_rows",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
-                contact_import_batch_id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
+                contact_import_batch_id = table.Column<long>(type: "bigint", nullable: false),
                 row_number = table.Column<int>(type: "integer", nullable: false),
                 values = table.Column<List<string>>(type: "text[]", nullable: false),
                 is_duplicate = table.Column<bool>(type: "boolean", nullable: false),
                 error = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -501,15 +523,16 @@ public partial class InitialCreate : Migration
             name: "contact_group_members",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
-                contact_id = table.Column<Guid>(type: "uuid", nullable: false),
-                contact_group_id = table.Column<Guid>(type: "uuid", nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
+                contact_id = table.Column<long>(type: "bigint", nullable: false),
+                contact_group_id = table.Column<long>(type: "bigint", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -535,15 +558,16 @@ public partial class InitialCreate : Migration
             name: "contact_tag_assignments",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
-                contact_id = table.Column<Guid>(type: "uuid", nullable: false),
-                contact_tag_id = table.Column<Guid>(type: "uuid", nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
+                contact_id = table.Column<long>(type: "bigint", nullable: false),
+                contact_tag_id = table.Column<long>(type: "bigint", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -569,8 +593,9 @@ public partial class InitialCreate : Migration
             name: "payments",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
-                invoice_id = table.Column<Guid>(type: "uuid", nullable: true),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
+                invoice_id = table.Column<long>(type: "bigint", nullable: true),
                 invoice_number = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
                 amount = table.Column<decimal>(type: "numeric(18,4)", precision: 18, scale: 4, nullable: false),
                 currency = table.Column<string>(type: "character varying(3)", maxLength: 3, nullable: false),
@@ -580,12 +605,12 @@ public partial class InitialCreate : Migration
                 card_last4 = table.Column<string>(type: "character varying(4)", maxLength: 4, nullable: true),
                 processed_at = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
                 failure_reason = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -605,10 +630,11 @@ public partial class InitialCreate : Migration
             name: "campaigns",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 name = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                 template_name = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
-                message_template_id = table.Column<Guid>(type: "uuid", nullable: true),
+                message_template_id = table.Column<long>(type: "bigint", nullable: true),
                 status = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
                 audience_label = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                 audience_size = table.Column<int>(type: "integer", nullable: false),
@@ -617,18 +643,18 @@ public partial class InitialCreate : Migration
                 read_count = table.Column<int>(type: "integer", nullable: false),
                 clicked_count = table.Column<int>(type: "integer", nullable: false),
                 failed_count = table.Column<int>(type: "integer", nullable: false),
-                audience_group_ids = table.Column<List<Guid>>(type: "uuid[]", nullable: false),
+                audience_group_ids = table.Column<List<long>>(type: "bigint[]", nullable: false),
                 scheduled_at = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 recipients_queued_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 resume_after = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 completed_at = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 created_by_name = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -648,8 +674,9 @@ public partial class InitialCreate : Migration
             name: "tenant_subscriptions",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
-                subscription_plan_id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
+                subscription_plan_id = table.Column<long>(type: "bigint", nullable: false),
                 status = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
                 billing_cycle = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
                 current_period_start = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
@@ -661,12 +688,12 @@ public partial class InitialCreate : Migration
                 seats_purchased = table.Column<int>(type: "integer", nullable: false),
                 amount = table.Column<decimal>(type: "numeric(18,4)", precision: 18, scale: 4, nullable: false),
                 currency = table.Column<string>(type: "character varying(3)", maxLength: 3, nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -686,7 +713,8 @@ public partial class InitialCreate : Migration
             name: "users",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
                 email = table.Column<string>(type: "character varying(320)", maxLength: 320, nullable: false),
                 normalized_email = table.Column<string>(type: "character varying(320)", maxLength: 320, nullable: false),
                 display_name = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: false),
@@ -699,12 +727,12 @@ public partial class InitialCreate : Migration
                 lockout_ends_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 job_title = table.Column<string>(type: "text", nullable: false),
                 avatar_url = table.Column<string>(type: "text", nullable: true),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -724,9 +752,10 @@ public partial class InitialCreate : Migration
             name: "campaign_messages",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
-                campaign_id = table.Column<Guid>(type: "uuid", nullable: false),
-                contact_id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
+                campaign_id = table.Column<long>(type: "bigint", nullable: false),
+                contact_id = table.Column<long>(type: "bigint", nullable: false),
                 phone_number = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
                 status = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
                 meta_message_id = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: true),
@@ -736,12 +765,12 @@ public partial class InitialCreate : Migration
                 read_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 error_code = table.Column<int>(type: "integer", nullable: true),
                 error_reason = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -767,21 +796,22 @@ public partial class InitialCreate : Migration
             name: "delivery_failures",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
-                campaign_id = table.Column<Guid>(type: "uuid", nullable: true),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
+                campaign_id = table.Column<long>(type: "bigint", nullable: true),
                 campaign_name = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
-                contact_id = table.Column<Guid>(type: "uuid", nullable: true),
+                contact_id = table.Column<long>(type: "bigint", nullable: true),
                 contact_name = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                 phone_number = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
                 reason = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
                 error_code = table.Column<int>(type: "integer", nullable: false),
                 occurred_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -801,8 +831,9 @@ public partial class InitialCreate : Migration
             name: "refresh_tokens",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
-                user_id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
+                user_id = table.Column<long>(type: "bigint", nullable: false),
                 session_id = table.Column<Guid>(type: "uuid", nullable: false),
                 token_hash = table.Column<string>(type: "character(64)", fixedLength: true, maxLength: 64, nullable: false),
                 security_stamp = table.Column<Guid>(type: "uuid", nullable: false),
@@ -813,12 +844,12 @@ public partial class InitialCreate : Migration
                 replaced_by_token_hash = table.Column<string>(type: "character(64)", fixedLength: true, maxLength: 64, nullable: true),
                 created_by_ip = table.Column<string>(type: "character varying(45)", maxLength: 45, nullable: true),
                 user_agent = table.Column<string>(type: "character varying(512)", maxLength: 512, nullable: true),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -838,16 +869,17 @@ public partial class InitialCreate : Migration
             name: "user_permission_overrides",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
-                user_id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
+                user_id = table.Column<long>(type: "bigint", nullable: false),
                 permission = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                 is_granted = table.Column<bool>(type: "boolean", nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -867,15 +899,16 @@ public partial class InitialCreate : Migration
             name: "user_roles",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
-                user_id = table.Column<Guid>(type: "uuid", nullable: false),
-                role_id = table.Column<Guid>(type: "uuid", nullable: false),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
+                user_id = table.Column<long>(type: "bigint", nullable: false),
+                role_id = table.Column<long>(type: "bigint", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)
@@ -901,19 +934,20 @@ public partial class InitialCreate : Migration
             name: "user_tokens",
             columns: table => new
             {
-                id = table.Column<Guid>(type: "uuid", nullable: false),
-                user_id = table.Column<Guid>(type: "uuid", nullable: false),
+                id = table.Column<long>(type: "bigint", nullable: false)
+                    .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
+                user_id = table.Column<long>(type: "bigint", nullable: false),
                 purpose = table.Column<string>(type: "character varying(24)", maxLength: 24, nullable: false),
                 token_hash = table.Column<string>(type: "character(64)", fixedLength: true, maxLength: 64, nullable: false),
                 expires_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
                 consumed_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 requested_by_ip = table.Column<string>(type: "character varying(45)", maxLength: 45, nullable: true),
-                tenant_id = table.Column<Guid>(type: "uuid", nullable: true),
-                created_by = table.Column<Guid>(type: "uuid", nullable: false),
+                tenant_id = table.Column<long>(type: "bigint", nullable: true),
+                created_by = table.Column<long>(type: "bigint", nullable: false),
                 created_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
-                modified_by = table.Column<Guid>(type: "uuid", nullable: true),
+                modified_by = table.Column<long>(type: "bigint", nullable: true),
                 modified_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
-                deleted_by = table.Column<Guid>(type: "uuid", nullable: true),
+                deleted_by = table.Column<long>(type: "bigint", nullable: true),
                 deleted_on = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true),
                 is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                 xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false)

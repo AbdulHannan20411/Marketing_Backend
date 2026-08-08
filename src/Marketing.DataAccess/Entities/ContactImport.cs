@@ -39,6 +39,24 @@ public sealed class ContactImportBatch : BaseEntity, IRequiresTenant
     /// <summary>Contacts created by the commit.</summary>
     public int ImportedCount { get; set; }
 
+    /// <summary>Existing contacts the commit updated.</summary>
+    public int UpdatedCount { get; set; }
+
+    /// <summary>
+    /// Rows the commit deliberately passed over — duplicates the operator chose to skip, and rows
+    /// beyond the plan's contact ceiling.
+    /// </summary>
+    public int SkippedCount { get; set; }
+
+    /// <summary>Rows the commit could not use.</summary>
+    public int FailedCount { get; set; }
+
+    /// <summary>
+    /// Why individual rows failed, so the poll endpoint can report them after the commit has
+    /// returned. Capped when written.
+    /// </summary>
+    public List<string> RowErrors { get; set; } = [];
+
     /// <summary>Staged rows.</summary>
     public ICollection<ContactImportRow> Rows { get; set; } = [];
 }
@@ -47,7 +65,7 @@ public sealed class ContactImportBatch : BaseEntity, IRequiresTenant
 public sealed class ContactImportRow : BaseEntity, IRequiresTenant
 {
     /// <summary>Batch the row belongs to.</summary>
-    public Guid ContactImportBatchId { get; set; }
+    public long ContactImportBatchId { get; set; }
 
     /// <summary>One-based row number in the source file, used in the error report.</summary>
     public int RowNumber { get; set; }

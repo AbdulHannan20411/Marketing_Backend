@@ -28,10 +28,10 @@ public interface IRepository<TEntity>
     public IQueryable<TEntity> Query(bool asNoTracking = true);
 
     /// <summary>Fetches a row by key without tracking. Returns null when absent or out of tenant.</summary>
-    public Task<TEntity?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    public Task<TEntity?> GetByIdAsync(long id, CancellationToken cancellationToken = default);
 
     /// <summary>Fetches a tracked row by key, ready to be mutated and saved.</summary>
-    public Task<TEntity?> GetForUpdateAsync(Guid id, CancellationToken cancellationToken = default);
+    public Task<TEntity?> GetForUpdateAsync(long id, CancellationToken cancellationToken = default);
 
     /// <summary>Fetches the first row matching a predicate, without tracking.</summary>
     public Task<TEntity?> FirstOrDefaultAsync(

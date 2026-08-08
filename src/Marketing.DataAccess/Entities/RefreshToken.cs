@@ -12,7 +12,7 @@ namespace Marketing.DataAccess.Entities;
 public sealed class RefreshToken : BaseEntity, ITenantScoped
 {
     /// <summary>Owning user.</summary>
-    public Guid UserId { get; set; }
+    public long UserId { get; set; }
 
     /// <summary>
     /// Session this token belongs to. Carried in the access token's <c>sid</c> claim so an access

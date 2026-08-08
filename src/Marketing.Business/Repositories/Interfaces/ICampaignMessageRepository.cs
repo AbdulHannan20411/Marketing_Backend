@@ -33,20 +33,20 @@ public interface ICampaignMessageRepository : IRepository<CampaignMessage>
     /// <param name="batchSize">Most messages to return.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<IReadOnlyList<CampaignMessage>> ClaimPendingAsync(
-        Guid campaignId,
+        long campaignId,
         int batchSize,
         CancellationToken cancellationToken = default);
 
     /// <summary>Counts messages still waiting to be sent for a campaign.</summary>
     /// <param name="campaignId">Campaign to count.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public Task<int> CountPendingAsync(Guid campaignId, CancellationToken cancellationToken = default);
+    public Task<int> CountPendingAsync(long campaignId, CancellationToken cancellationToken = default);
 
     /// <summary>Contacts that already have a message row for a campaign.</summary>
     /// <param name="campaignId">Campaign to inspect.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public Task<IReadOnlyList<Guid>> GetQueuedContactIdsAsync(
-        Guid campaignId,
+    public Task<IReadOnlyList<long>> GetQueuedContactIdsAsync(
+        long campaignId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -61,7 +61,7 @@ public interface ICampaignMessageRepository : IRepository<CampaignMessage>
     /// <param name="since">Start of the window.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<IReadOnlyList<DateTimeOffset>> GetSendTimesSinceAsync(
-        Guid tenantId,
+        long tenantId,
         DateTimeOffset since,
         CancellationToken cancellationToken = default);
 
@@ -82,4 +82,4 @@ public interface ICampaignMessageRepository : IRepository<CampaignMessage>
 /// <summary>A campaign the dispatcher has work to do on.</summary>
 /// <param name="CampaignId">Campaign identifier.</param>
 /// <param name="TenantId">Tenant that owns it.</param>
-public sealed record DueCampaign(Guid CampaignId, Guid TenantId);
+public sealed record DueCampaign(long CampaignId, long TenantId);

@@ -183,10 +183,10 @@ public sealed class CampaignConfiguration : BaseEntityConfiguration<Campaign>
         builder.Property(campaign => campaign.AudienceLabel).HasMaxLength(200);
         builder.Property(campaign => campaign.CreatedByName).HasMaxLength(150);
 
-        // uuid[], not a join table. The audience selection is read and written whole, never queried
-        // by element, so a child table would add a join to every read and buy nothing.
+        // bigint[], not a join table. The audience selection is read and written whole, never
+        // queried by element, so a child table would add a join to every read and buy nothing.
         builder.Property(campaign => campaign.AudienceGroupIds)
-            .HasColumnType("uuid[]");
+            .HasColumnType("bigint[]");
 
         builder.HasIndex(campaign => new { campaign.TenantId, campaign.Status, campaign.CreatedOn });
 

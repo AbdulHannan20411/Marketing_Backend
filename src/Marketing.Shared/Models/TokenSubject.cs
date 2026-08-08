@@ -18,14 +18,14 @@ namespace Marketing.Shared.Models;
 /// <param name="TenantSlug">Owning tenant slug, for log context.</param>
 /// <param name="SessionId">Ties the access token to its refresh-token session.</param>
 public sealed record TokenSubject(
-    Guid UserId,
+    long UserId,
     string Email,
     string Name,
     string Role,
     IReadOnlyCollection<string> Permissions,
     string? WorkspaceName,
     string? AvatarUrl,
-    Guid? TenantId,
+    long? TenantId,
     string? TenantSlug,
     Guid SessionId);
 

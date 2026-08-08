@@ -13,13 +13,16 @@ namespace Marketing.Application.Services;
 public sealed class ContactImportService : IContactImportService
 {
     /// <summary>Rows shown in the preview, enough to confirm a mapping without shipping the file back.</summary>
-    private const int SampleSize = 5;
+    private const int SampleSize = 10;
 
-    /// <summary>Cap on returned per-row errors, so a wholly broken file cannot return a huge payload.</summary>
-    private const int MaxReportedErrors = 50;
+    /// <summary>Cap on invalid rows named in the preview.</summary>
+    private const int MaxPreviewErrors = 50;
+
+    /// <summary>Cap on per-row errors in the result, so a wholly broken file returns a bounded payload.</summary>
+    private const int MaxReportedErrors = 100;
 
     /// <summary>Upper bound on rows in one upload.</summary>
-    private const int MaxRows = 50_000;
+    public const int MaxRows = 50_000;
 
     private readonly IRepository<ContactImportBatch> _batches;
     private readonly IRepository<ContactImportRow> _rows;
@@ -31,6 +34,7 @@ public sealed class ContactImportService : IContactImportService
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ITenantContext _tenantContext;
+    private readonly IPlanGuard _planGuard;
     private readonly IDateTimeProvider _clock;
 
     /// <summary>Initialises a new instance.</summary>
@@ -45,6 +49,7 @@ public sealed class ContactImportService : IContactImportService
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
         ITenantContext tenantContext,
+        IPlanGuard planGuard,
         IDateTimeProvider clock)
     {
         _batches = batches;
@@ -57,6 +62,7 @@ public sealed class ContactImportService : IContactImportService
         _queries = queries;
         _unitOfWork = unitOfWork;
         _tenantContext = tenantContext;
+        _planGuard = planGuard;
         _clock = clock;
     }
 
@@ -98,7 +104,6 @@ public sealed class ContactImportService : IContactImportService
 
         var batch = new ContactImportBatch
         {
-            Id = SequentialGuid.Create(),
             TenantId = tenantId,
             FileName = fileName,
             Columns = columns,
@@ -107,15 +112,18 @@ public sealed class ContactImportService : IContactImportService
             Status = ContactImportStatus.AwaitingMapping,
         };
 
-        // Numbers repeated inside the file itself count as duplicates too. Without this, a file
-        // listing the same customer twice inserts one and then fails the unique index on the other.
+        // Numbers repeated inside the file itself are counted separately from ones that collide
+        // with stored contacts: the operator resolves them differently, and the wizard shows both.
         var seenInFile = new HashSet<string>(StringComparer.Ordinal);
-        var duplicates = 0;
+        var duplicatesInFile = 0;
+        var duplicatesExisting = 0;
+        var invalidRows = new List<ImportRowError>();
         var invalid = 0;
 
         for (var index = 0; index < dataRows.Count; index++)
         {
             var values = dataRows[index];
+            var rowNumber = index + 2; // +2: one-based, and the header occupies row one.
             var rawPhone = phoneIndex >= 0 && phoneIndex < values.Count ? values[phoneIndex] : null;
             var normalized = PhoneNumbers.Normalise(rawPhone);
 
@@ -126,26 +134,37 @@ public sealed class ContactImportService : IContactImportService
             {
                 error = "Missing or invalid phone number.";
                 invalid++;
+
+                if (invalidRows.Count < MaxPreviewErrors)
+                {
+                    invalidRows.Add(new ImportRowError(rowNumber, error));
+                }
             }
-            else if (existingNumbers.Contains(normalized) || !seenInFile.Add(normalized))
+            else if (existingNumbers.Contains(normalized))
             {
                 isDuplicate = true;
-                duplicates++;
+                duplicatesExisting++;
+            }
+            else if (!seenInFile.Add(normalized))
+            {
+                isDuplicate = true;
+                duplicatesInFile++;
             }
 
             _rows.Add(new ContactImportRow
             {
-                Id = SequentialGuid.Create(),
                 TenantId = tenantId,
-                ContactImportBatchId = batch.Id,
-                RowNumber = index + 2, // +2: one-based, and the header occupies row one.
+                // Related by navigation: the batch is inserted in this same unit of work and has
+                // no key yet, so assigning the foreign key would store a zero.
+                ContactImportBatch = batch,
+                RowNumber = rowNumber,
                 Values = values,
                 IsDuplicate = isDuplicate,
                 Error = error,
             });
         }
 
-        batch.DuplicateRows = duplicates;
+        batch.DuplicateRows = duplicatesInFile + duplicatesExisting;
         batch.InvalidRows = invalid;
 
         _batches.Add(batch);
@@ -154,145 +173,324 @@ public sealed class ContactImportService : IContactImportService
         return new ImportPreview(
             PublicId.From(PublicId.Contact, batch.Id),
             fileName,
-            columns,
-            [.. dataRows.Take(SampleSize).Select(row => (IReadOnlyList<string>)row)],
             dataRows.Count,
-            duplicates,
-            invalid,
-            mapping);
+            columns,
+            mapping,
+            [.. dataRows.Take(SampleSize).Select(row => Keyed(columns, row))],
+            duplicatesInFile,
+            duplicatesExisting,
+            invalidRows);
     }
 
     /// <inheritdoc />
     public async Task<ImportResult> CommitAsync(
-        string batchId,
-        CommitImportRequest request,
+        ImportCommitRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var id = PublicId.Parse(PublicId.Contact, batchId, "import batch");
-
-        var batch = await _batches.GetForUpdateAsync(id, cancellationToken)
-                    ?? throw new NotFoundException("Import batch", batchId);
+        var batch = await LoadBatchAsync(request.UploadId, tracked: true, cancellationToken);
 
         if (batch.Status == ContactImportStatus.Committed)
         {
             throw new BusinessRuleException("import_already_committed", "That import has already been committed.");
         }
 
-        var phoneIndex = IndexOf(batch.Columns, request.Mapping.PhoneNumber);
-
-        if (phoneIndex < 0)
-        {
-            throw new ValidationException(
-                "mapping.phoneNumber",
-                "Choose which column holds the phone number. It is the only required field.");
-        }
-
-        var nameIndex = IndexOf(batch.Columns, request.Mapping.FullName);
-        var emailIndex = IndexOf(batch.Columns, request.Mapping.Email);
-        var countryIndex = IndexOf(batch.Columns, request.Mapping.Country);
+        var indexes = ResolveIndexes(batch.Columns, request.Mapping);
 
         var rows = await _queries.ToListAsync(
             _rows.Query().Where(row => row.ContactImportBatchId == batch.Id).OrderBy(row => row.RowNumber),
             cancellationToken);
 
         var tenantId = batch.TenantId;
-        var tagIds = await ResolveIdsAsync(_tags.Query().Select(tag => tag.Id), PublicId.Tag, request.TagIds, cancellationToken);
-        var groupIds = await ResolveIdsAsync(_groups.Query().Select(group => group.Id), PublicId.Group, request.GroupIds, cancellationToken);
 
-        var imported = 0;
-        var skipped = 0;
-        var failed = 0;
-        var errors = new List<ImportRowError>();
+        var assignTagIds = await ResolveIdsAsync(
+            _tags.Query().Select(tag => tag.Id), PublicId.Tag, request.AssignTagIds, cancellationToken);
+
+        var assignGroupIds = await ResolveIdsAsync(
+            _groups.Query().Select(group => group.Id), PublicId.Group, request.AssignGroupIds, cancellationToken);
+
+        // Fetched once, then extended as the file introduces new names. Creating a tag per row
+        // would mean a lookup per row for a file that usually names three tags in total.
+        var tagsByName = await LoadTagsByNameAsync(cancellationToken);
+        var groupsByName = await LoadGroupsByNameAsync(cancellationToken);
+
+        var stored = (await _queries.ToListAsync(_contacts.Query(asNoTracking: false), cancellationToken))
+            .ToDictionary(contact => contact.NormalizedPhoneNumber, StringComparer.Ordinal);
+
+        // The plan ceiling stops the import; it does not fail it. An operator who has waited for a
+        // 40,000-row upload should get the 12,000 that fit, not an error and nothing.
+        var capacity = await _planGuard.RemainingContactCapacityAsync(cancellationToken);
+
+        var outcome = new ImportOutcome();
 
         foreach (var row in rows)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            outcome.Processed++;
+
             if (row.Error is not null)
             {
-                failed++;
+                outcome.Fail(row.RowNumber, row.Error);
 
-                if (errors.Count < MaxReportedErrors)
+                continue;
+            }
+
+            var rawPhone = Cell(row.Values, indexes.Phone);
+            var normalized = PhoneNumbers.Normalise(rawPhone);
+
+            if (stored.TryGetValue(normalized, out var existing))
+            {
+                if (request.DuplicateStrategy != DuplicateStrategyOnImport.Update)
                 {
-                    errors.Add(new ImportRowError(row.RowNumber, row.Error));
+                    // Create behaves as skip here on purpose: the unique index would reject a second
+                    // row with this number, so honouring "create" would fail the whole transaction.
+                    outcome.Skipped++;
+
+                    continue;
                 }
 
+                ApplyRow(existing, row, indexes, request, _clock.UtcNow);
+                outcome.Updated++;
+
+                AssignAll(existing, tenantId, assignTagIds, assignGroupIds);
+                AssignNamed(existing, tenantId, row, indexes, tagsByName, groupsByName);
+
                 continue;
             }
 
-            if (row.IsDuplicate && request.SkipDuplicates)
+            if (capacity <= 0)
             {
-                skipped++;
+                outcome.Skipped++;
+                outcome.Fail(row.RowNumber, "Your plan's contact limit was reached before this row.");
+
                 continue;
             }
-
-            var rawPhone = Cell(row.Values, phoneIndex);
-            var normalized = PhoneNumbers.Normalise(rawPhone);
 
             var contact = new Contact
             {
-                Id = SequentialGuid.Create(),
                 TenantId = tenantId,
-                FullName = Cell(row.Values, nameIndex) is { Length: > 0 } name
-                    ? name.Trim()
-                    // A contact with no name still has to render in a list, and the number is the
-                    // only thing guaranteed to be there.
-                    : PhoneNumbers.ToDisplayForm(rawPhone),
+                FullName = string.Empty,
                 PhoneNumber = PhoneNumbers.ToDisplayForm(rawPhone),
                 NormalizedPhoneNumber = normalized,
-                Email = Cell(row.Values, emailIndex) is { Length: > 0 } email ? email.Trim() : null,
-                Country = Cell(row.Values, countryIndex)?.Trim().ToUpperInvariant() ?? string.Empty,
+                Status = request.DefaultStatus,
 
-                // Imported contacts arrive subscribed but with no opt-in timestamp: the platform
-                // has no evidence of when or whether consent was given, and inventing one would be
-                // fabricating a compliance record.
-                Status = ContactStatus.Subscribed,
+                // Imported contacts carry no opt-in timestamp unless the file gives a status the
+                // operator vouches for: the platform has no evidence of when consent was given, and
+                // inventing one would fabricate a compliance record.
                 OptedInAt = null,
             };
 
+            ApplyRow(contact, row, indexes, request, _clock.UtcNow);
+
             _contacts.Add(contact);
+            stored[normalized] = contact;
+            capacity--;
+            outcome.Created++;
 
-            foreach (var tagId in tagIds)
-            {
-                _tagAssignments.Add(new ContactTagAssignment
-                {
-                    Id = SequentialGuid.Create(),
-                    TenantId = tenantId,
-                    ContactId = contact.Id,
-                    ContactTagId = tagId,
-                });
-            }
-
-            foreach (var groupId in groupIds)
-            {
-                _groupMembers.Add(new ContactGroupMember
-                {
-                    Id = SequentialGuid.Create(),
-                    TenantId = tenantId,
-                    ContactId = contact.Id,
-                    ContactGroupId = groupId,
-                });
-            }
-
-            imported++;
+            AssignAll(contact, tenantId, assignTagIds, assignGroupIds);
+            AssignNamed(contact, tenantId, row, indexes, tagsByName, groupsByName);
         }
 
         batch.Status = ContactImportStatus.Committed;
         batch.CommittedOn = _clock.UtcNow;
-        batch.ImportedCount = imported;
+        batch.ImportedCount = outcome.Created;
+        batch.UpdatedCount = outcome.Updated;
+        batch.SkippedCount = outcome.Skipped;
+        batch.FailedCount = outcome.Failed;
+        batch.RowErrors = [.. outcome.Errors.Select(error => $"{error.RowNumber}: {error.Reason}")];
 
         // One transaction for the whole batch. A partial import would leave the operator with no
         // way to tell which half landed.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return new ImportResult(imported, skipped, failed, errors);
+        return Describe(batch, outcome.Errors);
+    }
+
+    /// <inheritdoc />
+    public async Task<ImportResult> GetJobAsync(string jobId, CancellationToken cancellationToken = default)
+    {
+        var batch = await LoadBatchAsync(jobId, tracked: false, cancellationToken);
+
+        return Describe(batch, ParseErrors(batch.RowErrors));
+    }
+
+    /// <summary>Copies the mapped cells of one staged row onto a contact.</summary>
+    private static void ApplyRow(
+        Contact contact,
+        ContactImportRow row,
+        ColumnIndexes indexes,
+        ImportCommitRequest request,
+        DateTimeOffset utcNow)
+    {
+        var rawPhone = Cell(row.Values, indexes.Phone) ?? contact.PhoneNumber;
+
+        if (Cell(row.Values, indexes.Name) is { Length: > 0 } name)
+        {
+            contact.FullName = name.Trim();
+        }
+        else if (string.IsNullOrEmpty(contact.FullName))
+        {
+            // A contact with no name still has to render in a list, and the number is the only
+            // thing guaranteed to be there.
+            contact.FullName = PhoneNumbers.ToDisplayForm(rawPhone);
+        }
+
+        if (Cell(row.Values, indexes.Email) is { Length: > 0 } email && MailIsUsable(email))
+        {
+            contact.Email = email.Trim();
+        }
+
+        // An unrecognised country in an imported file is left blank rather than refused. The row is
+        // otherwise usable, and refusing the whole import over a spelling is not a trade the
+        // operator would make.
+        var country = Cell(row.Values, indexes.Country);
+
+        contact.Country = Countries.ToStorageCode(country)
+                          ?? Countries.FromPhoneNumber(rawPhone)
+                          ?? contact.Country;
+
+        var status = Cell(row.Values, indexes.Status);
+
+        contact.Status = Enum.TryParse<ContactStatus>(status, ignoreCase: true, out var parsed)
+            ? parsed
+            : request.DefaultStatus;
+
+        // The stamp records when this platform started treating them as subscribed - not a claim
+        // about when consent was originally given, which an imported file cannot evidence. It is
+        // recorded rather than left null so "subscribed implies an opt-in date" stays true.
+        contact.OptedInAt = ContactRules.ConsentStampFor(contact.Status, utcNow, contact.OptedInAt);
+    }
+
+    /// <summary>Creates the tags and groups a row names, then assigns them.</summary>
+    private void AssignNamed(
+        Contact contact,
+        long? tenantId,
+        ContactImportRow row,
+        ColumnIndexes indexes,
+        Dictionary<string, ContactTag> tagsByName,
+        Dictionary<string, ContactGroup> groupsByName)
+    {
+        foreach (var name in SplitList(Cell(row.Values, indexes.Tags)))
+        {
+            if (!tagsByName.TryGetValue(name, out var tag))
+            {
+                tag = new ContactTag { TenantId = tenantId, Name = name };
+
+                _tags.Add(tag);
+                tagsByName[name] = tag;
+            }
+
+            _tagAssignments.Add(new ContactTagAssignment
+            {
+                TenantId = tenantId,
+                Contact = contact,
+                ContactTag = tag,
+            });
+        }
+
+        foreach (var name in SplitList(Cell(row.Values, indexes.Groups)))
+        {
+            if (!groupsByName.TryGetValue(name, out var group))
+            {
+                group = new ContactGroup { TenantId = tenantId, Name = name };
+
+                _groups.Add(group);
+                groupsByName[name] = group;
+            }
+
+            _groupMembers.Add(new ContactGroupMember
+            {
+                TenantId = tenantId,
+                Contact = contact,
+                ContactGroup = group,
+            });
+        }
+    }
+
+    private void AssignAll(
+        Contact contact,
+        long? tenantId,
+        List<long> tagIds,
+        List<long> groupIds)
+    {
+        foreach (var tagId in tagIds)
+        {
+            _tagAssignments.Add(new ContactTagAssignment
+            {
+                TenantId = tenantId,
+                Contact = contact,
+                ContactTagId = tagId,
+            });
+        }
+
+        foreach (var groupId in groupIds)
+        {
+            _groupMembers.Add(new ContactGroupMember
+            {
+                TenantId = tenantId,
+                Contact = contact,
+                ContactGroupId = groupId,
+            });
+        }
+    }
+
+    private async Task<ContactImportBatch> LoadBatchAsync(
+        string uploadId,
+        bool tracked,
+        CancellationToken cancellationToken)
+    {
+        var id = PublicId.Parse(PublicId.Contact, uploadId, "import batch");
+
+        var batch = tracked
+            ? await _batches.GetForUpdateAsync(id, cancellationToken)
+            : await _queries.FirstOrDefaultAsync(
+                _batches.Query().Where(candidate => candidate.Id == id),
+                cancellationToken);
+
+        return batch ?? throw new NotFoundException("Import batch", uploadId);
+    }
+
+    private static ImportResult Describe(ContactImportBatch batch, IReadOnlyList<ImportRowError> errors) =>
+        new(
+            PublicId.From(PublicId.Contact, batch.Id),
+            batch.Status == ContactImportStatus.Committed ? ImportJobStatus.Completed : ImportJobStatus.Queued,
+            batch.Status == ContactImportStatus.Committed ? batch.TotalRows : 0,
+            batch.TotalRows,
+            batch.ImportedCount,
+            batch.UpdatedCount,
+            batch.SkippedCount,
+            batch.FailedCount,
+            errors,
+            batch.CommittedOn);
+
+    private static ColumnIndexes ResolveIndexes(List<string> columns, ImportColumnMapping mapping)
+    {
+        var phone = IndexOf(columns, mapping.PhoneNumber);
+
+        if (phone < 0)
+        {
+            throw new ValidationException(
+                "mapping.phoneNumber",
+                "Choose which column holds the phone number. It is the only required field.");
+        }
+
+        return new ColumnIndexes(
+            phone,
+            IndexOf(columns, mapping.FullName),
+            IndexOf(columns, mapping.Email),
+            IndexOf(columns, mapping.Country),
+            IndexOf(columns, mapping.Status),
+            IndexOf(columns, mapping.Tags),
+            IndexOf(columns, mapping.Groups));
     }
 
     /// <summary>
     /// Guesses which column is which from the header names.
     /// <para>
     /// A convenience, not a decision: the operator confirms or changes it before committing. It
-    /// exists because the common case is a well-labelled export, and making someone map four
+    /// exists because the common case is a well-labelled export, and making someone map seven
     /// obvious columns by hand every time is friction for no benefit.
     /// </para>
     /// </summary>
@@ -302,13 +500,37 @@ public sealed class ContactImportService : IContactImportService
             Match(columns, ["name", "full name", "fullname", "contact", "customer"]),
             Match(columns, ["phone", "phone number", "phonenumber", "mobile", "msisdn", "number"]),
             Match(columns, ["email", "e-mail", "email address"]),
-            Match(columns, ["country", "country code", "iso"]));
+            Match(columns, ["country", "country code", "iso"]),
+            Match(columns, ["status", "consent", "subscription"]),
+            Match(columns, ["tags", "tag", "labels"]),
+            Match(columns, ["groups", "group", "segments", "lists"]));
 
         static string? Match(List<string> columns, string[] candidates) =>
             columns.FirstOrDefault(column =>
                 candidates.Any(candidate =>
                     string.Equals(column.Trim(), candidate, StringComparison.OrdinalIgnoreCase)));
     }
+
+    private static Dictionary<string, string> Keyed(List<string> columns, List<string> values)
+    {
+        var keyed = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        for (var index = 0; index < columns.Count; index++)
+        {
+            keyed[columns[index]] = index < values.Count ? values[index] : string.Empty;
+        }
+
+        return keyed;
+    }
+
+    private static IEnumerable<string> SplitList(string? cell) =>
+        string.IsNullOrWhiteSpace(cell)
+            ? []
+            : cell.Split(ImportDelimiters.List, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+
+    private static bool MailIsUsable(string email) =>
+        System.Net.Mail.MailAddress.TryCreate(email.Trim(), out _);
 
     private static int IndexOf(List<string> columns, string? columnName) =>
         string.IsNullOrWhiteSpace(columnName)
@@ -318,8 +540,44 @@ public sealed class ContactImportService : IContactImportService
     private static string? Cell(List<string> values, int index) =>
         index >= 0 && index < values.Count ? values[index] : null;
 
-    private async Task<List<Guid>> ResolveIdsAsync(
-        IQueryable<Guid> source,
+    private static List<ImportRowError> ParseErrors(List<string> stored)
+    {
+        var errors = new List<ImportRowError>(stored.Count);
+
+        foreach (var entry in stored)
+        {
+            var separator = entry.IndexOf(':', StringComparison.Ordinal);
+
+            if (separator > 0 && int.TryParse(entry[..separator], out var rowNumber))
+            {
+                errors.Add(new ImportRowError(rowNumber, entry[(separator + 2)..]));
+            }
+        }
+
+        return errors;
+    }
+
+    private async Task<Dictionary<string, ContactTag>> LoadTagsByNameAsync(CancellationToken cancellationToken)
+    {
+        var rows = await _queries.ToListAsync(_tags.Query(asNoTracking: false), cancellationToken);
+
+        // Entities rather than keys, and tracked. A tag the file introduces is inserted in the
+        // same unit of work and has no key until then, so callers relate to it by navigation.
+        // Case-insensitive, matching the partial unique index: a file naming "VIP" must find the
+        // stored "vip" rather than creating a second tag the operator then has to merge.
+        return rows.ToDictionary(tag => tag.Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task<Dictionary<string, ContactGroup>> LoadGroupsByNameAsync(
+        CancellationToken cancellationToken)
+    {
+        var rows = await _queries.ToListAsync(_groups.Query(asNoTracking: false), cancellationToken);
+
+        return rows.ToDictionary(group => group.Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task<List<long>> ResolveIdsAsync(
+        IQueryable<long> source,
         string prefix,
         IReadOnlyList<string>? ids,
         CancellationToken cancellationToken)
@@ -329,7 +587,7 @@ public sealed class ContactImportService : IContactImportService
             return [];
         }
 
-        var parsed = new List<Guid>(ids.Count);
+        var parsed = new List<long>(ids.Count);
 
         foreach (var id in ids)
         {
@@ -340,5 +598,35 @@ public sealed class ContactImportService : IContactImportService
         }
 
         return [.. await _queries.ToListAsync(source.Where(existing => parsed.Contains(existing)), cancellationToken)];
+    }
+
+    private sealed record NamedKey(string Name, long Id);
+
+    private sealed record ColumnIndexes(int Phone, int Name, int Email, int Country, int Status, int Tags, int Groups);
+
+    /// <summary>Running totals for one commit.</summary>
+    private sealed class ImportOutcome
+    {
+        public int Processed { get; set; }
+
+        public int Created { get; set; }
+
+        public int Updated { get; set; }
+
+        public int Skipped { get; set; }
+
+        public int Failed { get; private set; }
+
+        public List<ImportRowError> Errors { get; } = [];
+
+        public void Fail(int rowNumber, string reason)
+        {
+            Failed++;
+
+            if (Errors.Count < MaxReportedErrors)
+            {
+                Errors.Add(new ImportRowError(rowNumber, reason));
+            }
+        }
     }
 }

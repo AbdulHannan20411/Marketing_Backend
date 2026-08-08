@@ -21,7 +21,7 @@ public interface IUserRepository : IRepository<User>
     /// <summary>Loads a tracked user with their role assignments, for token issuance and refresh.</summary>
     /// <param name="userId">User identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public Task<User?> FindWithRolesAsync(Guid userId, CancellationToken cancellationToken = default);
+    public Task<User?> FindWithRolesAsync(long userId, CancellationToken cancellationToken = default);
 
     /// <summary>Returns whether an address is already registered anywhere on the platform.</summary>
     /// <param name="normalizedEmail">Lowercased address.</param>
@@ -29,11 +29,11 @@ public interface IUserRepository : IRepository<User>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<bool> IsEmailTakenAsync(
         string normalizedEmail,
-        Guid? excludingUserId = null,
+        long? excludingUserId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>Returns the role names granted to a user.</summary>
     /// <param name="userId">User identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public Task<IReadOnlyList<string>> GetRoleNamesAsync(Guid userId, CancellationToken cancellationToken = default);
+    public Task<IReadOnlyList<string>> GetRoleNamesAsync(long userId, CancellationToken cancellationToken = default);
 }

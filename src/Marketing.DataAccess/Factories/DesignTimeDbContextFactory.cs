@@ -63,7 +63,7 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<App
     /// </summary>
     private sealed class DesignTimeTenantContext : ITenantContext
     {
-        public Guid? TenantId => null;
+        public long? TenantId => null;
 
         public string? TenantSlug => null;
 
@@ -71,10 +71,10 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<App
 
         public bool CanAccessAllTenants => false;
 
-        public Guid RequireTenantId() =>
+        public long RequireTenantId() =>
             throw new InvalidOperationException("No tenant is available at design time.");
 
-        public IDisposable BeginScope(Guid tenantId, string? tenantSlug = null) => NullScope.Instance;
+        public IDisposable BeginScope(long tenantId, string? tenantSlug = null) => NullScope.Instance;
 
         private sealed class NullScope : IDisposable
         {

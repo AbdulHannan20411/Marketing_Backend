@@ -59,10 +59,10 @@ public sealed class ContactGroup : BaseEntity, IRequiresTenant
 public sealed class ContactGroupMember : BaseEntity, IRequiresTenant
 {
     /// <summary>The contact.</summary>
-    public Guid ContactId { get; set; }
+    public long ContactId { get; set; }
 
     /// <summary>The group.</summary>
-    public Guid ContactGroupId { get; set; }
+    public long ContactGroupId { get; set; }
 
     /// <summary>Contact navigation.</summary>
     public Contact Contact { get; set; } = null!;
@@ -88,10 +88,10 @@ public sealed class ContactTag : BaseEntity, IRequiresTenant
 public sealed class ContactTagAssignment : BaseEntity, IRequiresTenant
 {
     /// <summary>The contact.</summary>
-    public Guid ContactId { get; set; }
+    public long ContactId { get; set; }
 
     /// <summary>The tag.</summary>
-    public Guid ContactTagId { get; set; }
+    public long ContactTagId { get; set; }
 
     /// <summary>Contact navigation.</summary>
     public Contact Contact { get; set; } = null!;

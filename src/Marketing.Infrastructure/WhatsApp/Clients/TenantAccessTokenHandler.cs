@@ -100,5 +100,5 @@ public sealed partial class TenantAccessTokenHandler : DelegatingHandler
         EventId = 2501,
         Level = LogLevel.Error,
         Message = "The stored Meta access token for tenant {TenantId} could not be decrypted.")]
-    private partial void LogTokenUnreadable(Exception exception, Guid tenantId);
+    private partial void LogTokenUnreadable(Exception exception, long tenantId);
 }

@@ -36,7 +36,7 @@ public sealed class TenantContext : ITenantContext
     }
 
     /// <inheritdoc />
-    public Guid? TenantId
+    public long? TenantId
     {
         get
         {
@@ -47,7 +47,7 @@ public sealed class TenantContext : ITenantContext
 
             var raw = _httpContextAccessor.HttpContext?.User.FindFirst(AppConstants.Claims.TenantId)?.Value;
 
-            return Guid.TryParse(raw, out var tenantId) ? tenantId : null;
+            return long.TryParse(raw, out var tenantId) ? tenantId : null;
         }
     }
 
@@ -67,11 +67,11 @@ public sealed class TenantContext : ITenantContext
         AmbientScope.Value is null && _currentUser.IsSuperAdmin;
 
     /// <inheritdoc />
-    public Guid RequireTenantId() =>
+    public long RequireTenantId() =>
         TenantId ?? throw new TenantResolutionException();
 
     /// <inheritdoc />
-    public IDisposable BeginScope(Guid tenantId, string? tenantSlug = null)
+    public IDisposable BeginScope(long tenantId, string? tenantSlug = null)
     {
         var scope = new TenantScope(tenantId, tenantSlug, AmbientScope.Value);
         AmbientScope.Value = scope;
@@ -84,14 +84,14 @@ public sealed class TenantContext : ITenantContext
     {
         private bool _disposed;
 
-        public TenantScope(Guid tenantId, string? tenantSlug, TenantScope? parent)
+        public TenantScope(long tenantId, string? tenantSlug, TenantScope? parent)
         {
             TenantId = tenantId;
             TenantSlug = tenantSlug;
             Parent = parent;
         }
 
-        public Guid TenantId { get; }
+        public long TenantId { get; }
 
         public string? TenantSlug { get; }
 

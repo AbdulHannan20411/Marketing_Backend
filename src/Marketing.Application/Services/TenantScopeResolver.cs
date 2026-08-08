@@ -56,7 +56,7 @@ public sealed partial class TenantScopeResolver : ITenantScopeResolver
             throw new ForbiddenException("The requested account could not be resolved.");
         }
 
-        LogScopeEntered(_currentUser.UserId ?? Guid.Empty, accountId, tenantId);
+        LogScopeEntered(_currentUser.UserId ?? 0, accountId, tenantId);
 
         return _tenantContext.BeginScope(tenantId, account.Tenant?.Slug);
     }
@@ -69,7 +69,7 @@ public sealed partial class TenantScopeResolver : ITenantScopeResolver
         EventId = 2201,
         Level = LogLevel.Information,
         Message = "Super admin {SuperAdminId} is acting on admin account {AdminAccountId} in tenant {TenantId}.")]
-    private partial void LogScopeEntered(Guid superAdminId, Guid adminAccountId, Guid tenantId);
+    private partial void LogScopeEntered(long superAdminId, long adminAccountId, long tenantId);
 
     /// <summary>A scope that changes nothing, returned when the caller keeps their own tenant.</summary>
     private sealed class NullScope : IDisposable

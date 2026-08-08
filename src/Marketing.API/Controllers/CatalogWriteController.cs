@@ -18,6 +18,7 @@ namespace Marketing.API.Controllers;
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/groups")]
 [Authorize]
+[RequireModule(PlanModules.Crm)]
 public sealed class GroupWriteController : ApiControllerBase
 {
     private readonly ICatalogService _catalog;
@@ -87,6 +88,7 @@ public sealed class GroupWriteController : ApiControllerBase
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/tags")]
 [Authorize]
+[RequireModule(PlanModules.Crm)]
 public sealed class TagWriteController : ApiControllerBase
 {
     private readonly ICatalogService _catalog;
@@ -134,7 +136,8 @@ public sealed class TagWriteController : ApiControllerBase
         return Success(tag, $"Tag \"{tag.Name}\" saved.");
     }
 
-    /// <summary>Deletes a tag.</summary>
+    /// <summary>Deletes a tag, removing it from every contact that carried it.</summary>
+    /// <remarks>No contact is deleted. The message reports how many lost the label.</remarks>
     /// <response code="200">The tag was deleted.</response>
     [HttpDelete("{id}")]
     [RequirePermission(Permissions.Contacts.TagsManage)]
@@ -146,9 +149,9 @@ public sealed class TagWriteController : ApiControllerBase
     {
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
-        await _catalog.DeleteTagAsync(id, cancellationToken);
+        var affected = await _catalog.DeleteTagAsync(id, cancellationToken);
 
-        return SuccessEmpty("Tag deleted.");
+        return SuccessEmpty($"Tag deleted from {affected} contacts.");
     }
 }
 

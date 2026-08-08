@@ -139,7 +139,7 @@ public class ApplicationDbContext : DbContext
     /// baking the model-building context's value into the cached model.
     /// </para>
     /// </summary>
-    public Guid? CurrentTenantId => _tenantContext.TenantId;
+    public long? CurrentTenantId => _tenantContext.TenantId;
 
     /// <summary>Whether the tenant filter is bypassed. True only for platform administrators.</summary>
     public bool BypassTenantFilter => _tenantContext.CanAccessAllTenants;

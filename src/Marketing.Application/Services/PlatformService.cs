@@ -319,9 +319,9 @@ public sealed class PlatformService : IPlatformService
                 new ThroughputPoint($"{hour:00}:00", hour == _clock.UtcNow.Hour ? messagesToday : 0))]);
     }
 
-    private async Task<Dictionary<Guid, int>> CountByTenantAsync<TEntity>(
+    private async Task<Dictionary<long, int>> CountByTenantAsync<TEntity>(
         IQueryable<TEntity> source,
-        List<Guid> tenantIds,
+        List<long> tenantIds,
         CancellationToken cancellationToken)
         where TEntity : BaseEntity
     {
@@ -353,10 +353,10 @@ public sealed class PlatformService : IPlatformService
         previous == 0 ? 0m : Math.Round((current - previous) * 100m / previous, 1);
 
     private sealed record AdminRow(
-        Guid Id,
+        long Id,
         string DisplayName,
         string Email,
-        Guid TenantId,
+        long TenantId,
         string Organisation,
         TenantPlan PlanBand,
         AppConstants.TenantStatus TenantStatus,
