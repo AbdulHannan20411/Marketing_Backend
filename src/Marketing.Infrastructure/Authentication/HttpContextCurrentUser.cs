@@ -67,25 +67,38 @@ public sealed class HttpContextCurrentUser : ICurrentUser
     /// <summary>
     /// Permissions carried by the token.
     /// <para>
-    /// The claim holds a JSON array in a single claim value, so it is parsed rather than collected
-    /// from repeated claims. A malformed value yields an empty set: failing closed here means a
-    /// corrupt token grants nothing instead of throwing on every authorisation check.
+    /// The token is <em>written</em> as one claim holding a JSON array, but the bearer handler
+    /// <em>expands</em> a JSON array claim into one claim per element while validating. So by the
+    /// time a principal reaches here the permissions are repeated claims of plain strings, not a
+    /// single parseable array - reading only the first value and deserialising it yields nothing
+    /// and silently denies every authorisation check.
+    /// </para>
+    /// <para>
+    /// Both shapes are accepted, because a principal built by hand (tests, background work) can
+    /// still carry the unexpanded form. A malformed value yields an empty set: failing closed means
+    /// a corrupt token grants nothing rather than throwing on every check.
     /// </para>
     /// </summary>
     public IReadOnlyCollection<string> Permissions
     {
         get
         {
-            var raw = Principal?.FindFirstValue(AppConstants.Claims.Permissions);
+            var claims = Principal?.FindAll(AppConstants.Claims.Permissions).ToArray() ?? [];
 
-            if (string.IsNullOrWhiteSpace(raw))
+            if (claims.Length == 0)
             {
                 return [];
             }
 
+            // The expanded form: several claims, or one claim whose value is a bare permission.
+            if (claims.Length > 1 || !IsJsonArray(claims[0].Value))
+            {
+                return [.. claims.Select(claim => claim.Value)];
+            }
+
             try
             {
-                return JsonSerializer.Deserialize<string[]>(raw) ?? [];
+                return JsonSerializer.Deserialize<string[]>(claims[0].Value) ?? [];
             }
             catch (JsonException)
             {
@@ -93,6 +106,11 @@ public sealed class HttpContextCurrentUser : ICurrentUser
             }
         }
     }
+
+    /// <summary>Whether a claim value is still the raw JSON array rather than one element of it.</summary>
+    /// <param name="value">Claim value.</param>
+    private static bool IsJsonArray(string value) =>
+        value.AsSpan().TrimStart().StartsWith("[", StringComparison.Ordinal);
 
     /// <inheritdoc />
     public bool IsAuthenticated => Principal?.Identity?.IsAuthenticated == true && UserId is not null;
