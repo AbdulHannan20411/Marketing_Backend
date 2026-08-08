@@ -536,3 +536,56 @@ public sealed class CampaignMessageConfiguration : BaseEntityConfiguration<Campa
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+/// <summary>Fluent configuration for <see cref="PaymentMethod"/>.</summary>
+public sealed class PaymentMethodConfiguration : BaseEntityConfiguration<PaymentMethod>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<PaymentMethod> builder)
+    {
+        builder.ToTable("payment_methods");
+
+        builder.Property(method => method.Kind).IsRequired().HasMaxLength(24).HasConversion<string>();
+        builder.Property(method => method.ProviderToken).IsRequired().HasMaxLength(256);
+        builder.Property(method => method.Brand).HasMaxLength(40);
+
+        // Four characters, and only ever four. The column is sized so that a full number cannot be
+        // stored here even by accident.
+        builder.Property(method => method.Last4).HasMaxLength(4);
+
+        // One default per tenant, enforced by the database rather than by convention: two defaults
+        // would make "which card do we charge" ambiguous at renewal time.
+        builder.HasIndex(method => method.TenantId)
+            .IsUnique()
+            .HasFilter("is_default = true AND is_deleted = false");
+
+        builder.HasIndex(method => new { method.TenantId, method.ProviderToken })
+            .IsUnique()
+            .HasFilter("is_deleted = false");
+    }
+}
+
+/// <summary>Fluent configuration for <see cref="BillingProfile"/>.</summary>
+public sealed class BillingProfileConfiguration : BaseEntityConfiguration<BillingProfile>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<BillingProfile> builder)
+    {
+        builder.ToTable("billing_profiles");
+
+        builder.Property(profile => profile.CompanyName).HasMaxLength(200);
+        builder.Property(profile => profile.AddressLine1).HasMaxLength(200);
+        builder.Property(profile => profile.AddressLine2).HasMaxLength(200);
+        builder.Property(profile => profile.City).HasMaxLength(120);
+        builder.Property(profile => profile.Region).HasMaxLength(120);
+        builder.Property(profile => profile.PostalCode).HasMaxLength(24);
+        builder.Property(profile => profile.Country).HasMaxLength(2);
+        builder.Property(profile => profile.TaxId).HasMaxLength(64);
+        builder.Property(profile => profile.BillingEmail).HasMaxLength(254);
+
+        // One per tenant.
+        builder.HasIndex(profile => profile.TenantId)
+            .IsUnique()
+            .HasFilter("is_deleted = false");
+    }
+}

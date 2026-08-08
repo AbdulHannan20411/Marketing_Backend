@@ -36,6 +36,9 @@ public interface IBillingService
         CancelSubscriptionRequest request,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Reverses a pending cancellation before the period ends.</summary>
+    public Task<SubscriptionSnapshot> ResumeAsync(CancellationToken cancellationToken = default);
+
     /// <summary>Switches automatic renewal on or off.</summary>
     public Task<SubscriptionSnapshot> SetAutoRenewAsync(
         AutoRenewRequest request,

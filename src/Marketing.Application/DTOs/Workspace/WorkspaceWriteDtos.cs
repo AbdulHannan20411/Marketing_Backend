@@ -9,11 +9,39 @@ namespace Marketing.Application.DTOs.Workspace;
 /// <param name="Permissions">
 /// Starting grant. Anything beyond the Employee role's defaults is stored as a per-user override.
 /// </param>
+/// <param name="Role">
+/// Role to grant. Defaults to Employee; only an Admin may grant Admin, and Super Admin is never
+/// assignable here.
+/// </param>
+/// <param name="PermissionSetId">
+/// A saved set to start from, as an alternative to listing permissions. Ignored when
+/// <paramref name="Permissions"/> is supplied, because an explicit list is the more specific
+/// instruction.
+/// </param>
 public sealed record InviteEmployeeRequest(
     string Email,
     string Name,
     string JobTitle,
-    IReadOnlyList<string>? Permissions = null);
+    IReadOnlyList<string>? Permissions = null,
+    string? Role = null,
+    string? PermissionSetId = null);
+
+/// <summary>Request to change an employee's role.</summary>
+/// <param name="Role">New role: <c>Admin</c> or <c>Employee</c>.</param>
+public sealed record UpdateEmployeeRoleRequest(string Role);
+
+/// <summary>Request to change an employee's profile fields. Omitted fields are left alone.</summary>
+/// <param name="Name">Full name.</param>
+/// <param name="JobTitle">Job title.</param>
+/// <param name="Email">Address, which must not already belong to someone else.</param>
+public sealed record UpdateEmployeeRequest(
+    string? Name = null,
+    string? JobTitle = null,
+    string? Email = null);
+
+/// <summary>Request to apply a saved permission set to several employees.</summary>
+/// <param name="EmployeeIds">Employees to overwrite.</param>
+public sealed record ApplyPermissionSetRequest(IReadOnlyList<string> EmployeeIds);
 
 /// <summary>Request to replace an employee's effective permissions.</summary>
 /// <param name="Permissions">

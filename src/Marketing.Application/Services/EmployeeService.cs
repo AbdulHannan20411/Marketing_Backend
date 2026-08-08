@@ -18,6 +18,8 @@ public sealed class EmployeeService : IEmployeeService
     private readonly IUserRepository _users;
     private readonly IRepository<UserPermissionOverride> _overrides;
     private readonly IRepository<PermissionSet> _permissionSets;
+    private readonly IRepository<Role> _roles;
+    private readonly IRepository<UserRole> _userRoles;
     private readonly IRepository<TenantSubscription> _subscriptions;
     private readonly IRepository<SubscriptionPlan> _plans;
     private readonly IRefreshTokenRepository _refreshTokens;
@@ -27,12 +29,16 @@ public sealed class EmployeeService : IEmployeeService
     private readonly ITenantContext _tenantContext;
     private readonly IDateTimeProvider _clock;
     private readonly IAccountActivationService _activation;
+    private readonly ICurrentUser _currentUser;
+    private readonly IPlanGuard _planGuard;
 
     /// <summary>Initialises a new instance.</summary>
     public EmployeeService(
         IUserRepository users,
         IRepository<UserPermissionOverride> overrides,
         IRepository<PermissionSet> permissionSets,
+        IRepository<Role> roles,
+        IRepository<UserRole> userRoles,
         IRepository<TenantSubscription> subscriptions,
         IRepository<SubscriptionPlan> plans,
         IRefreshTokenRepository refreshTokens,
@@ -41,11 +47,15 @@ public sealed class EmployeeService : IEmployeeService
         IPasswordHasher passwordHasher,
         ITenantContext tenantContext,
         IDateTimeProvider clock,
-        IAccountActivationService activation)
+        IAccountActivationService activation,
+        ICurrentUser currentUser,
+        IPlanGuard planGuard)
     {
         _users = users;
         _overrides = overrides;
         _permissionSets = permissionSets;
+        _roles = roles;
+        _userRoles = userRoles;
         _subscriptions = subscriptions;
         _plans = plans;
         _refreshTokens = refreshTokens;
@@ -55,6 +65,8 @@ public sealed class EmployeeService : IEmployeeService
         _tenantContext = tenantContext;
         _clock = clock;
         _activation = activation;
+        _currentUser = currentUser;
+        _planGuard = planGuard;
     }
 
     /// <inheritdoc />
@@ -121,6 +133,12 @@ public sealed class EmployeeService : IEmployeeService
 
         await EnsureSeatAvailableAsync(cancellationToken);
 
+        EmployeeRules.EnsureRoleGrantable(request.Role ?? Roles.Employee, _currentUser);
+
+        var requested = request.Permissions ?? [];
+
+        await EnsureGrantableAsync(requested, cancellationToken);
+
         var employee = new User
         {
             TenantId = tenantId,
@@ -139,9 +157,9 @@ public sealed class EmployeeService : IEmployeeService
 
         _users.Add(employee);
 
-        if (request.Permissions is { Count: > 0 })
+        if (requested.Count > 0)
         {
-            foreach (var (permission, isGranted) in EffectivePermissions.Diff([Roles.Employee], request.Permissions))
+            foreach (var (permission, isGranted) in EffectivePermissions.Diff([Roles.Employee], requested))
             {
                 _overrides.Add(new UserPermissionOverride
                 {
@@ -180,6 +198,19 @@ public sealed class EmployeeService : IEmployeeService
 
         var roleNames = employee.UserRoles.Select(userRole => userRole.Role.Name).ToList();
 
+        // An Admin's or Super Admin's access comes from their role, not from overrides. Silently
+        // accepting an edit here would show the operator a saved matrix that changes nothing.
+        if (roleNames.Any(name =>
+                string.Equals(Roles.Normalise(name), Roles.Admin, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(Roles.Normalise(name), Roles.SuperAdmin, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new BusinessRuleException(
+                "role_derived_permissions",
+                "This person's permissions come from their role and cannot be edited individually.");
+        }
+
+        await EnsureGrantableAsync(request.Permissions, cancellationToken);
+
         var existing = await _queries.ToListAsync(
             _overrides.Query(asNoTracking: false).Where(entry => entry.UserId == id),
             cancellationToken);
@@ -202,15 +233,7 @@ public sealed class EmployeeService : IEmployeeService
             });
         }
 
-        // Rotating the stamp is what makes the change take effect promptly. Without it the
-        // employee keeps their old permissions until their access token lapses, which for a
-        // revocation is exactly the wrong behaviour.
-        var tracked = await _users.GetForUpdateAsync(id, cancellationToken);
-
-        if (tracked is not null)
-        {
-            tracked.SecurityStamp = Guid.NewGuid();
-        }
+        await RotateStampAsync(id, cancellationToken);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -229,6 +252,14 @@ public sealed class EmployeeService : IEmployeeService
 
         var employee = await _users.GetForUpdateAsync(id, cancellationToken)
                        ?? throw new NotFoundException("Employee", employeeId);
+
+        if (request.Status != EmployeeStatus.Active)
+        {
+            EmployeeRules.EnsureNotSelf(id, _currentUser, "suspend");
+            EmployeeRules.EnsureAnAdminRemains(
+                await CountOtherAdminsAsync(id, cancellationToken),
+                "suspend");
+        }
 
         employee.Status = request.Status switch
         {
@@ -257,12 +288,180 @@ public sealed class EmployeeService : IEmployeeService
     }
 
     /// <inheritdoc />
+    public async Task<EmployeeResponse> UpdateRoleAsync(
+        string employeeId,
+        UpdateEmployeeRoleRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var id = PublicId.Parse(PublicId.Employee, employeeId, "employee");
+
+        EmployeeRules.EnsureRoleGrantable(request.Role, _currentUser);
+        EmployeeRules.EnsureNotSelf(id, _currentUser, "change the role of");
+
+        var employee = await _users.FindWithRolesAsync(id, cancellationToken)
+                       ?? throw new NotFoundException("Employee", employeeId);
+
+        var target = Roles.Normalise(request.Role);
+        var wasAdmin = employee.UserRoles.Any(assignment =>
+            string.Equals(assignment.Role.NormalizedName, Roles.Normalise(Roles.Admin), StringComparison.Ordinal));
+
+        // Demoting the only Admin would leave the workspace unmanageable, which costs a support
+        // conversation to undo and is never what the operator meant.
+        if (wasAdmin && !string.Equals(target, Roles.Normalise(Roles.Admin), StringComparison.Ordinal))
+        {
+            EmployeeRules.EnsureAnAdminRemains(await CountOtherAdminsAsync(id, cancellationToken), "demote");
+        }
+
+        var role = await _queries.FirstOrDefaultAsync(
+            _roles.Query().Where(candidate => candidate.NormalizedName == target),
+            cancellationToken)
+            ?? throw new NotFoundException("Role", request.Role);
+
+        var existing = await _queries.ToListAsync(
+            _userRoles.Query(asNoTracking: false).Where(assignment => assignment.UserId == id),
+            cancellationToken);
+
+        foreach (var assignment in existing)
+        {
+            _userRoles.Remove(assignment);
+        }
+
+        _userRoles.Add(new UserRole
+        {
+            TenantId = employee.TenantId,
+            UserId = employee.Id,
+            RoleId = role.Id,
+        });
+
+        await RotateStampAsync(id, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return await LoadOneAsync(id, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<EmployeeResponse> UpdateAsync(
+        string employeeId,
+        UpdateEmployeeRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var id = PublicId.Parse(PublicId.Employee, employeeId, "employee");
+
+        var employee = await _users.GetForUpdateAsync(id, cancellationToken)
+                       ?? throw new NotFoundException("Employee", employeeId);
+
+        if (request.Email is { Length: > 0 } email)
+        {
+            var normalised = email.ToNormalisedEmail();
+
+            if (normalised != employee.NormalizedEmail
+                && await _users.IsEmailTakenAsync(normalised, id, cancellationToken))
+            {
+                throw new BusinessRuleException("email_taken", "That email address is already registered.");
+            }
+
+            employee.Email = email.Trim();
+            employee.NormalizedEmail = normalised;
+        }
+
+        employee.DisplayName = request.Name?.Trim() is { Length: > 0 } name ? name : employee.DisplayName;
+        employee.JobTitle = request.JobTitle?.Trim() ?? employee.JobTitle;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return await LoadOneAsync(id, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task ResendInviteAsync(string employeeId, CancellationToken cancellationToken = default)
+    {
+        var id = PublicId.Parse(PublicId.Employee, employeeId, "employee");
+
+        var employee = await _users.GetForUpdateAsync(id, cancellationToken)
+                       ?? throw new NotFoundException("Employee", employeeId);
+
+        if (employee.Status != AppConstants.UserStatus.Invited)
+        {
+            throw new BusinessRuleException(
+                "not_invited",
+                "That person has already accepted their invitation.");
+        }
+
+        // Issuing a new token consumes the old one, so a forwarded copy of the first email stops
+        // working. Resending must not leave two live ways into the same account.
+        await _activation.SendInvitationAsync(employee, null, cancellationToken);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task RevokeInviteAsync(string employeeId, CancellationToken cancellationToken = default)
+    {
+        var id = PublicId.Parse(PublicId.Employee, employeeId, "employee");
+
+        var employee = await _users.GetForUpdateAsync(id, cancellationToken)
+                       ?? throw new NotFoundException("Employee", employeeId);
+
+        if (employee.Status != AppConstants.UserStatus.Invited)
+        {
+            throw new BusinessRuleException(
+                "not_invited",
+                "That person has already accepted their invitation. Remove them instead.");
+        }
+
+        // The account never became real, so it goes with the invitation rather than lingering as
+        // an invited row nobody can act on. The seat is freed either way.
+        _users.Remove(employee);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<EmployeeResponse>> ApplyPermissionSetAsync(
+        string permissionSetId,
+        ApplyPermissionSetRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var setId = PublicId.Parse(PublicId.PermissionSet, permissionSetId, "permission set");
+
+        var set = await _queries.FirstOrDefaultAsync(
+            _permissionSets.Query().Where(candidate => candidate.Id == setId),
+            cancellationToken)
+            ?? throw new NotFoundException("Permission set", permissionSetId);
+
+        // Applying a set is a grant like any other, so it is subject to the same guards. A saved
+        // set must not become a way to hand out something the caller could not grant directly.
+        await EnsureGrantableAsync(set.Permissions, cancellationToken);
+
+        var applied = new List<EmployeeResponse>(request.EmployeeIds.Count);
+
+        foreach (var employeeId in request.EmployeeIds)
+        {
+            applied.Add(await UpdatePermissionsAsync(
+                employeeId,
+                new UpdatePermissionsRequest(set.Permissions),
+                cancellationToken));
+        }
+
+        return applied;
+    }
+
+    /// <inheritdoc />
     public async Task DeleteAsync(string employeeId, CancellationToken cancellationToken = default)
     {
         var id = PublicId.Parse(PublicId.Employee, employeeId, "employee");
 
         var employee = await _users.GetForUpdateAsync(id, cancellationToken)
                        ?? throw new NotFoundException("Employee", employeeId);
+
+        EmployeeRules.EnsureNotSelf(id, _currentUser, "remove");
+        EmployeeRules.EnsureAnAdminRemains(await CountOtherAdminsAsync(id, cancellationToken), "remove");
 
         await _refreshTokens.RevokeAllForUserAsync(
             employee.Id,
@@ -375,6 +574,52 @@ public sealed class EmployeeService : IEmployeeService
             "permissions",
             $"The {plan.Name} plan includes {maxEmployees} seats and all of them are in use. "
             + "Upgrade the plan or remove an employee first.");
+    }
+
+    /// <summary>
+    /// Rotates an account's security stamp so an access-affecting change lands immediately.
+    /// <para>
+    /// Without it the employee keeps their old access until their token lapses, which for a
+    /// revocation is exactly the wrong behaviour.
+    /// </para>
+    /// </summary>
+    private async Task RotateStampAsync(long employeeId, CancellationToken cancellationToken)
+    {
+        var tracked = await _users.GetForUpdateAsync(employeeId, cancellationToken);
+
+        if (tracked is not null)
+        {
+            tracked.SecurityStamp = Guid.NewGuid();
+        }
+    }
+
+    /// <summary>Runs every grant guard over a requested permission set.</summary>
+    private async Task EnsureGrantableAsync(
+        IReadOnlyList<string> permissions,
+        CancellationToken cancellationToken)
+    {
+        if (permissions.Count == 0)
+        {
+            return;
+        }
+
+        EmployeeRules.EnsureKnown(permissions);
+        EmployeeRules.EnsureCallerHolds(permissions, _currentUser);
+        EmployeeRules.EnsureWithinPlan(permissions, await _planGuard.EnabledModulesAsync(cancellationToken));
+    }
+
+    /// <summary>Counts the workspace's other administrators, excluding one account.</summary>
+    private Task<int> CountOtherAdminsAsync(long excluding, CancellationToken cancellationToken)
+    {
+        var adminRole = Roles.Normalise(Roles.Admin);
+
+        return _queries.CountAsync(
+            _users.Query()
+                .Where(user =>
+                    user.Id != excluding
+                    && user.Status == AppConstants.UserStatus.Active
+                    && user.UserRoles.Any(assignment => assignment.Role.NormalizedName == adminRole)),
+            cancellationToken);
     }
 
     private async Task<PermissionSet> LoadSetForUpdateAsync(string permissionSetId, CancellationToken cancellationToken)

@@ -2,6 +2,7 @@ using Asp.Versioning;
 using Marketing.API.Filters;
 using Marketing.Application.DTOs.Billing;
 using Marketing.Application.Interfaces;
+using Marketing.Application.Services;
 using Marketing.Common.Constants;
 using Marketing.Common.Responses;
 using Microsoft.AspNetCore.Authorization;
@@ -60,6 +61,20 @@ public sealed class SubscriptionController : ApiControllerBase
         var snapshot = await _billing.CancelAsync(request, cancellationToken);
 
         return Success(snapshot, "Subscription cancelled. Access continues until the period ends.");
+    }
+
+    /// <summary>Reverses a pending cancellation before the period ends.</summary>
+    /// <response code="200">The updated subscription.</response>
+    /// <response code="422">Nothing to resume, or the subscription has already lapsed.</response>
+    [HttpPost("resume")]
+    [RequirePermission(Permissions.Settings.Subscription)]
+    [ProducesResponseType(typeof(ApiResponse<SubscriptionSnapshot>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ResumeAsync(CancellationToken cancellationToken)
+    {
+        var snapshot = await _billing.ResumeAsync(cancellationToken);
+
+        return Success(snapshot, "Subscription resumed.");
     }
 
     /// <summary>Switches automatic renewal on or off.</summary>
@@ -240,5 +255,148 @@ public sealed class PlanAdministrationController : ApiControllerBase
         await _plans.DeleteAsync(id, cancellationToken);
 
         return SuccessEmpty("Plan retired.");
+    }
+}
+
+/// <summary>
+/// Stored payment instruments and the invoice address.
+/// <para>
+/// Not module-gated. A customer must always be able to see what they are paying for and fix a
+/// failed payment, whatever their plan includes.
+/// </para>
+/// </summary>
+[ApiVersion("1.0")]
+[Route("api/v{version:apiVersion}/billing")]
+[Authorize]
+public sealed class BillingProfileController : ApiControllerBase
+{
+    private readonly IBillingProfileService _profile;
+    private readonly ITenantScopeResolver _scope;
+
+    /// <summary>Initialises a new instance.</summary>
+    public BillingProfileController(IBillingProfileService profile, ITenantScopeResolver scope)
+    {
+        _profile = profile;
+        _scope = scope;
+    }
+
+    /// <summary>Returns every stored payment instrument, the default one first.</summary>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The stored instruments.</response>
+    [HttpGet("payment-methods")]
+    [RequirePermission(Permissions.Settings.Billing)]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<PaymentMethodResponse>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPaymentMethodsAsync(
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(await _profile.GetPaymentMethodsAsync(cancellationToken));
+    }
+
+    /// <summary>Stores a payment instrument from a processor token.</summary>
+    /// <remarks>
+    /// Send the token your client-side tokenisation returned, never card details. A request that
+    /// looks like it carries a card number is refused: keeping real numbers out of this API is
+    /// what keeps the platform outside PCI scope.
+    /// </remarks>
+    /// <param name="request">Processor token and instrument type.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The stored instrument.</response>
+    /// <response code="422">The request carried something other than a token.</response>
+    [HttpPost("payment-methods")]
+    [RequirePermission(Permissions.Settings.Billing)]
+    [ProducesResponseType(typeof(ApiResponse<PaymentMethodResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> AddPaymentMethodAsync(
+        [FromBody] AddPaymentMethodRequest request,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        var method = await _profile.AddPaymentMethodAsync(request, cancellationToken);
+
+        return Success(method, "Payment method saved.");
+    }
+
+    /// <summary>Removes a stored payment instrument.</summary>
+    /// <param name="id">Payment method identifier.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The instrument was removed.</response>
+    /// <response code="422">It is the only instrument and the subscription renews automatically.</response>
+    [HttpDelete("payment-methods/{id}")]
+    [RequirePermission(Permissions.Settings.Billing)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> RemovePaymentMethodAsync(
+        string id,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        await _profile.RemovePaymentMethodAsync(id, cancellationToken);
+
+        return SuccessEmpty("Payment method removed.");
+    }
+
+    /// <summary>Makes one instrument the one renewals and retries charge.</summary>
+    /// <param name="id">Payment method identifier.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The instrument that is now the default.</response>
+    [HttpPut("payment-methods/{id}/default")]
+    [RequirePermission(Permissions.Settings.Billing)]
+    [ProducesResponseType(typeof(ApiResponse<PaymentMethodResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SetDefaultPaymentMethodAsync(
+        string id,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        var method = await _profile.SetDefaultPaymentMethodAsync(id, cancellationToken);
+
+        return Success(method, "Default payment method updated.");
+    }
+
+    /// <summary>Returns the invoice address.</summary>
+    /// <remarks>Empty fields rather than a 404 when it has never been filled in.</remarks>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The billing profile.</response>
+    [HttpGet("profile")]
+    [RequirePermission(Permissions.Settings.Billing)]
+    [ProducesResponseType(typeof(ApiResponse<BillingProfileResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetProfileAsync(
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(await _profile.GetProfileAsync(cancellationToken));
+    }
+
+    /// <summary>Updates the invoice address. Omitted fields are left unchanged.</summary>
+    /// <param name="request">Fields to change.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The updated billing profile.</response>
+    [HttpPut("profile")]
+    [RequirePermission(Permissions.Settings.Billing)]
+    [ProducesResponseType(typeof(ApiResponse<BillingProfileResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdateProfileAsync(
+        [FromBody] UpdateBillingProfileRequest request,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(await _profile.UpdateProfileAsync(request, cancellationToken), "Billing details saved.");
     }
 }

@@ -239,3 +239,73 @@ public sealed class RenewalRecord : BaseEntity, IRequiresTenant
     /// <summary>Whether it renewed automatically or was paid manually.</summary>
     public bool Automatic { get; set; }
 }
+
+/// <summary>
+/// A stored means of payment, held as the processor's reference and nothing more.
+/// <para>
+/// <b>No card data is stored here and none ever reaches this API.</b> The browser tokenises the
+/// card directly with the processor; this row keeps that token plus the handful of display fields
+/// needed to render "Visa ending 4242". Storing a PAN would put the whole platform in PCI scope.
+/// </para>
+/// </summary>
+public sealed class PaymentMethod : BaseEntity, IRequiresTenant
+{
+    /// <summary>What kind of instrument this is.</summary>
+    public PaymentMethodKind Kind { get; set; } = PaymentMethodKind.Card;
+
+    /// <summary>The processor's identifier for the stored instrument.</summary>
+    public required string ProviderToken { get; set; }
+
+    /// <summary>Card network or bank name, for display only.</summary>
+    public string? Brand { get; set; }
+
+    /// <summary>Last four digits, for display only. Never a full number.</summary>
+    public string? Last4 { get; set; }
+
+    /// <summary>Expiry month, for display only.</summary>
+    public int? ExpiryMonth { get; set; }
+
+    /// <summary>Expiry year, for display only.</summary>
+    public int? ExpiryYear { get; set; }
+
+    /// <summary>Whether renewals and retries charge this instrument.</summary>
+    public bool IsDefault { get; set; }
+}
+
+/// <summary>
+/// The company details that appear on an invoice.
+/// <para>
+/// One row per tenant. Separate from <c>Tenant</c> because a billing address is a legal record that
+/// changes on its own schedule, and because a tax identifier has different retention rules from an
+/// organisation's display name.
+/// </para>
+/// </summary>
+public sealed class BillingProfile : BaseEntity, IRequiresTenant
+{
+    /// <summary>Legal entity name, which may differ from the workspace name.</summary>
+    public string CompanyName { get; set; } = string.Empty;
+
+    /// <summary>First address line.</summary>
+    public string AddressLine1 { get; set; } = string.Empty;
+
+    /// <summary>Second address line.</summary>
+    public string AddressLine2 { get; set; } = string.Empty;
+
+    /// <summary>Town or city.</summary>
+    public string City { get; set; } = string.Empty;
+
+    /// <summary>Region, state or county.</summary>
+    public string Region { get; set; } = string.Empty;
+
+    /// <summary>Postal or ZIP code.</summary>
+    public string PostalCode { get; set; } = string.Empty;
+
+    /// <summary>ISO 3166-1 alpha-2 country code.</summary>
+    public string Country { get; set; } = string.Empty;
+
+    /// <summary>VAT or tax registration identifier.</summary>
+    public string TaxId { get; set; } = string.Empty;
+
+    /// <summary>Address invoices are sent to, which need not be the account owner's.</summary>
+    public string BillingEmail { get; set; } = string.Empty;
+}

@@ -194,11 +194,58 @@ public sealed class BillingService : IBillingService
     {
         var (subscription, plan) = await LoadSubscriptionAsync(cancellationToken, tracked: true);
 
-        // Cancelled, not terminated: access runs to the end of the paid period. Cutting it off
-        // immediately would be taking money for time the customer cannot use.
-        subscription.Status = SubscriptionStatus.Cancelled;
+        ArgumentNullException.ThrowIfNull(request);
+
         subscription.AutoRenew = false;
         subscription.NextRenewalAt = null;
+
+        if (request.Immediate)
+        {
+            subscription.Status = SubscriptionStatus.Cancelled;
+            subscription.ExpiresAt = _clock.UtcNow;
+        }
+        else
+        {
+            // Still active, not yet cancelled. Access runs to the end of the paid period, and the
+            // status only changes when it lapses - flipping it now would show the customer a
+            // cancelled workspace they are still paying for and can still use.
+            subscription.Status = SubscriptionStatus.Active;
+            subscription.ExpiresAt = subscription.CurrentPeriodEnd;
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return new SubscriptionSnapshot(
+            MapSubscription(subscription, plan),
+            MapPlan(plan),
+            await BuildUsageAsync(plan, subscription, cancellationToken));
+    }
+
+    /// <inheritdoc />
+    public async Task<SubscriptionSnapshot> ResumeAsync(CancellationToken cancellationToken = default)
+    {
+        var (subscription, plan) = await LoadSubscriptionAsync(cancellationToken, tracked: true);
+
+        // Only a cancellation that has not yet taken effect can be reversed. Once the period has
+        // lapsed there is nothing to resume - that is a new purchase, and pretending otherwise
+        // would give away time nobody paid for.
+        if (subscription.ExpiresAt <= _clock.UtcNow || subscription.Status == SubscriptionStatus.Expired)
+        {
+            throw new BusinessRuleException(
+                "subscription_lapsed",
+                "This subscription has already ended. Choose a plan to start again.");
+        }
+
+        if (subscription.AutoRenew && subscription.Status == SubscriptionStatus.Active)
+        {
+            throw new BusinessRuleException(
+                "not_cancelled",
+                "This subscription is not scheduled to end.");
+        }
+
+        subscription.Status = SubscriptionStatus.Active;
+        subscription.AutoRenew = true;
+        subscription.NextRenewalAt = subscription.CurrentPeriodEnd;
         subscription.ExpiresAt = subscription.CurrentPeriodEnd;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);

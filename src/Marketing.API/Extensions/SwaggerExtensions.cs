@@ -41,11 +41,15 @@ public static class SwaggerExtensions
             // Microsoft.OpenApi v2 split the scheme from the reference to it: a requirement now
             // points at a registered definition by id instead of embedding a self-referencing
             // copy of the scheme object.
-            // Swashbuckle 10 takes a factory rather than an instance, so the requirement can
-            // resolve its scheme reference against the document being generated.
-            options.AddSecurityRequirement(_ => new OpenApiSecurityRequirement
+            //
+            // The document argument is not optional in practice. A reference constructed without
+            // it has nothing to resolve against, so it serialises as an empty object and the
+            // document ends up declaring "security": [ { } ] - which reads as "no authentication
+            // required". Swagger UI then stores the token from the Authorize dialog and never
+            // sends it, and every call comes back 401 with no Authorization header in the curl.
+            options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
             {
-                [new OpenApiSecuritySchemeReference(schemeId)] = [],
+                [new OpenApiSecuritySchemeReference(schemeId, document)] = [],
             });
 
             // Surfaces the same XML comments that document the code, so the API reference and the

@@ -76,7 +76,11 @@ public sealed record ChangePlanRequest(string PlanId, BillingCycle BillingCycle)
 
 /// <summary>Request to cancel a subscription.</summary>
 /// <param name="Reason">Optional free-text reason, recorded for churn analysis.</param>
-public sealed record CancelSubscriptionRequest(string? Reason = null);
+/// <param name="Immediate">
+/// Ends the subscription now rather than at the end of the paid period. Defaults to false, because
+/// end-of-period is what "cancel" means to almost everyone who presses it.
+/// </param>
+public sealed record CancelSubscriptionRequest(string? Reason = null, bool Immediate = false);
 
 /// <summary>Request to switch automatic renewal on or off.</summary>
 /// <param name="Enabled">Whether the subscription should renew automatically.</param>

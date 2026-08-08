@@ -13,6 +13,7 @@ namespace Marketing.API.Controllers;
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/employees")]
 [Authorize]
+[RequireModule(PlanModules.Employees)]
 public sealed class EmployeesController : ApiControllerBase
 {
     private readonly IEmployeeService _employees;
@@ -96,6 +97,94 @@ public sealed class EmployeesController : ApiControllerBase
         return Success(employee, $"{employee.Name} is now {employee.Status}.");
     }
 
+    /// <summary>Changes an employee's role.</summary>
+    /// <remarks>
+    /// Only an Admin may grant the Admin role, Super Admin is never assignable here, and nobody may
+    /// change their own role or demote the last remaining Admin.
+    /// </remarks>
+    /// <param name="id">Employee identifier.</param>
+    /// <param name="request">New role.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The updated employee.</response>
+    /// <response code="403">The caller may not grant that role.</response>
+    [HttpPut("{id}/role")]
+    [RequirePermission(Permissions.Settings.Employees)]
+    [ProducesResponseType(typeof(ApiResponse<EmployeeResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> UpdateRoleAsync(
+        string id,
+        [FromBody] UpdateEmployeeRoleRequest request,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        var employee = await _employees.UpdateRoleAsync(id, request, cancellationToken);
+
+        return Success(employee, $"{employee.Name} is now {employee.Role}.");
+    }
+
+    /// <summary>Updates an employee's name, job title or email.</summary>
+    /// <param name="id">Employee identifier.</param>
+    /// <param name="request">Fields to change.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The updated employee.</response>
+    [HttpPut("{id}")]
+    [RequirePermission(Permissions.Settings.Employees)]
+    [ProducesResponseType(typeof(ApiResponse<EmployeeResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdateAsync(
+        string id,
+        [FromBody] UpdateEmployeeRequest request,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(await _employees.UpdateAsync(id, request, cancellationToken), "Employee saved.");
+    }
+
+    /// <summary>Sends a fresh invitation, invalidating any outstanding one.</summary>
+    /// <param name="id">Employee identifier.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The invitation was sent again.</response>
+    [HttpPost("{id}/resend-invite")]
+    [RequirePermission(Permissions.Settings.Employees)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ResendInviteAsync(
+        string id,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        await _employees.ResendInviteAsync(id, cancellationToken);
+
+        return SuccessEmpty("Invitation sent again.");
+    }
+
+    /// <summary>Withdraws a pending invitation and frees the seat.</summary>
+    /// <param name="id">Employee identifier.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The invitation was withdrawn.</response>
+    [HttpDelete("{id}/invite")]
+    [RequirePermission(Permissions.Settings.Employees)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> RevokeInviteAsync(
+        string id,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        await _employees.RevokeInviteAsync(id, cancellationToken);
+
+        return SuccessEmpty("Invitation withdrawn.");
+    }
+
     /// <summary>Removes an employee and ends their sessions.</summary>
     /// <param name="id">Employee identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -115,6 +204,7 @@ public sealed class EmployeesController : ApiControllerBase
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/permission-sets")]
 [Authorize]
+[RequireModule(PlanModules.Employees)]
 public sealed class PermissionSetsController : ApiControllerBase
 {
     private readonly IEmployeeService _employees;
@@ -187,6 +277,32 @@ public sealed class PermissionSetsController : ApiControllerBase
         await _employees.DeletePermissionSetAsync(id, cancellationToken);
 
         return SuccessEmpty("Permission set deleted.");
+    }
+
+    /// <summary>Applies a saved set to several employees, overwriting their permissions.</summary>
+    /// <remarks>
+    /// Subject to the same guards as editing permissions directly, so a saved set cannot become a
+    /// way to grant something the caller could not grant by hand.
+    /// </remarks>
+    /// <param name="id">Permission set identifier.</param>
+    /// <param name="request">Employees to apply it to.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The updated employees.</response>
+    [HttpPost("{id}/apply")]
+    [RequirePermission(Permissions.Settings.Employees)]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<EmployeeResponse>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ApplyAsync(
+        string id,
+        [FromBody] ApplyPermissionSetRequest request,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        var employees = await _employees.ApplyPermissionSetAsync(id, request, cancellationToken);
+
+        return Success(employees, $"Applied to {employees.Count} people.");
     }
 }
 

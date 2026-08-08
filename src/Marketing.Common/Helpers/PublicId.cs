@@ -66,6 +66,9 @@ public static class PublicId
     /// <summary>Prefix for delivery failures.</summary>
     public const string DeliveryFailure = "dlf";
 
+    /// <summary>Prefix for stored payment methods.</summary>
+    public const string PaymentMethod = "pm";
+
     private const char Separator = '_';
 
     /// <summary>Formats a key as its public identifier.</summary>

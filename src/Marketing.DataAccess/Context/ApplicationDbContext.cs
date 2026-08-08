@@ -119,6 +119,12 @@ public class ApplicationDbContext : DbContext
     /// <summary>Renewal records.</summary>
     public DbSet<RenewalRecord> RenewalRecords => Set<RenewalRecord>();
 
+    /// <summary>Stored payment instruments, held as processor tokens only.</summary>
+    public DbSet<PaymentMethod> PaymentMethods => Set<PaymentMethod>();
+
+    /// <summary>Invoice addresses.</summary>
+    public DbSet<BillingProfile> BillingProfiles => Set<BillingProfile>();
+
     /// <summary>Notifications.</summary>
     public DbSet<Notification> Notifications => Set<Notification>();
 

@@ -40,8 +40,36 @@ public interface IEmployeeService
         UpdateEmployeeStatusRequest request,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Changes an employee's role.</summary>
+    /// <remarks>
+    /// Rotates their security stamp, so the new role takes effect on their next request rather
+    /// than whenever their current token happens to lapse.
+    /// </remarks>
+    public Task<EmployeeResponse> UpdateRoleAsync(
+        string employeeId,
+        UpdateEmployeeRoleRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Changes an employee's name, job title or email. Omitted fields are left alone.</summary>
+    public Task<EmployeeResponse> UpdateAsync(
+        string employeeId,
+        UpdateEmployeeRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Issues a fresh invitation, invalidating any outstanding one.</summary>
+    public Task ResendInviteAsync(string employeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>Withdraws a pending invitation and removes the account it was for.</summary>
+    public Task RevokeInviteAsync(string employeeId, CancellationToken cancellationToken = default);
+
     /// <summary>Removes an employee and ends their sessions.</summary>
     public Task DeleteAsync(string employeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>Overwrites several employees' permissions with a saved set.</summary>
+    public Task<IReadOnlyList<EmployeeResponse>> ApplyPermissionSetAsync(
+        string permissionSetId,
+        ApplyPermissionSetRequest request,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Creates a permission set.</summary>
     public Task<PermissionSetResponse> CreatePermissionSetAsync(

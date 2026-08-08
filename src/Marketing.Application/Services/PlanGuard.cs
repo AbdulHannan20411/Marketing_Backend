@@ -42,6 +42,16 @@ public interface IPlanGuard
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns><see cref="int.MaxValue"/> when the plan is unlimited or no plan applies.</returns>
     public Task<int> RemainingContactCapacityAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Module keys the resolved tenant's plan includes.
+    /// </summary>
+    /// <remarks>
+    /// Every module when no plan applies, so platform-level work is not accidentally restricted by
+    /// a commercial rule that has nothing to say about it.
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<IReadOnlyCollection<string>> EnabledModulesAsync(CancellationToken cancellationToken = default);
 }
 
 /// <inheritdoc cref="IPlanGuard" />
@@ -125,6 +135,14 @@ public sealed class PlanGuard : IPlanGuard
         var stored = await _queries.CountAsync(_contacts.Query(), cancellationToken);
 
         return Math.Max(0, ceiling - stored);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyCollection<string>> EnabledModulesAsync(CancellationToken cancellationToken = default)
+    {
+        var plan = await ResolvePlanAsync(cancellationToken);
+
+        return plan?.EnabledModules ?? [.. PlanModules.All];
     }
 
     /// <summary>Loads the tenant's plan once per request, or null when none applies.</summary>
