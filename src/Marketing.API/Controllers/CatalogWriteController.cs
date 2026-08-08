@@ -394,7 +394,7 @@ public sealed class AdminAccountController : ApiControllerBase
     /// <response code="200">The created account.</response>
     /// <response code="409">The address or organisation name is already in use.</response>
     [HttpPost]
-    //[RequirePermission(Permissions.Platform.Tenants)]
+    [RequirePermission(Permissions.Platform.Tenants)]
     [ProducesResponseType(typeof(ApiResponse<AdminAccount>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> CreateAsync(
