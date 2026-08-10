@@ -34,6 +34,12 @@ public sealed class SecurityHeadersMiddleware
     /// <summary>Path prefix the documentation is served under.</summary>
     private const string DocumentationPath = "/swagger";
 
+    /// <summary>
+    /// Path segment the development-only helper pages sit under — the mailbox and the pages an
+    /// emailed link lands on. They render HTML and post a form, which the API policy forbids.
+    /// </summary>
+    private const string DeveloperToolsSegment = "/dev/";
+
     private readonly RequestDelegate _next;
     private readonly bool _servesDocumentation;
 
@@ -82,8 +88,9 @@ public sealed class SecurityHeadersMiddleware
         return _next(context);
     }
 
-    /// <summary>Whether a path belongs to the API documentation.</summary>
+    /// <summary>Whether a path belongs to the documentation or the development-only helper pages.</summary>
     /// <param name="path">Request path.</param>
     private static bool IsDocumentation(PathString path) =>
-        path.StartsWithSegments(DocumentationPath, StringComparison.OrdinalIgnoreCase);
+        path.StartsWithSegments(DocumentationPath, StringComparison.OrdinalIgnoreCase)
+        || path.Value?.Contains(DeveloperToolsSegment, StringComparison.OrdinalIgnoreCase) == true;
 }

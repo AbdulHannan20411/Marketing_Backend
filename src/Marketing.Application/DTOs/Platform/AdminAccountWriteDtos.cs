@@ -12,11 +12,13 @@ namespace Marketing.Application.DTOs.Platform;
 /// <param name="Name">Full name of the account owner.</param>
 /// <param name="Email">Owner's email address.</param>
 /// <param name="Organisation">Organisation name.</param>
+/// /// <param name="Password">Password name.</param>
 /// <param name="Plan">Commercial plan band.</param>
 public sealed record CreateAdminAccountRequest(
     string Name,
     string Email,
     string Organisation,
+    string Password,
     TenantPlan Plan = TenantPlan.Starter);
 
 /// <summary>Request to update an Admin account. Omitted fields are left unchanged.</summary>

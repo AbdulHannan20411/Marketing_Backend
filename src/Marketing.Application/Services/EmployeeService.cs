@@ -133,9 +133,19 @@ public sealed class EmployeeService : IEmployeeService
 
         await EnsureSeatAvailableAsync(cancellationToken);
 
-        EmployeeRules.EnsureRoleGrantable(request.Role ?? Roles.Employee, _currentUser);
+        var roleName = request.Role ?? Roles.Employee;
 
-        var requested = request.Permissions ?? [];
+        EmployeeRules.EnsureRoleGrantable(roleName, _currentUser);
+
+        var role = await _queries.FirstOrDefaultAsync(
+            _roles.Query().Where(candidate => candidate.NormalizedName == Roles.Normalise(roleName)),
+            cancellationToken)
+            ?? throw new NotFoundException("Role", roleName);
+
+        // An explicit list wins over a saved set, because it is the more specific instruction.
+        var requested = request.Permissions ?? await ResolveSetPermissionsAsync(
+            request.PermissionSetId,
+            cancellationToken);
 
         await EnsureGrantableAsync(requested, cancellationToken);
 
@@ -157,9 +167,21 @@ public sealed class EmployeeService : IEmployeeService
 
         _users.Add(employee);
 
+        // The role assignment, without which the invitee signs in with no role and therefore no
+        // permissions at all - the request's role was previously validated and then discarded.
+        _userRoles.Add(new UserRole
+        {
+            TenantId = tenantId,
+            User = employee,
+            RoleId = role.Id,
+        });
+
         if (requested.Count > 0)
         {
-            foreach (var (permission, isGranted) in EffectivePermissions.Diff([Roles.Employee], requested))
+            // Diffed against the role actually granted, not against Employee. Diffing against the
+            // wrong role writes revokes for permissions the person never had and misses grants for
+            // ones they now do.
+            foreach (var (permission, isGranted) in EffectivePermissions.Diff([role.Name], requested))
             {
                 _overrides.Add(new UserPermissionOverride
                 {
@@ -591,6 +613,26 @@ public sealed class EmployeeService : IEmployeeService
         {
             tracked.SecurityStamp = Guid.NewGuid();
         }
+    }
+
+    /// <summary>Reads the permissions out of a saved set, or none when no set was named.</summary>
+    private async Task<IReadOnlyList<string>> ResolveSetPermissionsAsync(
+        string? permissionSetId,
+        CancellationToken cancellationToken)
+    {
+        if (permissionSetId is not { Length: > 0 })
+        {
+            return [];
+        }
+
+        var id = PublicId.Parse(PublicId.PermissionSet, permissionSetId, "permission set");
+
+        var set = await _queries.FirstOrDefaultAsync(
+            _permissionSets.Query().Where(candidate => candidate.Id == id),
+            cancellationToken)
+            ?? throw new NotFoundException("Permission set", permissionSetId);
+
+        return set.Permissions;
     }
 
     /// <summary>Runs every grant guard over a requested permission set.</summary>

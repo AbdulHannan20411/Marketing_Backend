@@ -9,6 +9,7 @@ using Marketing.Application.Extensions;
 using Marketing.Business.Extensions;
 using Marketing.Common.Constants;
 using Marketing.DataAccess.Extensions;
+using Marketing.Infrastructure.Email;
 using Marketing.Infrastructure.Extensions;
 using Marketing.Infrastructure.Logging;
 using Marketing.Scheduler.Extensions;
@@ -38,6 +39,16 @@ try
     builder.Services.AddRepositories();
     builder.Services.AddApplicationServices(builder.Configuration);
     builder.Services.AddInfrastructure(builder.Configuration);
+
+    if (builder.Environment.IsDevelopment())
+    {
+        // Keeps a copy of every message the platform tries to send, so an invitation or reset can
+        // be completed without a mail provider. Registered here rather than inside AddInfrastructure
+        // so the capture path cannot reach any other environment: invitation tokens are stored
+        // hashed, so the raw token exists only in the message body this holds in memory.
+        builder.Services.AddSingleton<DevMailbox>();
+        builder.Services.AddSingleton<IEmailSender, CapturingEmailSender>();
+    }
 
     // Discovers every [ScheduledJob] class in Marketing.Scheduler and wires it into Quartz.
     // Adding a job - an email dispatcher, a campaign runner - needs no change here.

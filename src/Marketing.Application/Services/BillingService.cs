@@ -26,6 +26,7 @@ public sealed class BillingService : IBillingService
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IPaymentGateway _gateway;
+    private readonly ITenantContext _tenantContext;
     private readonly IDateTimeProvider _clock;
 
     /// <summary>Initialises a new instance.</summary>
@@ -43,6 +44,7 @@ public sealed class BillingService : IBillingService
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
         IPaymentGateway gateway,
+        ITenantContext tenantContext,
         IDateTimeProvider clock)
     {
         _subscriptions = subscriptions;
@@ -58,6 +60,7 @@ public sealed class BillingService : IBillingService
         _queries = queries;
         _unitOfWork = unitOfWork;
         _gateway = gateway;
+        _tenantContext = tenantContext;
         _clock = clock;
     }
 
@@ -134,7 +137,6 @@ public sealed class BillingService : IBillingService
         ArgumentNullException.ThrowIfNull(request);
 
         var planId = PublicId.Parse(PublicId.Plan, request.PlanId, "plan");
-        var (subscription, currentPlan) = await LoadSubscriptionAsync(cancellationToken, tracked: true);
 
         var target = await _plans.GetForUpdateAsync(planId, cancellationToken)
                      ?? throw new NotFoundException("Plan", request.PlanId);
@@ -143,6 +145,20 @@ public sealed class BillingService : IBillingService
         {
             throw new BusinessRuleException("plan_not_available", $"The {target.Name} plan is not available.");
         }
+
+        // A tenant that has never subscribed reaches this endpoint from the "choose a plan" state,
+        // which is what GET /subscription's 404 tells the client to render. Without this branch
+        // that state is a dead end: the only way to buy a first plan would be to already have one.
+        var existing = await _queries.FirstOrDefaultAsync(
+            _subscriptions.Query(asNoTracking: false),
+            cancellationToken);
+
+        if (existing is null)
+        {
+            return await StartSubscriptionAsync(target, request.BillingCycle, cancellationToken);
+        }
+
+        var (subscription, currentPlan) = (existing, await LoadPlanAsync(existing, cancellationToken));
 
         var usage = await BuildUsageAsync(target, subscription, cancellationToken);
 
@@ -220,6 +236,69 @@ public sealed class BillingService : IBillingService
             MapPlan(plan),
             await BuildUsageAsync(plan, subscription, cancellationToken));
     }
+
+    /// <summary>
+    /// Creates a tenant's first subscription.
+    /// </summary>
+    /// <remarks>
+    /// A trial when the plan offers one, otherwise active immediately. No proration and no charge:
+    /// no payment provider is configured, so this records the commercial state and nothing more.
+    /// </remarks>
+    /// <param name="plan">Plan being bought.</param>
+    /// <param name="cycle">Billing cadence.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task<SubscriptionSnapshot> StartSubscriptionAsync(
+        SubscriptionPlan plan,
+        BillingCycle cycle,
+        CancellationToken cancellationToken)
+    {
+        var now = _clock.UtcNow;
+        var periodEnd = cycle == BillingCycle.Yearly
+            ? now.AddYears(1)
+            : now.AddMonths(Math.Max(1, plan.RenewalPeriodMonths));
+
+        var isTrial = plan.TrialDays > 0;
+
+        // A trial ends when the trial ends, not when the paid period would have. Setting expiry to
+        // the period end would silently give away the whole first period for free.
+        var expiresAt = isTrial ? now.AddDays(plan.TrialDays) : periodEnd;
+
+        var subscription = new TenantSubscription
+        {
+            TenantId = _tenantContext.RequireTenantId(),
+            SubscriptionPlanId = plan.Id,
+            Status = isTrial ? SubscriptionStatus.Trial : SubscriptionStatus.Active,
+            BillingCycle = cycle,
+            CurrentPeriodStart = now,
+            CurrentPeriodEnd = periodEnd,
+            ExpiresAt = expiresAt,
+            NextRenewalAt = periodEnd,
+            AutoRenew = true,
+            TrialEndsAt = isTrial ? expiresAt : null,
+            SeatsPurchased = plan.MaxEmployees ?? 0,
+            Amount = PriceFor(plan, cycle),
+            Currency = plan.Currency,
+        };
+
+        _subscriptions.Add(subscription);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return new SubscriptionSnapshot(
+            MapSubscription(subscription, plan),
+            MapPlan(plan),
+            await BuildUsageAsync(plan, subscription, cancellationToken));
+    }
+
+    /// <summary>Loads the plan a subscription points at.</summary>
+    private async Task<SubscriptionPlan> LoadPlanAsync(
+        TenantSubscription subscription,
+        CancellationToken cancellationToken) =>
+        await _queries.FirstOrDefaultAsync(
+            _plans.Query(asNoTracking: false).Where(plan => plan.Id == subscription.SubscriptionPlanId),
+            cancellationToken)
+        ?? throw new NotFoundException("Plan", subscription.SubscriptionPlanId.ToString(
+            System.Globalization.CultureInfo.InvariantCulture));
 
     /// <inheritdoc />
     public async Task<SubscriptionSnapshot> ResumeAsync(CancellationToken cancellationToken = default)

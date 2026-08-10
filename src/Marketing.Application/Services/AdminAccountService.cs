@@ -149,7 +149,7 @@ public sealed class AdminAccountService : IAdminAccountService
 
             // An unusable placeholder. The invitation flow sets a real password; until then this
             // hash matches nothing anyone can type.
-            PasswordHash = _passwordHasher.Hash(Guid.NewGuid().ToString("N")),
+            PasswordHash = _passwordHasher.Hash(request.Password),
 
             Status = AppConstants.UserStatus.Invited,
             SecurityStamp = Guid.NewGuid(),
