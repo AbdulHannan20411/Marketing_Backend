@@ -39,6 +39,11 @@ public static class ApplicationServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.AddOptions<ImportOptions>()
+            .Bind(configuration.GetSection(ImportOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         services.AddSingleton<IPasswordPolicy, PasswordPolicy>();
         services.AddScoped<IAccountActivationService, AccountActivationService>();
         services.AddScoped<IAuthenticationService, AuthenticationService>();
@@ -58,6 +63,11 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IPlatformService, PlatformService>();
         services.AddScoped<IContactWriteService, ContactWriteService>();
         services.AddScoped<IContactImportService, ContactImportService>();
+        services.AddScoped<Services.Imports.IImportHistoryService, Services.Imports.ImportHistoryService>();
+        services.AddScoped<Services.Imports.IImportService, Services.Imports.ImportService>();
+        services.AddScoped<Services.Imports.IImportJobDispatcher, Services.Imports.ImportJobDispatcher>();
+        services.AddScoped<Services.Imports.IImportProcessingService, Services.Imports.ImportProcessingService>();
+        services.AddScoped<Services.Imports.IImportJobRunner, Services.Imports.ImportJobRunner>();
         services.AddScoped<ICatalogService, CatalogService>();
         services.AddScoped<ICampaignWriteService, CampaignWriteService>();
         services.AddScoped<IAdminAccountService, AdminAccountService>();

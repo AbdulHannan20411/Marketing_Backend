@@ -108,4 +108,18 @@ public static class CatalogQueryExtensions
 
         return source.Where(tag => EF.Functions.ILike(tag.Name, name));
     }
+
+    /// <summary>Matches an import batch on its file name, case-insensitively.</summary>
+    /// <param name="source">Batches to filter.</param>
+    /// <param name="search">Free-text term. Empty means no filter.</param>
+    public static IQueryable<ContactImportBatch> WhereFileNameMatches(
+        this IQueryable<ContactImportBatch> source,
+        string? search)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        return string.IsNullOrWhiteSpace(search)
+            ? source
+            : source.Where(batch => EF.Functions.ILike(batch.FileName, $"%{search.Trim()}%"));
+    }
 }

@@ -35,3 +35,6 @@ secrets.json
 data/
 *.pfx
 *.key
+
+# Local file storage. Uploaded imports and generated reports are tenant data, not source.
+src/Marketing.API/App_Data/

@@ -27,7 +27,15 @@ public static class CorsExtensions
             policy
                 .WithOrigins(corsOptions.AllowedOrigins)
                 .AllowAnyMethod()
-                .WithHeaders("Authorization", "Content-Type", "Accept", AppConstants.Headers.CorrelationId)
+                .WithHeaders(
+                    "Authorization",
+                    "Content-Type",
+                    "Accept",
+                    // SignalR sends this on its negotiate request. Without it the browser rejects
+                    // the preflight and the realtime hub never connects — which shows up as
+                    // progress bars that never move, not as a CORS error the operator can read.
+                    "X-Requested-With",
+                    AppConstants.Headers.CorrelationId)
                 // Without this the browser hides these from the client's JavaScript, so the SPA
                 // cannot read paging counts or surface a correlation id in an error report.
                 .WithExposedHeaders(

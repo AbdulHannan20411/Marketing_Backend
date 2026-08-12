@@ -121,7 +121,6 @@ public sealed class AdminAccountService : IAdminAccountService
             Slug = slug,
             ContactEmail = request.Email.Trim(),
             Status = AppConstants.TenantStatus.Pending,
-            PlanBand = request.Plan,
         };
 
         _tenants.Add(tenant);
@@ -147,9 +146,10 @@ public sealed class AdminAccountService : IAdminAccountService
             DisplayName = request.Name.Trim(),
             JobTitle = "Administrator",
 
-            // An unusable placeholder. The invitation flow sets a real password; until then this
-            // hash matches nothing anyone can type.
-            PasswordHash = _passwordHasher.Hash(request.Password),
+            // An unusable placeholder, and deliberately random. The owner sets a real password
+            // through the invitation link; until then this hash matches nothing anyone can type,
+            // and nobody - including whoever created the account - knows a value that would.
+            PasswordHash = _passwordHasher.Hash(Guid.NewGuid().ToString("N")),
 
             Status = AppConstants.UserStatus.Invited,
             SecurityStamp = Guid.NewGuid(),

@@ -104,6 +104,17 @@ public static class AppConstants
         public const string MetaSignature = "X-Hub-Signature-256";
     }
 
+    /// <summary>Media types this platform serves files under.</summary>
+    public static class ContentTypes
+    {
+        /// <summary>Comma-separated values.</summary>
+        public const string Csv = "text/csv";
+
+        /// <summary>An Excel workbook in the Open XML format.</summary>
+        public const string Xlsx =
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    }
+
     /// <summary>
     /// Authorization policy names. Controllers reference these rather than raw role strings, so the
     /// mapping from intent to roles stays in exactly one place.
@@ -290,6 +301,45 @@ public static class AppConstants
     }
 
     /// <summary>Where an individual campaign message has got to.</summary>
+    /// <summary>What an asynchronous import job asks a worker to do.</summary>
+    public enum ImportJobKind
+    {
+        /// <summary>Read the uploaded file, validate it and stage its rows.</summary>
+        Process,
+
+        /// <summary>Write the staged rows as contacts.</summary>
+        Commit,
+
+        /// <summary>Build the failed-record report.</summary>
+        ExportErrors,
+    }
+
+    /// <summary>Where a queued import job has got to.</summary>
+    public enum ImportJobState
+    {
+        /// <summary>Waiting for a worker.</summary>
+        Pending,
+
+        /// <summary>Claimed by a worker.</summary>
+        Claimed,
+
+        /// <summary>Finished successfully.</summary>
+        Succeeded,
+
+        /// <summary>Abandoned after exhausting its attempts. The dead letter.</summary>
+        Failed,
+    }
+
+    /// <summary>What a commit does with a row whose phone number already exists.</summary>
+    public enum ImportDuplicateStrategy
+    {
+        /// <summary>Leave the stored contact untouched and count the row as skipped.</summary>
+        Skip,
+
+        /// <summary>Apply the file's values over the stored contact.</summary>
+        Update,
+    }
+
     public enum CampaignMessageStatus
     {
         /// <summary>Queued, not yet handed to Meta.</summary>

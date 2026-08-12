@@ -73,14 +73,117 @@ public static class ContractEnums
     /// <summary>State of a staged CSV import.</summary>
     public enum ContactImportStatus
     {
-        /// <summary>Uploaded and parsed; waiting for the operator to map columns.</summary>
+        /// <summary>Accepted and stored; the parse has not started.</summary>
+        Queued,
+
+        /// <summary>A worker is reading and validating the file.</summary>
+        Processing,
+
+        /// <summary>Parsed; waiting for the operator to map columns.</summary>
         AwaitingMapping,
 
-        /// <summary>Committed. Contacts were created.</summary>
-        Committed,
+        /// <summary>Mapped and previewed; waiting for the operator to confirm.</summary>
+        AwaitingConfirmation,
 
-        /// <summary>Abandoned or expired without being committed.</summary>
-        Discarded,
+        /// <summary>A worker is writing contacts.</summary>
+        Committing,
+
+        /// <summary>Finished with every usable row written.</summary>
+        Completed,
+
+        /// <summary>Finished, but some rows could not be used. Their reasons are on the batch.</summary>
+        CompletedWithErrors,
+
+        /// <summary>The file could not be read or the run was abandoned by the worker.</summary>
+        Failed,
+
+        /// <summary>Cancelled by the operator, or expired before it was confirmed.</summary>
+        Cancelled,
+    }
+
+    // The three enums below serialise PascalCase, against the camelCase policy every other enum in
+    // this file follows. The import contract was specified that way and the client matches on the
+    // literals, so the exception is declared per type rather than by loosening the global policy.
+
+    /// <summary>What happened to one staged import row.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter<RowStatus>))]
+    public enum RowStatus
+    {
+        /// <summary>Staged, not yet examined.</summary>
+        Pending,
+
+        /// <summary>Parsed and valid; not yet committed.</summary>
+        Valid,
+
+        /// <summary>Written as a new contact.</summary>
+        Imported,
+
+        /// <summary>Applied over an existing contact.</summary>
+        Updated,
+
+        /// <summary>Its number already exists, in the file or in the tenant.</summary>
+        Duplicate,
+
+        /// <summary>Deliberately passed over.</summary>
+        Skipped,
+
+        /// <summary>Could not be used.</summary>
+        Failed,
+    }
+
+    /// <summary>
+    /// Why an import row could not be used.
+    /// <para>
+    /// The client owns the wording and matches on the code. A message always travels alongside, so
+    /// a code added later renders its message rather than breaking the screen.
+    /// </para>
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter<ImportErrorCode>))]
+    public enum ImportErrorCode
+    {
+        /// <summary>The number could not be parsed or dialled.</summary>
+        InvalidPhoneNumber,
+
+        /// <summary>A required field was empty.</summary>
+        MissingRequiredField,
+
+        /// <summary>The email address is not valid.</summary>
+        InvalidEmail,
+
+        /// <summary>The number already belongs to a stored contact.</summary>
+        DuplicateContact,
+
+        /// <summary>The number appears earlier in the same file.</summary>
+        DuplicateInFile,
+
+        /// <summary>A mapped column is not one this import understands.</summary>
+        UnsupportedColumn,
+
+        /// <summary>The country is not one we recognise.</summary>
+        InvalidCountry,
+
+        /// <summary>The write failed for a reason the operator cannot fix.</summary>
+        DatabaseError,
+
+        /// <summary>The plan's contact ceiling was reached before this row.</summary>
+        PlanLimitExceeded,
+    }
+
+    /// <summary>Where a failed-record export has got to.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter<ExportStatus>))]
+    public enum ExportStatus
+    {
+        /// <summary>Queued.</summary>
+        Pending,
+
+        /// <summary>Being generated.</summary>
+        Processing,
+
+        /// <summary>Ready to download.</summary>
+        Completed,
+
+        /// <summary>Generation failed.</summary>
+        Failed,
     }
 
     // -------------------------------------------------------------------------------------

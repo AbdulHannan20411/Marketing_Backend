@@ -69,6 +69,12 @@ public static class PublicId
     /// <summary>Prefix for stored payment methods.</summary>
     public const string PaymentMethod = "pm";
 
+    /// <summary>Prefix for contact import batches.</summary>
+    public const string ImportBatch = "imp";
+
+    /// <summary>Prefix for generated export jobs.</summary>
+    public const string Export = "exp";
+
     private const char Separator = '_';
 
     /// <summary>Formats a key as its public identifier.</summary>

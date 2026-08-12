@@ -137,6 +137,12 @@ public class ApplicationDbContext : DbContext
     /// <summary>Staged CSV import rows.</summary>
     public DbSet<ContactImportRow> ContactImportRows => Set<ContactImportRow>();
 
+    /// <summary>Failed-record exports asked for against an import.</summary>
+    public DbSet<ContactImportExport> ContactImportExports => Set<ContactImportExport>();
+
+    /// <summary>The import outbox. Queued work, claimed by the import workers.</summary>
+    public DbSet<ImportJob> ImportJobs => Set<ImportJob>();
+
     /// <summary>
     /// Tenant applied by the global query filter.
     /// <para>

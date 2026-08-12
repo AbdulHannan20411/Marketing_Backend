@@ -28,6 +28,7 @@ public static class BusinessServiceCollectionExtensions
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddScoped<IWhatsAppConnectionRepository, WhatsAppConnectionRepository>();
         services.AddScoped<ICampaignMessageRepository, CampaignMessageRepository>();
+        services.AddScoped<IImportJobRepository, ImportJobRepository>();
 
         return services;
     }

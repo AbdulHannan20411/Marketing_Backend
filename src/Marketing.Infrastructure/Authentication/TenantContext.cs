@@ -16,15 +16,21 @@ namespace Marketing.Infrastructure.Authentication;
 /// </summary>
 public sealed class TenantContext : ITenantContext
 {
-    /// <summary>
-    /// Explicit scope set by Quartz jobs and webhook processing, which have no bearer token.
-    /// <see cref="AsyncLocal{T}"/> so a scope follows the async flow of one job execution and
-    /// cannot bleed into another running concurrently on the same thread pool.
-    /// </summary>
-    private static readonly AsyncLocal<TenantScope?> AmbientScope = new();
-
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ICurrentUser _currentUser;
+
+    /// <summary>
+    /// Explicit scope entered by Super Admin request scoping, Quartz jobs and webhook processing,
+    /// none of which get a tenant from a bearer token.
+    /// <para>
+    /// Held per instance, and this service is registered scoped, so the scope lives exactly as long
+    /// as the request or job that entered it. It was an <see cref="AsyncLocal{T}"/>, which is
+    /// wrong in a way that fails silently: a write inside an <c>async</c> method is discarded when
+    /// that method returns, so a resolver that awaited a database read before entering the scope
+    /// handed its caller a scope that was already gone.
+    /// </para>
+    /// </summary>
+    private TenantScope? _ambientScope;
 
     /// <summary>Initialises a new instance.</summary>
     /// <param name="httpContextAccessor">Accessor for the ambient request.</param>
@@ -40,7 +46,7 @@ public sealed class TenantContext : ITenantContext
     {
         get
         {
-            if (AmbientScope.Value is { } scope)
+            if (_ambientScope is { } scope)
             {
                 return scope.TenantId;
             }
@@ -53,7 +59,7 @@ public sealed class TenantContext : ITenantContext
 
     /// <inheritdoc />
     public string? TenantSlug =>
-        AmbientScope.Value?.TenantSlug
+        _ambientScope?.TenantSlug
         ?? _httpContextAccessor.HttpContext?.User.FindFirst(AppConstants.Claims.TenantSlug)?.Value;
 
     /// <inheritdoc />
@@ -64,7 +70,7 @@ public sealed class TenantContext : ITenantContext
         // An explicit scope always wins. A job that entered a tenant deliberately must stay inside
         // it even when the principal driving it could see everything - otherwise the query filter
         // silently widens and the job processes other tenants' rows.
-        AmbientScope.Value is null && _currentUser.IsSuperAdmin;
+        _ambientScope is null && _currentUser.IsSuperAdmin;
 
     /// <inheritdoc />
     public long RequireTenantId() =>
@@ -73,8 +79,8 @@ public sealed class TenantContext : ITenantContext
     /// <inheritdoc />
     public IDisposable BeginScope(long tenantId, string? tenantSlug = null)
     {
-        var scope = new TenantScope(tenantId, tenantSlug, AmbientScope.Value);
-        AmbientScope.Value = scope;
+        var scope = new TenantScope(this, tenantId, tenantSlug, _ambientScope);
+        _ambientScope = scope;
 
         return scope;
     }
@@ -84,8 +90,11 @@ public sealed class TenantContext : ITenantContext
     {
         private bool _disposed;
 
-        public TenantScope(long tenantId, string? tenantSlug, TenantScope? parent)
+        private readonly TenantContext _owner;
+
+        public TenantScope(TenantContext owner, long tenantId, string? tenantSlug, TenantScope? parent)
         {
+            _owner = owner;
             TenantId = tenantId;
             TenantSlug = tenantSlug;
             Parent = parent;
@@ -105,7 +114,7 @@ public sealed class TenantContext : ITenantContext
             }
 
             _disposed = true;
-            AmbientScope.Value = Parent;
+            _owner._ambientScope = Parent;
         }
     }
 }

@@ -82,8 +82,16 @@ try
             // renders it as an infinity glyph - so they must be serialised, not omitted.
             options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.Never;
 
-            // Enums cross the wire as camelCase strings. Integers would break every badge and
-            // filter silently, because the client compares exact literals such as "subscribed".
+            // The import contract's enums are PascalCase. Registered first, because the first
+            // matching converter wins and the general one below would otherwise claim them.
+            foreach (var converter in Marketing.Application.DTOs.Imports.ImportContractJson.Converters)
+            {
+                options.JsonSerializerOptions.Converters.Add(converter);
+            }
+
+            // Every other enum crosses the wire as a camelCase string. Integers would break every
+            // badge and filter silently, because the client compares exact literals such as
+            // "subscribed".
             options.JsonSerializerOptions.Converters.Add(
                 new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
         });

@@ -64,6 +64,19 @@ public abstract class ApiControllerBase : ControllerBase
     protected OkObjectResult SuccessEmpty(string? message = null) =>
         Ok(ApiResponse.Empty(TraceId, message));
 
+    /// <summary>
+    /// Returns 202 with the standard envelope, for work that was queued rather than done.
+    /// </summary>
+    /// <remarks>
+    /// The status code is the honest one for an asynchronous import: the request was accepted, and
+    /// the payload says what to poll. A 200 would tell the client the work had finished.
+    /// </remarks>
+    /// <typeparam name="TData">Payload type.</typeparam>
+    /// <param name="data">What was queued.</param>
+    /// <param name="message">Optional success message.</param>
+    protected AcceptedResult SuccessAccepted<TData>(TData data, string? message = null) =>
+        Accepted(ApiResponse.Ok(data, TraceId, message));
+
     /// <summary>Returns 201 with the standard envelope and a Location header.</summary>
     /// <typeparam name="TData">Payload type.</typeparam>
     /// <param name="actionName">Action that reads the created resource.</param>

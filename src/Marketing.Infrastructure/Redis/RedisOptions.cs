@@ -8,9 +8,15 @@ public sealed class RedisOptions
     /// <summary>Configuration section name.</summary>
     public const string SectionName = "Redis";
 
-    /// <summary>StackExchange.Redis connection string.</summary>
+    /// <summary>
+    /// StackExchange.Redis connection string.
+    /// <para>
+    /// Settable rather than init-only because <c>ConnectionStrings:Redis</c> overrides it after
+    /// binding — see the post-configure step in the infrastructure registration.
+    /// </para>
+    /// </summary>
     [Required(AllowEmptyStrings = false)]
-    public string ConnectionString { get; init; } = string.Empty;
+    public string ConnectionString { get; set; } = string.Empty;
 
     /// <summary>
     /// Whether the cache is enabled at all. Turning it off makes every read a miss, which is the

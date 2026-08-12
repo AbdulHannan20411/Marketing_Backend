@@ -37,6 +37,7 @@ public static class InfrastructureServiceCollectionExtensions
             .AddAmbientContext()
             .AddSecurityPrimitives(configuration)
             .AddDistributedCache(configuration)
+            .AddMessaging(configuration)
             .AddResilience(configuration)
             .AddWhatsAppClient(configuration);
 
@@ -117,6 +118,19 @@ public static class InfrastructureServiceCollectionExtensions
     {
         services.AddOptions<RedisOptions>()
             .Bind(configuration.GetSection(RedisOptions.SectionName))
+
+            // ConnectionStrings:Redis wins when it is set. It is where operators and every hosting
+            // platform expect a connection string to live, and binding it here means the deployed
+            // value does not have to be duplicated into the Redis section to take effect.
+            .PostConfigure<IConfiguration>((options, config) =>
+            {
+                var shared = config.GetConnectionString("Redis");
+
+                if (!string.IsNullOrWhiteSpace(shared))
+                {
+                    options.ConnectionString = shared;
+                }
+            })
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
@@ -130,6 +144,27 @@ public static class InfrastructureServiceCollectionExtensions
             provider.GetRequiredService<IOptions<RedisOptions>>(),
             provider.GetRequiredService<IDateTimeProvider>(),
             provider.GetRequiredService<ILogger<RedisCacheService>>()));
+
+        return services;
+    }
+
+    /// <summary>
+    /// Binds the broker settings.
+    /// </summary>
+    /// <remarks>
+    /// Settings only. Nothing in the platform dials RabbitMQ yet — asynchronous import work is
+    /// carried by a database-backed outbox behind <c>IImportJobDispatcher</c>. This registration is
+    /// the groundwork for moving that transport, and validating the settings now means a broken
+    /// broker configuration surfaces at startup rather than on the first publish.
+    /// </remarks>
+    private static IServiceCollection AddMessaging(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.AddOptions<Messaging.RabbitMqOptions>()
+            .Bind(configuration.GetSection(Messaging.RabbitMqOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         return services;
     }
@@ -164,6 +199,24 @@ public static class InfrastructureServiceCollectionExtensions
             .Bind(configuration.GetSection(WhatsAppOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+
+        services.AddOptions<Storage.StorageOptions>()
+            .Bind(configuration.GetSection(Storage.StorageOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // Local disk is correct for one instance. A multi-instance deployment needs the same
+        // interface over shared storage, because the worker that reads an upload will not be on the
+        // node that received it.
+        services.AddSingleton<Shared.Abstractions.IFileStorage, Storage.LocalFileStorage>();
+
+        // Stateless and thread-safe, so one instance of each serves every import.
+        services.AddSingleton<Application.Services.Imports.IImportFileReader, Imports.CsvImportFileReader>();
+        services.AddSingleton<Application.Services.Imports.IImportFileReader, Imports.ExcelImportFileReader>();
+        services.AddSingleton<
+            Application.Services.Imports.IImportFileReaderFactory, Imports.ImportFileReaderFactory>();
+        services.AddSingleton<
+            Application.Services.Imports.IImportErrorReportWriter, Imports.ExcelImportErrorReportWriter>();
 
         services.AddTransient<GraphApiErrorHandler>();
         services.AddTransient<TenantAccessTokenHandler>();

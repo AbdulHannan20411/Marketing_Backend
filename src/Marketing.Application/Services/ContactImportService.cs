@@ -191,7 +191,7 @@ public sealed class ContactImportService : IContactImportService
 
         var batch = await LoadBatchAsync(request.UploadId, tracked: true, cancellationToken);
 
-        if (batch.Status == ContactImportStatus.Committed)
+        if (batch.Status == ContactImportStatus.Completed)
         {
             throw new BusinessRuleException("import_already_committed", "That import has already been committed.");
         }
@@ -293,7 +293,7 @@ public sealed class ContactImportService : IContactImportService
             AssignNamed(contact, tenantId, row, indexes, tagsByName, groupsByName);
         }
 
-        batch.Status = ContactImportStatus.Committed;
+        batch.Status = ContactImportStatus.Completed;
         batch.CommittedOn = _clock.UtcNow;
         batch.ImportedCount = outcome.Created;
         batch.UpdatedCount = outcome.Updated;
@@ -455,8 +455,8 @@ public sealed class ContactImportService : IContactImportService
     private static ImportResult Describe(ContactImportBatch batch, IReadOnlyList<ImportRowError> errors) =>
         new(
             PublicId.From(PublicId.Contact, batch.Id),
-            batch.Status == ContactImportStatus.Committed ? ImportJobStatus.Completed : ImportJobStatus.Queued,
-            batch.Status == ContactImportStatus.Committed ? batch.TotalRows : 0,
+            batch.Status == ContactImportStatus.Completed ? ImportJobStatus.Completed : ImportJobStatus.Queued,
+            batch.Status == ContactImportStatus.Completed ? batch.TotalRows : 0,
             batch.TotalRows,
             batch.ImportedCount,
             batch.UpdatedCount,

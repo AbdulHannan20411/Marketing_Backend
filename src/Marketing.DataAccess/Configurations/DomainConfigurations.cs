@@ -444,6 +444,7 @@ public sealed class ContactImportBatchConfiguration : BaseEntityConfiguration<Co
         builder.Property(batch => batch.FileName).IsRequired().HasMaxLength(260);
         builder.Property(batch => batch.Columns).HasColumnType("text[]").IsRequired();
         builder.Property(batch => batch.Status).IsRequired().HasMaxLength(24).HasConversion<string>();
+        builder.Property(batch => batch.UploadedByName).HasMaxLength(200);
 
         // Supports the cleanup job that discards abandoned uploads.
         builder.HasIndex(batch => new { batch.TenantId, batch.Status, batch.UploadedOn });
@@ -453,6 +454,57 @@ public sealed class ContactImportBatchConfiguration : BaseEntityConfiguration<Co
             .HasForeignKey(row => row.ContactImportBatchId)
             // Cascade here, unlike everywhere else: staged rows are worthless without their batch
             // and are not business data worth preserving.
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasMany(batch => batch.Exports)
+            .WithOne(export => export.ContactImportBatch)
+            .HasForeignKey(export => export.ContactImportBatchId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+/// <summary>Fluent configuration for <see cref="ContactImportExport"/>.</summary>
+public sealed class ContactImportExportConfiguration : BaseEntityConfiguration<ContactImportExport>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<ContactImportExport> builder)
+    {
+        builder.ToTable("contact_import_exports");
+
+        builder.Property(export => export.FileName).IsRequired().HasMaxLength(260);
+        builder.Property(export => export.Status).IsRequired().HasMaxLength(16).HasConversion<string>();
+        builder.Property(export => export.StorageKey).HasMaxLength(400);
+        builder.Property(export => export.FailureReason).HasMaxLength(500);
+
+        // The detail screen asks for the newest export of one batch.
+        builder.HasIndex(export => new { export.ContactImportBatchId, export.RequestedAt });
+    }
+}
+
+/// <summary>Fluent configuration for <see cref="ImportJob"/>.</summary>
+public sealed class ImportJobConfiguration : BaseEntityConfiguration<ImportJob>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<ImportJob> builder)
+    {
+        builder.ToTable("import_jobs");
+
+        builder.Property(job => job.Kind).IsRequired().HasMaxLength(16).HasConversion<string>();
+        builder.Property(job => job.State).IsRequired().HasMaxLength(16).HasConversion<string>();
+        builder.Property(job => job.LastError).HasMaxLength(1000);
+
+        // The claim query's whole plan: it selects pending or expired-lease rows in due order, and
+        // runs on every poll across every tenant, so it is the one index that has to be right.
+        builder.HasIndex(job => new { job.State, job.AvailableAt });
+
+        builder.HasOne(job => job.ContactImportBatch)
+            .WithMany()
+            .HasForeignKey(job => job.ContactImportBatchId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(job => job.ContactImportExport)
+            .WithMany()
+            .HasForeignKey(job => job.ContactImportExportId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 }
@@ -467,6 +519,13 @@ public sealed class ContactImportRowConfiguration : BaseEntityConfiguration<Cont
 
         builder.Property(row => row.Values).HasColumnType("text[]").IsRequired();
         builder.Property(row => row.Error).HasMaxLength(500);
+        builder.Property(row => row.Status).IsRequired().HasMaxLength(16).HasConversion<string>();
+        builder.Property(row => row.ErrorCode).HasMaxLength(32).HasConversion<string>();
+        builder.Property(row => row.ErrorField).HasMaxLength(64);
+
+        // The review table filters a batch's rows by status, and the failed-record export reads
+        // only the ones that failed.
+        builder.HasIndex(row => new { row.ContactImportBatchId, row.Status });
 
         // The commit walks a batch in file order, and the preview reads the first few rows.
         builder.HasIndex(row => new { row.ContactImportBatchId, row.RowNumber });
