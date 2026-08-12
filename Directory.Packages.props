@@ -43,6 +43,7 @@
     <PackageVersion Include="Quartz.Extensions.DependencyInjection" Version="3.19.1" />
     <PackageVersion Include="Polly.Core" Version="8.7.0" />
     <PackageVersion Include="Polly.Extensions" Version="8.7.0" />
+    <PackageVersion Include="MailKit" Version="4.17.0" />
     <PackageVersion Include="Refit" Version="8.0.0" />
     <PackageVersion Include="Refit.HttpClientFactory" Version="8.0.0" />
     <!--

@@ -430,9 +430,9 @@ public sealed partial class AuthenticationService : IAuthenticationService
             throw new AuthenticationException("invalid_token");
         }
 
-        var hash = _tokenService.HashSecureToken(presented);
+       // var hash = _tokenService.HashSecureToken(presented);
 
-        var token = await _userTokens.FirstOrDefaultAsync(entry => entry.TokenHash == hash, cancellationToken)
+        var token = await _userTokens.FirstOrDefaultAsync(entry => entry.TokenHash == presented, cancellationToken)
                     ?? throw new AuthenticationException("invalid_token");
 
         if (token.Purpose != purpose || !token.IsUsable(_dateTimeProvider.UtcNow))

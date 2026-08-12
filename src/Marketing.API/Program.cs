@@ -40,12 +40,17 @@ try
     builder.Services.AddApplicationServices(builder.Configuration);
     builder.Services.AddInfrastructure(builder.Configuration);
 
-    if (builder.Environment.IsDevelopment())
+    var smtpConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Smtp:Host"]);
+
+    if (builder.Environment.IsDevelopment() && !smtpConfigured)
     {
         // Keeps a copy of every message the platform tries to send, so an invitation or reset can
         // be completed without a mail provider. Registered here rather than inside AddInfrastructure
         // so the capture path cannot reach any other environment: invitation tokens are stored
         // hashed, so the raw token exists only in the message body this holds in memory.
+        //
+        // Skipped once a relay is configured - real delivery is what the operator asked for, and
+        // silently intercepting it would be worse than useless.
         builder.Services.AddSingleton<DevMailbox>();
         builder.Services.AddSingleton<IEmailSender, CapturingEmailSender>();
     }
