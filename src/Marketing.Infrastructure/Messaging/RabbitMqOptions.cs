@@ -1,60 +1,102 @@
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 
 namespace Marketing.Infrastructure.Messaging;
 
 /// <summary>
-/// Broker settings, bound from the <c>RabbitMQ</c> configuration section.
+/// RabbitMQ broker settings, bound from the <c>RabbitMQ</c> configuration section.
 /// </summary>
 /// <remarks>
-/// Credentials belong in user secrets or the platform secret store, never in a checked-in
-/// <c>appsettings.json</c>. The values in the development file are the broker's stock
-/// <c>guest/guest</c> pair, which RabbitMQ itself refuses over any non-loopback connection — they
-/// protect nothing and are deliberately worthless outside a developer machine.
+/// Credentials should come from user secrets, environment variables, or the platform
+/// secret store in deployed environments. The development defaults use RabbitMQ's
+/// stock <c>guest/guest</c> credentials, which RabbitMQ restricts to loopback access.
 /// </remarks>
 public sealed class RabbitMqOptions
 {
-    /// <summary>Configuration section name.</summary>
+    /// <summary>
+    /// Configuration section name.
+    /// </summary>
     public const string SectionName = "RabbitMQ";
 
-    /// <summary>Broker host name or address.</summary>
+    /// <summary>
+    /// Broker host name or IP address.
+    /// </summary>
     [Required(AllowEmptyStrings = false)]
-    public string Host { get; init; } = "127.0.0.1";
+    public string Host { get; set; } = "127.0.0.1";
 
-    /// <summary>AMQP port.</summary>
+    /// <summary>
+    /// AMQP port.
+    /// </summary>
     [Range(1, 65_535)]
     public int Port { get; init; } = 5672;
 
-    /// <summary>User the connection authenticates as.</summary>
+    /// <summary>
+    /// User the connection authenticates as.
+    /// </summary>
     [Required(AllowEmptyStrings = false)]
-    public string Username { get; init; } = "guest";
-
-    /// <summary>Password for <see cref="Username"/>.</summary>
-    [Required(AllowEmptyStrings = false)]
-    public string Password { get; init; } = "guest";
+    public string Username { get; set; } = "guest";
 
     /// <summary>
-    /// Virtual host to connect to. RabbitMQ's default is <c>/</c>, and a virtual host is the unit of
-    /// isolation between applications sharing one broker.
+    /// Password for <see cref="Username"/>.
+    /// </summary>
+    [Required(AllowEmptyStrings = false)]
+    public string Password { get; set; } = "guest";
+
+    /// <summary>
+    /// Virtual host to connect to.
     /// </summary>
     [Required(AllowEmptyStrings = false)]
     public string VirtualHost { get; init; } = "/";
 
     /// <summary>
-    /// Whether to connect at all.
+    /// RabbitMQ connection string.
     /// <para>
-    /// False leaves the settings bound and validated while nothing dials the broker, which is what
-    /// lets a deployment without RabbitMQ start cleanly rather than failing on a dependency it has
-    /// no work for.
+    /// When configured through <c>ConnectionStrings:RabbitMq</c>, this value
+    /// overrides the value from the <c>RabbitMQ</c> section.
     /// </para>
     /// </summary>
-    public bool Enabled { get; init; }
+    public string ConnectionString { get; set; } = string.Empty;
 
     /// <summary>
-    /// The endpoint, for logs and health output.
+    /// Whether messaging is enabled.
+    /// <para>
+    /// False registers no bus at all and falls back to a publisher that drops messages, so a
+    /// deployment with no broker starts and serves traffic normally.
+    /// </para>
+    /// </summary>
+    public bool Enabled { get; init; } = true;
+
+    /// <summary>
+    /// Connection timeout in seconds.
+    /// </summary>
+    [Range(1, 120)]
+    public int ConnectionTimeoutSeconds { get; init; } = 10;
+
+    /// <summary>
+    /// Requested AMQP heartbeat interval in seconds.
+    /// </summary>
+    [Range(1, 300)]
+    public int RequestedHeartbeatSeconds { get; init; } = 60;
+
+    // Connection and topology recovery are deliberately absent. MassTransit supervises the
+    // connection itself — reconnecting, redeclaring topology and restarting receive endpoints — and
+    // does not surface those as knobs. Keeping settings the transport cannot honour would be worse
+    // than not having them: they read as configured and do nothing.
+
+    /// <summary>
+    /// Name reported to RabbitMQ for this application's connection, which is what makes a
+    /// connection identifiable in the Management UI rather than showing as "undefined".
+    /// </summary>
+    [Required(AllowEmptyStrings = false)]
+    public string ClientProvidedName { get; init; } = "Marketing.API";
+
+    /// <summary>
+    /// The broker endpoint without credentials.
     /// </summary>
     /// <remarks>
-    /// Host, port and virtual host only. The credentials are deliberately absent: an AMQP URI
-    /// carries the password inline, and anything built for display ends up in a log sooner or later.
+    /// Credentials are deliberately excluded so that logging this value does not
+    /// expose the RabbitMQ password.
     /// </remarks>
-    public string Endpoint => $"amqp://{Host}:{Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}{VirtualHost}";
+    public string Endpoint =>
+        $"amqp://{Host}:{Port.ToString(CultureInfo.InvariantCulture)}{VirtualHost}";
 }

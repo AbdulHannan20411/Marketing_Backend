@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Testcontainers.PostgreSql;
+using Testcontainers.RabbitMq;
 using Testcontainers.Redis;
 
 namespace Marketing.IntegrationTests.Fixtures;
@@ -37,15 +38,22 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         .WithCleanUp(true)
         .Build();
 
+    private readonly RabbitMqContainer _rabbitMq = new RabbitMqBuilder("rabbitmq:4-alpine")
+        .WithCleanUp(true)
+        .Build();
+
     /// <inheritdoc />
     public async ValueTask InitializeAsync() =>
-        await Task.WhenAll(_postgres.StartAsync(), _redis.StartAsync());
+        await Task.WhenAll(_postgres.StartAsync(), _redis.StartAsync(), _rabbitMq.StartAsync());
 
     /// <inheritdoc />
     public override async ValueTask DisposeAsync()
     {
         await base.DisposeAsync();
-        await Task.WhenAll(_postgres.DisposeAsync().AsTask(), _redis.DisposeAsync().AsTask());
+        await Task.WhenAll(
+            _postgres.DisposeAsync().AsTask(),
+            _redis.DisposeAsync().AsTask(),
+            _rabbitMq.DisposeAsync().AsTask());
 
         GC.SuppressFinalize(this);
     }
@@ -61,6 +69,15 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
         await action(context);
     }
+
+    /// <summary>
+    /// Extra host configuration applied last, so a test can override any bound setting.
+    /// </summary>
+    /// <remarks>
+    /// Applied after the defaults below, which is what lets a test point the bus at a port nothing
+    /// is listening on without disturbing the containers the rest of the host needs.
+    /// </remarks>
+    public Action<IWebHostBuilder>? Overrides { get; init; }
 
     /// <inheritdoc />
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -80,6 +97,11 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
                 ["Redis:ConnectionString"] = _redis.GetConnectionString(),
                 ["Redis:Enabled"] = "true",
+
+                // The container's AMQP URI carries its generated credentials, so it goes in as a
+                // connection string rather than being decomposed into host, user and password.
+                ["RabbitMQ:ConnectionString"] = _rabbitMq.GetConnectionString(),
+                ["RabbitMQ:Enabled"] = "true",
 
                 ["Authentication:Jwt:Issuer"] = "https://api.integration.test",
                 ["Authentication:Jwt:Audience"] = "integration-tests",
@@ -104,5 +126,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 ["Bootstrap:AdministratorPassword"] = AdministratorPassword,
             });
         });
+
+        Overrides?.Invoke(builder);
     }
 }

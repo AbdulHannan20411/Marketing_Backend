@@ -1,3 +1,5 @@
+using MassTransit;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Marketing.Infrastructure.Authentication;
 using Marketing.Infrastructure.Logging;
 using Marketing.Infrastructure.Payments;
@@ -24,9 +26,18 @@ public static class InfrastructureServiceCollectionExtensions
     /// <summary>Registers ambient context, security primitives, cache, resilience, HTTP clients and jobs.</summary>
     /// <param name="services">Service collection.</param>
     /// <param name="configuration">Application configuration.</param>
+    /// <param name="configureBus">
+    /// Adds consumers and other registrations to the message bus.
+    /// <para>
+    /// A seam rather than a convenience: MassTransit permits exactly one <c>AddMassTransit</c> call
+    /// per container, so anything that needs to contribute a consumer — another module, or a test —
+    /// has to do it inside the single registration this method owns.
+    /// </para>
+    /// </param>
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        Action<IBusRegistrationConfigurator>? configureBus = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -37,7 +48,7 @@ public static class InfrastructureServiceCollectionExtensions
             .AddAmbientContext()
             .AddSecurityPrimitives(configuration)
             .AddDistributedCache(configuration)
-            .AddMessaging(configuration)
+            .AddMessaging(configuration, configureBus)
             .AddResilience(configuration)
             .AddWhatsAppClient(configuration);
 
@@ -136,6 +147,7 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddSingleton<RedisConnection>();
 
+
         // Constructed by hand rather than by convention, because the multiplexer is legitimately
         // nullable and the container has no way to express "inject null if the dependency could
         // not be established".
@@ -148,25 +160,137 @@ public static class InfrastructureServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>
-    /// Binds the broker settings.
-    /// </summary>
-    /// <remarks>
-    /// Settings only. Nothing in the platform dials RabbitMQ yet — asynchronous import work is
-    /// carried by a database-backed outbox behind <c>IImportJobDispatcher</c>. This registration is
-    /// the groundwork for moving that transport, and validating the settings now means a broken
-    /// broker configuration surfaces at startup rather than on the first publish.
-    /// </remarks>
+    /// <summary>Registers the broker connection and publisher.</summary>
     private static IServiceCollection AddMessaging(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        Action<IBusRegistrationConfigurator>? configureBus)
     {
         services.AddOptions<Messaging.RabbitMqOptions>()
             .Bind(configuration.GetSection(Messaging.RabbitMqOptions.SectionName))
+
+            // ConnectionStrings:RabbitMq wins when it is set. It is where operators and every
+            // hosting platform expect a connection string to live, so the deployed value does not
+            // have to be duplicated into the RabbitMQ section to take effect.
+            .PostConfigure<IConfiguration>((options, config) =>
+            {
+                var shared = config.GetConnectionString("RabbitMq");
+
+                if (!string.IsNullOrWhiteSpace(shared))
+                {
+                    options.ConnectionString = shared;
+                }
+            })
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        var options = configuration
+            .GetSection(Messaging.RabbitMqOptions.SectionName)
+            .Get<Messaging.RabbitMqOptions>() ?? new Messaging.RabbitMqOptions();
+
+        if (!options.Enabled)
+        {
+            // No bus at all. Registering one against an address nobody runs would make every
+            // deployment without a broker log connection failures for ever, and MassTransit's
+            // health check would sit permanently degraded for a feature that is switched off.
+            // Scoped, matching the MassTransit-backed publisher, so a consumer of this interface
+            // sees one lifetime whichever implementation is registered.
+            services.AddScoped<IMessagePublisher, Messaging.NullMessagePublisher>();
+
+            return services;
+        }
+
+        services.AddMassTransit(bus =>
+        {
+            // Queue names come from consumer names, kebab-cased. Set explicitly rather than left to
+            // the default so the topology is a property of this configuration and does not shift if
+            // MassTransit changes its default formatter.
+            bus.SetKebabCaseEndpointNameFormatter();
+
+            // MassTransit's own bus health check, retagged. By default it reports Unhealthy and
+            // carries the "ready" tag, which would pull instances out of rotation whenever the
+            // broker blipped — the opposite of the degraded-start behaviour this API is built for.
+            // Degraded and tagged "messaging" keeps it visible without making it fatal, matching
+            // how the cache is treated.
+            bus.ConfigureHealthCheckOptions(health =>
+            {
+                health.Name = "rabbitmq";
+                health.MinimalFailureStatus = HealthStatus.Degraded;
+                health.Tags.Clear();
+                health.Tags.Add("messaging");
+            });
+
+            // Consumers are contributed here. The platform ships none yet — its asynchronous work
+            // runs on the import outbox, which is deliberately untouched — so this is the seam that
+            // will carry them, and what the messaging tests use to attach one.
+            configureBus?.Invoke(bus);
+
+            bus.UsingRabbitMq((context, configurator) =>
+            {
+                ConfigureHost(configurator, options);
+
+                // Retries live here rather than in a loop around a publish. Applied to the receive
+                // endpoint, so a consumer that throws is retried by the transport with the message
+                // still on the queue, and lands in <queue>_error once the attempts are spent.
+                configurator.UseMessageRetry(retry =>
+                {
+                    retry.Interval(3, TimeSpan.FromSeconds(5));
+
+                    // Permanent failures are not retried. A malformed message and a broken business
+                    // rule will fail identically on the third attempt as on the first; retrying
+                    // only delays the dead letter and multiplies the side effects of getting there.
+                    retry.Ignore<Common.Exceptions.ValidationException>();
+                    retry.Ignore<Common.Exceptions.BusinessRuleException>();
+                    retry.Ignore<Common.Exceptions.NotFoundException>();
+                    retry.Ignore<ArgumentException>();
+                });
+
+                // Safe here, and checked before use: the platform declares no queues, exchanges or
+                // routing keys of its own today, so there is no existing topology for this to
+                // rename. Once a consumer ships against a deployed queue, pin it with a
+                // ReceiveEndpoint instead of letting the formatter decide.
+                configurator.ConfigureEndpoints(context);
+            });
+        });
+
+        // Startup must not block on the broker. The API's existing behaviour is to start and serve
+        // traffic whether or not its messaging dependency is reachable, and MassTransit connects in
+        // the background and keeps retrying. Set explicitly rather than relied on as a default.
+        services.Configure<MassTransitHostOptions>(host => host.WaitUntilStarted = false);
+
+        // Scoped, because IPublishEndpoint is. Inside a consumer the scoped endpoint carries the
+        // incoming message's context, which is what lets MassTransit correlate a published message
+        // to the one that caused it. A singleton here would be a captive dependency and would lose
+        // that correlation.
+        services.AddScoped<IMessagePublisher, Messaging.MassTransitMessagePublisher>();
+
         return services;
+    }
+
+    /// <summary>Points the bus at the configured broker.</summary>
+    private static void ConfigureHost(
+        IRabbitMqBusFactoryConfigurator configurator,
+        Messaging.RabbitMqOptions options)
+    {
+        void Credentials(IRabbitMqHostConfigurator host)
+        {
+            host.Username(options.Username);
+            host.Password(options.Password);
+            host.Heartbeat(TimeSpan.FromSeconds(options.RequestedHeartbeatSeconds));
+            host.RequestedConnectionTimeout(TimeSpan.FromSeconds(options.ConnectionTimeoutSeconds));
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.ConnectionString))
+        {
+            // A whole connection string replaces the discrete settings, matching what the option
+            // documents. Credentials inside the URI are honoured by the transport and are never
+            // logged.
+            configurator.Host(new Uri(options.ConnectionString), Credentials);
+
+            return;
+        }
+
+        configurator.Host(options.Host, (ushort)options.Port, options.VirtualHost, Credentials);
     }
 
     private static IServiceCollection AddResilience(

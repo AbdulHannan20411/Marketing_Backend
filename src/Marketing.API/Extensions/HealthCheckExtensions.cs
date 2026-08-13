@@ -38,17 +38,26 @@ public static class HealthCheckExtensions
                 tags: [ReadinessTag]);
         }
 
-        if (redisOptions is { Enabled: true } && !string.IsNullOrWhiteSpace(redisOptions.ConnectionString))
+        // ConnectionStrings:Redis is the override the options binding honours, so the probe has to
+        // read it the same way or it will test an address the application is not using.
+        var redisConnectionString = configuration.GetConnectionString("Redis") is { Length: > 0 } shared
+            ? shared
+            : redisOptions?.ConnectionString;
+
+        if (redisOptions is { Enabled: true } && !string.IsNullOrWhiteSpace(redisConnectionString))
         {
             // Deliberately Degraded rather than Unhealthy, and deliberately not tagged for
             // readiness. The cache is fail-open, so losing it slows the API down; taking instances
             // out of rotation for it would turn a latency problem into an availability one.
             builder.AddRedis(
-                redisOptions.ConnectionString,
+                redisConnectionString,
                 name: "redis",
                 failureStatus: HealthStatus.Degraded,
                 tags: ["cache"]);
         }
+
+        // The broker check is contributed by MassTransit itself, configured where the bus is
+        // registered. It reports as "rabbitmq", degraded on failure and outside the readiness set.
 
         return services;
     }
