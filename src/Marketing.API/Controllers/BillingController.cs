@@ -137,17 +137,35 @@ public sealed class PlansController : ApiControllerBase
 public sealed class BillingController : ApiControllerBase
 {
     private readonly IBillingService _billing;
+    private readonly ITenantScopeResolver _scope;
 
     /// <summary>Initialises a new instance.</summary>
-    public BillingController(IBillingService billing) => _billing = billing;
+    public BillingController(IBillingService billing, ITenantScopeResolver scope)
+    {
+        _billing = billing;
+        _scope = scope;
+    }
 
     /// <summary>Returns the billing history.</summary>
+    /// <remarks>
+    /// Accepts <c>adminId</c> like every other scoped endpoint. Without it a Super Admin reads with
+    /// the tenant filter bypassed, and this query is unbounded — it would return every
+    /// organisation's invoices and payments interleaved as though they were one workspace's.
+    /// </remarks>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">Invoices, payments and renewals.</response>
     [HttpGet("history")]
     [RequirePermission(Permissions.Settings.Billing)]
     [ProducesResponseType(typeof(ApiResponse<BillingHistory>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetHistoryAsync(CancellationToken cancellationToken) =>
-        Success(await _billing.GetBillingHistoryAsync(cancellationToken));
+    public async Task<IActionResult> GetHistoryAsync(
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(await _billing.GetBillingHistoryAsync(cancellationToken));
+    }
 
     /// <summary>Retries payment for an unsettled invoice.</summary>
     /// <remarks>
@@ -175,20 +193,34 @@ public sealed class BillingController : ApiControllerBase
 
     /// <summary>Downloads an invoice as a PDF.</summary>
     /// <remarks>
-    /// Not implemented. The download URL and its short-lived signed-token flow are in place, but
-    /// the renderer is deliberately deferred - it needs an invoice layout and a licence decision
-    /// on the PDF library. The client integration will not change when it lands.
+    /// Raw bytes, not the success envelope: the client fetches this as a blob and saves it, because
+    /// a plain anchor cannot carry the bearer token this endpoint requires.
+    /// <para>
+    /// An invoice belonging to another workspace returns 404 rather than 403, so identifiers cannot
+    /// be probed for existence.
+    /// </para>
     /// </remarks>
     /// <param name="id">Invoice identifier.</param>
-    /// <response code="501">The renderer is not built yet.</response>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The rendered invoice.</response>
+    /// <response code="404">No such invoice, or it belongs to another workspace.</response>
     [HttpGet("invoices/{id}/pdf")]
     [RequirePermission(Permissions.Settings.Billing)]
-    [ProducesResponseType(StatusCodes.Status501NotImplemented)]
-    public IActionResult GetInvoicePdf(string id) =>
-        Problem(
-            title: "Invoice rendering is not available yet",
-            detail: "Invoice PDF generation has not been built. The invoice data is available from /billing/history.",
-            statusCode: StatusCodes.Status501NotImplemented);
+    [Produces("application/pdf")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetInvoicePdfAsync(
+        string id,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        var invoice = await _billing.RenderInvoiceAsync(id, cancellationToken);
+
+        return File(invoice.Content, invoice.ContentType, invoice.FileName);
+    }
 }
 
 /// <summary>Plan administration. Platform staff only.</summary>

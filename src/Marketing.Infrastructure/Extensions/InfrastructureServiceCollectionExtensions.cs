@@ -342,6 +342,11 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<
             Application.Services.Imports.IImportErrorReportWriter, Imports.ExcelImportErrorReportWriter>();
 
+        // Stateless, and the font resolver behind it caches on first use, so one instance serves
+        // every invoice download.
+        services.AddSingleton<
+            Application.Services.Billing.IInvoiceRenderer, Billing.MigraDocInvoiceRenderer>();
+
         services.AddTransient<GraphApiErrorHandler>();
         services.AddTransient<TenantAccessTokenHandler>();
 

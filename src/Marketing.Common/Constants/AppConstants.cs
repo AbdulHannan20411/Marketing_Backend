@@ -165,6 +165,17 @@ public static class AppConstants
         /// </summary>
         public const string Uploads = "rl:uploads";
 
+        /// <summary>
+        /// Endpoints that cause mail to leave the platform on a tenant's behalf.
+        /// <para>
+        /// Partitioned per workspace, because sending reputation is shared. One tenant using the
+        /// invite endpoint as a mailing list gets the platform's domain blacklisted, and every
+        /// other tenant then stops receiving mail — a failure no individual customer can see
+        /// coming or diagnose.
+        /// </para>
+        /// </summary>
+        public const string Invitations = "rl:invitations";
+
         /// <summary>Default budget applied to everything else.</summary>
         public const string Default = "rl:default";
     }

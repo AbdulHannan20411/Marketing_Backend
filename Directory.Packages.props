@@ -47,6 +47,7 @@
     <PackageVersion Include="Quartz.Extensions.DependencyInjection" Version="3.19.1" />
     <PackageVersion Include="Polly.Core" Version="8.7.0" />
     <PackageVersion Include="Polly.Extensions" Version="8.7.0" />
+    <PackageVersion Include="PDFsharp-MigraDoc" Version="6.2.4" />
     <PackageVersion Include="ClosedXML" Version="0.104.2" />
     <PackageVersion Include="MailKit" Version="4.17.0" />
     <PackageVersion Include="Refit" Version="8.0.0" />

@@ -313,6 +313,12 @@ public sealed class PaymentReviewService : IPaymentReviewService
             IssuedAt = request.SubmittedAt,
             DueAt = request.SubmittedAt,
             PaidAt = now,
+
+            // The period this invoice covers — the same one the subscription was just moved onto.
+            // Left unset these default to year one, which the rendered PDF prints as
+            // "1 Jan 0001 – 1 Jan 0001" on a document the customer keeps for their accounts.
+            PeriodStart = now,
+            PeriodEnd = periodEnd,
         };
 
         _invoices.Add(invoice);

@@ -44,6 +44,21 @@ public interface IBillingService
         AutoRenewRequest request,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Renders one invoice as a downloadable document.
+    /// </summary>
+    /// <remarks>
+    /// Loaded through the tenant-filtered repository, so another workspace's identifier is a
+    /// <see cref="Common.Exceptions.NotFoundException"/> rather than a refusal — the two are
+    /// indistinguishable to a caller, which is what stops identifiers being probed for existence.
+    /// </remarks>
+    /// <param name="invoiceId">Prefixed invoice identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The rendered bytes, the file name and its media type.</returns>
+    public Task<RenderedInvoice> RenderInvoiceAsync(
+        string invoiceId,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Retries payment for an unsettled invoice.</summary>
     /// <param name="invoiceId">Invoice identifier.</param>
     /// <param name="idempotencyKey">Caller-supplied key that makes a retry safe.</param>
@@ -84,3 +99,9 @@ public interface IPlanManagementService
     /// </summary>
     public Task DeleteAsync(string planId, CancellationToken cancellationToken = default);
 }
+
+/// <summary>A rendered invoice, ready to be written to the response.</summary>
+/// <param name="Content">The document bytes.</param>
+/// <param name="FileName">Name the browser saves it under — the invoice number.</param>
+/// <param name="ContentType">Media type.</param>
+public sealed record RenderedInvoice(byte[] Content, string FileName, string ContentType);

@@ -54,6 +54,13 @@ public sealed partial class SmtpEmailSender : IEmailSender
         // Gmail silently rewrites it. The configured from-address must therefore be the account.
         mime.From.Add(new MailboxAddress(_email.FromName, _email.FromAddress));
         mime.To.Add(new MailboxAddress(message.ToName, message.ToAddress));
+
+        // Attribution, when the message was caused by somebody in a workspace. A reply then reaches
+        // the colleague who sent the invitation rather than a no-reply mailbox nobody reads.
+        if (!string.IsNullOrWhiteSpace(message.ReplyToAddress))
+        {
+            mime.ReplyTo.Add(new MailboxAddress(message.ReplyToName ?? string.Empty, message.ReplyToAddress));
+        }
         mime.Subject = message.Subject;
 
         mime.Body = new BodyBuilder

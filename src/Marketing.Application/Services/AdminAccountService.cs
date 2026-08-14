@@ -48,6 +48,7 @@ public sealed class AdminAccountService : IAdminAccountService
     private readonly IPlatformService _platform;
     private readonly IDateTimeProvider _clock;
     private readonly IAccountActivationService _activation;
+    private readonly ICurrentUser _currentUser;
 
     /// <summary>Initialises a new instance.</summary>
     public AdminAccountService(
@@ -61,7 +62,8 @@ public sealed class AdminAccountService : IAdminAccountService
         IPasswordHasher passwordHasher,
         IPlatformService platform,
         IDateTimeProvider clock,
-        IAccountActivationService activation)
+        IAccountActivationService activation,
+        ICurrentUser currentUser)
     {
         _users = users;
         _tenants = tenants;
@@ -74,6 +76,7 @@ public sealed class AdminAccountService : IAdminAccountService
         _platform = platform;
         _clock = clock;
         _activation = activation;
+        _currentUser = currentUser;
     }
 
     /// <inheritdoc />
@@ -168,7 +171,15 @@ public sealed class AdminAccountService : IAdminAccountService
 
         // Same transaction as the account and the organisation, so a created admin always has a
         // usable activation link.
-        await _activation.SendInvitationAsync(admin, tenant.Name, cancellationToken);
+        // Attributed to the platform administrator who created the account, for the same reason a
+        // colleague's invitation is: the recipient is deciding whether an unexpected message is real.
+        await _activation.SendInvitationAsync(
+            admin,
+            tenant.Name,
+            _currentUser is { DisplayName: { Length: > 0 } name, Email: { Length: > 0 } email }
+                ? new EmailAttribution(name, email)
+                : null,
+            cancellationToken);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 

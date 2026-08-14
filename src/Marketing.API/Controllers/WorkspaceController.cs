@@ -6,6 +6,7 @@ using Marketing.Common.Constants;
 using Marketing.Common.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Marketing.API.Controllers;
 
@@ -45,13 +46,17 @@ public sealed class EmployeesController : ApiControllerBase
     /// <response code="200">The invited employee.</response>
     /// <response code="422">The plan's seat allowance is exhausted.</response>
     [HttpPost("invite")]
+    [EnableRateLimiting(AppConstants.RateLimits.Invitations)]
     [RequirePermission(Permissions.Settings.Employees)]
     [ProducesResponseType(typeof(ApiResponse<EmployeeResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> InviteAsync(
         [FromBody] InviteEmployeeRequest request,
+        [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
         var employee = await _employees.InviteAsync(request, cancellationToken);
 
         return Success(employee, $"Invitation sent to {employee.Email}.");
@@ -64,6 +69,7 @@ public sealed class EmployeesController : ApiControllerBase
     /// </remarks>
     /// <param name="id">Employee identifier.</param>
     /// <param name="request">The complete effective set they should end up with.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The updated employee.</response>
     [HttpPut("{id}/permissions")]
@@ -72,8 +78,11 @@ public sealed class EmployeesController : ApiControllerBase
     public async Task<IActionResult> UpdatePermissionsAsync(
         string id,
         [FromBody] UpdatePermissionsRequest request,
+        [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
         var employee = await _employees.UpdatePermissionsAsync(id, request, cancellationToken);
 
         return Success(employee, $"Permissions updated for {employee.Name}.");
@@ -82,6 +91,7 @@ public sealed class EmployeesController : ApiControllerBase
     /// <summary>Changes an employee's account state.</summary>
     /// <param name="id">Employee identifier.</param>
     /// <param name="request">New state.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The updated employee.</response>
     [HttpPut("{id}/status")]
@@ -90,8 +100,11 @@ public sealed class EmployeesController : ApiControllerBase
     public async Task<IActionResult> UpdateStatusAsync(
         string id,
         [FromBody] UpdateEmployeeStatusRequest request,
+        [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
         var employee = await _employees.UpdateStatusAsync(id, request, cancellationToken);
 
         return Success(employee, $"{employee.Name} is now {employee.Status}.");
@@ -151,6 +164,7 @@ public sealed class EmployeesController : ApiControllerBase
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The invitation was sent again.</response>
     [HttpPost("{id}/resend-invite")]
+    [EnableRateLimiting(AppConstants.RateLimits.Invitations)]
     [RequirePermission(Permissions.Settings.Employees)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
     public async Task<IActionResult> ResendInviteAsync(
@@ -187,13 +201,19 @@ public sealed class EmployeesController : ApiControllerBase
 
     /// <summary>Removes an employee and ends their sessions.</summary>
     /// <param name="id">Employee identifier.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The employee was removed.</response>
     [HttpDelete("{id}")]
     [RequirePermission(Permissions.Settings.Employees)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> DeleteAsync(string id, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteAsync(
+        string id,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
     {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
         await _employees.DeleteAsync(id, cancellationToken);
 
         return SuccessEmpty("Employee removed.");
@@ -238,8 +258,11 @@ public sealed class PermissionSetsController : ApiControllerBase
     [ProducesResponseType(typeof(ApiResponse<PermissionSetResponse>), StatusCodes.Status200OK)]
     public async Task<IActionResult> CreateAsync(
         [FromBody] PermissionSetDraft draft,
+        [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
         var set = await _employees.CreatePermissionSetAsync(draft, cancellationToken);
 
         return Success(set, $"Permission set \"{set.Name}\" created.");
@@ -248,6 +271,7 @@ public sealed class PermissionSetsController : ApiControllerBase
     /// <summary>Replaces a permission set.</summary>
     /// <param name="id">Permission set identifier.</param>
     /// <param name="draft">Replacement content.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The updated set.</response>
     [HttpPut("{id}")]
@@ -256,8 +280,11 @@ public sealed class PermissionSetsController : ApiControllerBase
     public async Task<IActionResult> UpdateAsync(
         string id,
         [FromBody] PermissionSetDraft draft,
+        [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
         var set = await _employees.UpdatePermissionSetAsync(id, draft, cancellationToken);
 
         return Success(set, $"Permission set \"{set.Name}\" saved.");
@@ -265,6 +292,7 @@ public sealed class PermissionSetsController : ApiControllerBase
 
     /// <summary>Deletes a permission set. System sets cannot be deleted.</summary>
     /// <param name="id">Permission set identifier.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The set was deleted.</response>
     /// <response code="409">The set ships with the platform.</response>
@@ -272,8 +300,13 @@ public sealed class PermissionSetsController : ApiControllerBase
     [RequirePermission(Permissions.Settings.Employees)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> DeleteAsync(string id, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteAsync(
+        string id,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
     {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
         await _employees.DeletePermissionSetAsync(id, cancellationToken);
 
         return SuccessEmpty("Permission set deleted.");

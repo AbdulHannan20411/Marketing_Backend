@@ -8,6 +8,23 @@ using static Marketing.Common.Constants.AppConstants;
 
 namespace Marketing.Application.Services;
 
+/// <summary>
+/// Who caused a workspace-originated email, so the recipient can see it.
+/// </summary>
+/// <remarks>
+/// Employees are invited by a colleague, but the mail leaves the platform's SMTP server. Without
+/// naming the human behind it the recipient sees an address they do not recognise for a message
+/// they were expecting from someone they do — which reads as spam, and gets ignored or reported.
+/// <para>
+/// This never changes the <c>From:</c> header. Sending as the customer's own domain would fail
+/// that domain's SPF and DKIM checks; genuinely sending as them needs per-tenant verified sending
+/// domains, which is a much larger piece of work.
+/// </para>
+/// </remarks>
+/// <param name="SenderName">Display name of the person who acted.</param>
+/// <param name="SenderEmail">Their address, used for <c>Reply-To</c>.</param>
+public sealed record EmailAttribution(string SenderName, string SenderEmail);
+
 /// <summary>Issues and delivers the single-use links that activate accounts and reset passwords.</summary>
 public interface IAccountActivationService
 {
@@ -21,8 +38,16 @@ public interface IAccountActivationService
     /// </summary>
     /// <param name="user">The invited user. Must already be persisted.</param>
     /// <param name="organisationName">Organisation name, used in the message.</param>
+    /// <param name="attribution">
+    /// Who caused the invitation. Named in the subject and body and used for <c>Reply-To</c>; null
+    /// sends an unattributed message rather than one signed by nobody.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public Task SendInvitationAsync(User user, string? organisationName, CancellationToken cancellationToken = default);
+    public Task SendInvitationAsync(
+        User user,
+        string? organisationName,
+        EmailAttribution? attribution = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Issues a password reset and emails the link.</summary>
     /// <param name="user">The user resetting their password.</param>
@@ -63,6 +88,7 @@ public sealed class AccountActivationService : IAccountActivationService
     public async Task SendInvitationAsync(
         User user,
         string? organisationName,
+        EmailAttribution? attribution = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(user);
@@ -75,23 +101,79 @@ public sealed class AccountActivationService : IAccountActivationService
 
         var link = BuildLink("accept-invitation", token.Value);
         var workspace = string.IsNullOrWhiteSpace(organisationName) ? "the platform" : organisationName;
+        var sender = attribution?.SenderName;
 
-        await SendAsync(
-            user,
-            $"You have been invited to {workspace}",
-            $"""
+        // Named in the subject, because the recipient is deciding whether to trust a message that
+        // arrives from an address they have never seen. "Amara Chen invited you…" is recognisable;
+        // "You have been invited" from a no-reply address reads as spam and gets reported.
+        // Header-sanitised, not HTML-escaped. A subject line is text, not markup: escaping it would
+        // put a literal "&amp;" in the recipient's inbox for a workspace called "Smith & Co". What a
+        // header genuinely cannot contain is a line break, which would let a tenant-supplied name
+        // split the subject and inject headers of its own.
+        var subject = string.IsNullOrWhiteSpace(sender)
+            ? Header($"You have been invited to join {workspace} on {_options.FromName}")
+            : Header($"{sender} invited you to join {workspace} on {_options.FromName}");
+
+        var attributionHtml = attribution is { } who
+            ? $"<p style=\"color:#6b7280;font-size:12px\">This invitation was sent by "
+              + $"{Escape(who.SenderName)} ({Escape(who.SenderEmail)}) through {Escape(_options.FromName)}. "
+              + "If you weren't expecting it, you can ignore this email.</p>"
+            : string.Empty;
+
+        var attributionText = attribution is { } signer
+            ? $"{Environment.NewLine}{Environment.NewLine}This invitation was sent by "
+              + $"{signer.SenderName} ({signer.SenderEmail}) through "
+              + $"{_options.FromName}. If you weren't expecting it, you can ignore this email."
+            : string.Empty;
+
+        var opening = string.IsNullOrWhiteSpace(sender)
+            ? $"You have been invited to work in <strong>{Escape(workspace)}</strong>."
+            : $"<strong>{Escape(sender)}</strong> has invited you to work in "
+              + $"<strong>{Escape(workspace)}</strong> on {Escape(_options.FromName)}.";
+
+        // Built as HTML directly rather than going through the plain-text wrapper, because every
+        // interpolated value here — the sender's name, their address, the workspace name — is
+        // supplied by a tenant. An organisation renamed to a script tag must not be able to inject
+        // anything into a message delivered to somebody else's inbox.
+        var html = $"<p>Hello {Escape(user.DisplayName)},</p>"
+                   + $"<p>{opening} Set your password to get started.</p>"
+                   + $"<p><a href=\"{Escape(link)}\">Set your password</a></p>"
+                   + $"<p>This link can be used once and expires in "
+                   + $"{_options.InvitationLifetimeHours} hours.</p>"
+                   + attributionHtml;
+
+        var text = $"""
              Hello {user.DisplayName},
 
-             You have been invited to join {workspace}.
-
-             Set your password and activate your account:
+             {(string.IsNullOrWhiteSpace(sender) ? $"You have been invited to work in {workspace}." : $"{sender} has invited you to work in {workspace} on {_options.FromName}.")} Set your password to get started:
              {link}
 
              This link can be used once and expires in {_options.InvitationLifetimeHours} hours.
-             If you were not expecting this invitation you can ignore this message.
-             """,
+             """ + attributionText;
+
+        await _email.SendAsync(
+            new EmailMessage(user.Email, user.DisplayName, subject, html, text)
+            {
+                // Replies reach the person who caused the message, not a mailbox nobody reads.
+                ReplyToAddress = attribution?.SenderEmail,
+                ReplyToName = attribution?.SenderName,
+            },
             cancellationToken);
     }
+
+    /// <summary>Escapes a tenant-supplied value before it enters an HTML body.</summary>
+    private static string Escape(string? value) => System.Net.WebUtility.HtmlEncode(value ?? string.Empty);
+
+    /// <summary>
+    /// Makes a tenant-supplied value safe to put in a header.
+    /// </summary>
+    /// <remarks>
+    /// Strips the control characters that terminate a header line. Without this, a workspace named
+    /// with an embedded newline could append headers of its own to a message the platform sends on
+    /// somebody else's behalf.
+    /// </remarks>
+    private static string Header(string value) =>
+        new([.. value.Where(character => !char.IsControl(character))]);
 
     /// <inheritdoc />
     public async Task SendPasswordResetAsync(User user, CancellationToken cancellationToken = default)

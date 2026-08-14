@@ -1,4 +1,5 @@
 using Marketing.Application.DTOs.Billing;
+using Marketing.Application.Services.Billing;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Constants;
@@ -16,6 +17,10 @@ public sealed class BillingService : IBillingService
     private readonly IRepository<TenantSubscription> _subscriptions;
     private readonly IRepository<SubscriptionPlan> _plans;
     private readonly IRepository<Invoice> _invoices;
+    private readonly IRepository<Tenant> _tenants;
+    private readonly IRepository<BillingProfile> _profiles;
+    private readonly Services.Billing.IInvoiceRenderer _renderer;
+    private readonly Configurations.EmailOptions _emailOptions;
     private readonly IRepository<Payment> _payments;
     private readonly IRepository<RenewalRecord> _renewals;
     private readonly IRepository<Contact> _contacts;
@@ -34,6 +39,10 @@ public sealed class BillingService : IBillingService
         IRepository<TenantSubscription> subscriptions,
         IRepository<SubscriptionPlan> plans,
         IRepository<Invoice> invoices,
+        IRepository<Tenant> tenants,
+        IRepository<BillingProfile> profiles,
+        Services.Billing.IInvoiceRenderer renderer,
+        Microsoft.Extensions.Options.IOptions<Configurations.EmailOptions> emailOptions,
         IRepository<Payment> payments,
         IRepository<RenewalRecord> renewals,
         IRepository<Contact> contacts,
@@ -50,6 +59,10 @@ public sealed class BillingService : IBillingService
         _subscriptions = subscriptions;
         _plans = plans;
         _invoices = invoices;
+        _tenants = tenants;
+        _profiles = profiles;
+        _renderer = renderer;
+        _emailOptions = emailOptions.Value;
         _payments = payments;
         _renewals = renewals;
         _contacts = contacts;
@@ -534,6 +547,53 @@ public sealed class BillingService : IBillingService
             plan.Highlights,
             plan.SortOrder,
             plan.ModifiedOn ?? plan.CreatedOn);
+
+    /// <inheritdoc />
+    public async Task<RenderedInvoice> RenderInvoiceAsync(
+        string invoiceId,
+        CancellationToken cancellationToken = default)
+    {
+        var id = PublicId.Parse(PublicId.Invoice, invoiceId, "invoice");
+
+        // Tenant-filtered. Another workspace's identifier resolves to nothing and surfaces as a
+        // 404, so an invoice id cannot be probed for existence from outside the workspace.
+        var invoice = await _queries.FirstOrDefaultAsync(
+            _invoices.Query().Where(candidate => candidate.Id == id),
+            cancellationToken)
+            ?? throw new NotFoundException("Invoice", invoiceId);
+
+        var profile = await _queries.FirstOrDefaultAsync(_profiles.Query(), cancellationToken);
+
+        var tenant = _tenantContext.TenantId is { } tenantId
+            ? await _queries.FirstOrDefaultAsync(
+                _tenants.Query().Where(candidate => candidate.Id == tenantId),
+                cancellationToken)
+            : null;
+
+        var document = new InvoiceDocument(
+            MapInvoice(invoice),
+            profile is null ? null : MapProfile(profile),
+            tenant?.Name ?? string.Empty,
+            _emailOptions.FromName);
+
+        var content = await _renderer.RenderAsync(document, cancellationToken);
+
+        // Named for the invoice, matching what the client saves it as.
+        return new RenderedInvoice(content, $"{invoice.Number}.pdf", _renderer.ContentType);
+    }
+
+    /// <summary>Projects the stored billing profile onto its response shape.</summary>
+    private static BillingProfileResponse MapProfile(BillingProfile profile) =>
+        new(
+            profile.CompanyName,
+            profile.AddressLine1,
+            profile.AddressLine2,
+            profile.City,
+            profile.Region,
+            profile.PostalCode,
+            profile.Country,
+            profile.TaxId,
+            profile.BillingEmail);
 
     private static InvoiceResponse MapInvoice(Invoice invoice) =>
         new(

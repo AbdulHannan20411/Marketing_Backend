@@ -42,6 +42,8 @@ public sealed partial class DevMailbox
             message.TextBody,
             message.HtmlBody,
             ExtractLink(message.TextBody) ?? ExtractLink(message.HtmlBody),
+            message.ReplyToAddress,
+            message.ReplyToName,
             sentAt));
 
         while (_messages.Count > Capacity && _messages.TryDequeue(out _))
@@ -84,6 +86,12 @@ public sealed partial class DevMailbox
 /// The first link found in the body — the activation or reset URL, which carries the single-use
 /// token. This is the value you need to finish the flow.
 /// </param>
+/// <param name="ReplyToAddress">
+/// Address replies go to, when the message was caused by somebody in a workspace. Captured because
+/// attribution is a deliverability feature — a message that reaches the inbox but replies to a
+/// no-reply mailbox has only half worked, and that half is invisible without this.
+/// </param>
+/// <param name="ReplyToName">Display name for the reply address.</param>
 /// <param name="SentAt">When it was captured.</param>
 public sealed record CapturedEmail(
     string ToAddress,
@@ -92,6 +100,8 @@ public sealed record CapturedEmail(
     string TextBody,
     string HtmlBody,
     string? Link,
+    string? ReplyToAddress,
+    string? ReplyToName,
     DateTimeOffset SentAt);
 
 /// <summary>

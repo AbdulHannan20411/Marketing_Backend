@@ -36,4 +36,20 @@ public sealed record EmailMessage(
     string ToName,
     string Subject,
     string HtmlBody,
-    string TextBody);
+    string TextBody)
+{
+    /// <summary>
+    /// Address replies should go to, when the message was caused by a person other than the
+    /// platform.
+    /// </summary>
+    /// <remarks>
+    /// <b>The sender in <c>From:</c> never changes.</b> It stays the platform's verified address,
+    /// because mail claiming to come from a customer's own domain fails that domain's SPF and DKIM
+    /// checks and lands in spam — which is worse for them than an honest platform sender.
+    /// Attribution belongs here, in the subject and in the body.
+    /// </remarks>
+    public string? ReplyToAddress { get; init; }
+
+    /// <summary>Display name for <see cref="ReplyToAddress"/>.</summary>
+    public string? ReplyToName { get; init; }
+}

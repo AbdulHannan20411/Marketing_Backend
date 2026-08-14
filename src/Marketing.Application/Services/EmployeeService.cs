@@ -26,6 +26,7 @@ public sealed class EmployeeService : IEmployeeService
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IPasswordHasher _passwordHasher;
+    private readonly IRepository<Tenant> _tenants;
     private readonly ITenantContext _tenantContext;
     private readonly IDateTimeProvider _clock;
     private readonly IAccountActivationService _activation;
@@ -45,6 +46,7 @@ public sealed class EmployeeService : IEmployeeService
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
         IPasswordHasher passwordHasher,
+        IRepository<Tenant> tenants,
         ITenantContext tenantContext,
         IDateTimeProvider clock,
         IAccountActivationService activation,
@@ -62,6 +64,7 @@ public sealed class EmployeeService : IEmployeeService
         _queries = queries;
         _unitOfWork = unitOfWork;
         _passwordHasher = passwordHasher;
+        _tenants = tenants;
         _tenantContext = tenantContext;
         _clock = clock;
         _activation = activation;
@@ -176,7 +179,15 @@ public sealed class EmployeeService : IEmployeeService
             RoleId = role.Id,
         });
 
-        if (requested.Count > 0)
+        // An administrator holds everything by role, so there is nothing to write and any set sent
+        // alongside the role is ignored rather than silently reducing them.
+        //
+        // An employee, by contrast, starts with exactly what was asked for — including nothing at
+        // all. The role's defaults are not a floor: an invitee with no set named should be able to
+        // sign in and see an empty application until somebody grants them access, which is what the
+        // invite dialog promises. Falling back to the role defaults would hand a new starter twelve
+        // permissions the person inviting them never chose.
+        if (!Roles.Normalise(role.Name).Equals(Roles.Normalise(Roles.Admin), StringComparison.Ordinal))
         {
             // Diffed against the role actually granted, not against Employee. Diffing against the
             // wrong role writes revokes for permissions the person never had and misses grants for
@@ -198,7 +209,8 @@ public sealed class EmployeeService : IEmployeeService
 
         // Issued before the commit so the invitation token and the account are written in one
         // transaction. An account with no way to activate it would be worse than no account.
-        await _activation.SendInvitationAsync(employee, null, cancellationToken);
+        await _activation.SendInvitationAsync(
+            employee, await WorkspaceNameAsync(cancellationToken), ActingAs(), cancellationToken);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -415,7 +427,8 @@ public sealed class EmployeeService : IEmployeeService
 
         // Issuing a new token consumes the old one, so a forwarded copy of the first email stops
         // working. Resending must not leave two live ways into the same account.
-        await _activation.SendInvitationAsync(employee, null, cancellationToken);
+        await _activation.SendInvitationAsync(
+            employee, await WorkspaceNameAsync(cancellationToken), ActingAs(), cancellationToken);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
@@ -511,7 +524,7 @@ public sealed class EmployeeService : IEmployeeService
             Name = draft.Name.Trim(),
             Description = draft.Description,
             IsSystem = false,
-            Permissions = [.. draft.Permissions.Where(Permissions.IsKnown)],
+            Permissions = [.. EnsureKnown(draft.Permissions)],
         };
 
         _permissionSets.Add(set);
@@ -538,7 +551,7 @@ public sealed class EmployeeService : IEmployeeService
 
         set.Name = draft.Name.Trim();
         set.Description = draft.Description;
-        set.Permissions = [.. draft.Permissions.Where(Permissions.IsKnown)];
+        set.Permissions = [.. EnsureKnown(draft.Permissions)];
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -566,6 +579,14 @@ public sealed class EmployeeService : IEmployeeService
     /// <summary>Refuses an invitation once the plan's seat allowance is used.</summary>
     private async Task EnsureSeatAvailableAsync(CancellationToken cancellationToken)
     {
+        // Platform staff are not bound by a seat ceiling. It is a billing construct — what the
+        // customer has paid for — not a security one, and refusing support staff the ability to add
+        // somebody to a workspace they are fixing helps nobody.
+        if (_currentUser.IsSuperAdmin)
+        {
+            return;
+        }
+
         var subscription = await _queries.FirstOrDefaultAsync(_subscriptions.Query(), cancellationToken);
 
         if (subscription is null)
@@ -590,10 +611,12 @@ public sealed class EmployeeService : IEmployeeService
             return;
         }
 
-        // 422 with the limit named, so the message tells the customer what to do rather than just
-        // that something went wrong.
-        throw new ValidationException(
-            "permissions",
+        // A commercial ceiling, not a malformed request: 409 with the allowance named, so the
+        // client can distinguish "fix your input" from "buy more seats" and say so. It was a 422
+        // reported against a "permissions" field the invite request does not even have, which gave
+        // the form nowhere sensible to put the message.
+        throw new BusinessRuleException(
+            "seat_limit_reached",
             $"The {plan.Name} plan includes {maxEmployees} seats and all of them are in use. "
             + "Upgrade the plan or remove an employee first.");
     }
@@ -717,4 +740,52 @@ public sealed class EmployeeService : IEmployeeService
         List<OverrideRow> Overrides,
         DateTimeOffset? LastLoginOn,
         DateTimeOffset CreatedOn);
+
+    /// <summary>
+    /// The signed-in person, for attribution on mail this action causes.
+    /// </summary>
+    /// <remarks>
+    /// Read from the principal rather than passed in, so a caller cannot claim to be somebody else.
+    /// Null when the actor has no address to reply to, in which case the mail goes out unattributed
+    /// rather than attributed to a blank.
+    /// </remarks>
+    private EmailAttribution? ActingAs() =>
+        _currentUser is { DisplayName: { Length: > 0 } name, Email: { Length: > 0 } email }
+            ? new EmailAttribution(name, email)
+            : null;
+
+    /// <summary>The organisation's display name, for the invitation's subject and body.</summary>
+    private async Task<string?> WorkspaceNameAsync(CancellationToken cancellationToken)
+    {
+        var tenantId = _tenantContext.TenantId;
+
+        if (tenantId is null)
+        {
+            return null;
+        }
+
+        var tenant = await _queries.FirstOrDefaultAsync(
+            _tenants.Query().Where(candidate => candidate.Id == tenantId.Value),
+            cancellationToken);
+
+        return tenant?.Name;
+    }
+
+    /// <summary>
+    /// Returns the permissions, or refuses the whole request if any is not in the catalogue.
+    /// </summary>
+    /// <remarks>
+    /// Rejecting rather than filtering, to match what editing an employee's permissions already
+    /// does. Quietly dropping an unrecognised name means an administrator ticks a box, saves, and
+    /// finds their selection gone with nothing to explain why — and the two endpoints disagreeing
+    /// about the same invalid input is worse than either behaviour on its own.
+    /// </remarks>
+    private static IReadOnlyList<string> EnsureKnown(IReadOnlyList<string> permissions)
+    {
+        var unknown = permissions.Where(permission => !Permissions.IsKnown(permission)).ToArray();
+
+        return unknown.Length > 0
+            ? throw new ValidationException("permissions", $"Unknown permission: {string.Join(", ", unknown)}.")
+            : permissions;
+    }
 }

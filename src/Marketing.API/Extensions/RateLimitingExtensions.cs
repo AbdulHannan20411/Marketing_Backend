@@ -108,6 +108,20 @@ public static class RateLimitingExtensions
                         AutoReplenishment = true,
                     }));
 
+            // Twenty invitations an hour per workspace. Comfortably above onboarding a team,
+            // far below anything that would damage the platform's sending reputation.
+            limiter.AddPolicy(AppConstants.RateLimits.Invitations, context =>
+                RateLimitPartition.GetTokenBucketLimiter(
+                    ResolvePartitionKey(context),
+                    _ => new TokenBucketRateLimiterOptions
+                    {
+                        TokenLimit = 20,
+                        TokensPerPeriod = 20,
+                        ReplenishmentPeriod = TimeSpan.FromHours(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true,
+                    }));
+
             // Generous by design. Meta retries webhooks aggressively and de-subscribes endpoints
             // that reject or stall, so throttling this one costs delivery receipts.
             limiter.AddPolicy(AppConstants.RateLimits.Webhook, _ =>
