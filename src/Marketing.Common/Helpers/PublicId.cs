@@ -75,6 +75,16 @@ public static class PublicId
     /// <summary>Prefix for generated export jobs.</summary>
     public const string Export = "exp";
 
+    /// <summary>
+    /// Prefix for manual payment requests.
+    /// <para>
+    /// Deliberately not <c>pay</c>, which already identifies a captured <c>Payment</c>. Two entity
+    /// types behind one prefix would make <c>pay_5</c> ambiguous in audit records, which is exactly
+    /// where a financial control cannot afford ambiguity.
+    /// </para>
+    /// </summary>
+    public const string PaymentRequest = "pyr";
+
     private const char Separator = '_';
 
     /// <summary>Formats a key as its public identifier.</summary>

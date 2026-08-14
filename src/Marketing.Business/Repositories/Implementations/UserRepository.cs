@@ -1,7 +1,9 @@
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.DataAccess.Context;
 using Marketing.DataAccess.Entities;
+using Marketing.Common.Constants;
 using Microsoft.EntityFrameworkCore;
+using static Marketing.Common.Constants.AppConstants;
 
 namespace Marketing.Business.Repositories.Implementations;
 
@@ -72,5 +74,17 @@ public sealed class UserRepository : Repository<User>, IUserRepository
             .IgnoreQueryFilters()
             .Where(userRole => !userRole.IsDeleted && userRole.UserId == userId)
             .Select(userRole => userRole.Role.Name)
+            .ToListAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<User>> GetPlatformAdministratorsAsync(
+        CancellationToken cancellationToken = default) =>
+        await Set
+            .IgnoreQueryFilters()
+            .Where(user => !user.IsDeleted
+                           && user.Status == UserStatus.Active
+                           && user.UserRoles.Any(userRole =>
+                               !userRole.IsDeleted && userRole.Role.Name == Roles.SuperAdmin))
+            .OrderBy(user => user.Id)
             .ToListAsync(cancellationToken);
 }

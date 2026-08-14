@@ -65,6 +65,10 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IContactImportService, ContactImportService>();
         services.AddScoped<Services.Imports.IImportHistoryService, Services.Imports.ImportHistoryService>();
         services.AddScoped<Services.Imports.IImportService, Services.Imports.ImportService>();
+        services.AddScoped<Services.Payments.IPaymentRequestService, Services.Payments.PaymentRequestService>();
+        services.AddScoped<Services.Payments.IPaymentReviewService, Services.Payments.PaymentReviewService>();
+        services.AddScoped<Services.Payments.IPaymentNotifier, Services.Payments.PaymentNotifier>();
+        services.AddScoped<Services.Payments.IPaymentChannelAdminService, Services.Payments.PaymentChannelAdminService>();
         services.AddScoped<Services.Imports.IImportJobDispatcher, Services.Imports.ImportJobDispatcher>();
         services.AddScoped<Services.Imports.IImportProcessingService, Services.Imports.ImportProcessingService>();
         services.AddScoped<Services.Imports.IImportJobRunner, Services.Imports.ImportJobRunner>();

@@ -140,6 +140,12 @@ public class ApplicationDbContext : DbContext
     /// <summary>Failed-record exports asked for against an import.</summary>
     public DbSet<ContactImportExport> ContactImportExports => Set<ContactImportExport>();
 
+    /// <summary>Manual payment submissions awaiting or past review.</summary>
+    public DbSet<PaymentRequest> PaymentRequests => Set<PaymentRequest>();
+
+    /// <summary>Where customers can send money, and how they are told to.</summary>
+    public DbSet<PaymentChannelSetting> PaymentChannelSettings => Set<PaymentChannelSetting>();
+
     /// <summary>The import outbox. Queued work, claimed by the import workers.</summary>
     public DbSet<ImportJob> ImportJobs => Set<ImportJob>();
 

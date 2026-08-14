@@ -122,4 +122,31 @@ public static class CatalogQueryExtensions
             ? source
             : source.Where(batch => EF.Functions.ILike(batch.FileName, $"%{search.Trim()}%"));
     }
+
+    /// <summary>
+    /// Narrows the payment review queue to an organisation or a submitter's email.
+    /// </summary>
+    /// <remarks>
+    /// Lives here rather than in a service because <c>ILike</c> is an EF Core translation and the
+    /// Application layer does not reference the provider.
+    /// </remarks>
+    /// <param name="source">Requests to filter.</param>
+    /// <param name="search">Search text. Blank matches everything.</param>
+    public static IQueryable<PaymentRequest> WhereOrganisationOrEmailMatches(
+        this IQueryable<PaymentRequest> source,
+        string? search)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            return source;
+        }
+
+        var pattern = $"%{search.Trim()}%";
+
+        return source.Where(request =>
+            EF.Functions.ILike(request.Organisation, pattern)
+            || EF.Functions.ILike(request.SubmittedByEmail, pattern));
+    }
 }

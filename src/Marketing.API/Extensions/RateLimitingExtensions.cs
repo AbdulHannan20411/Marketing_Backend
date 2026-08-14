@@ -94,6 +94,20 @@ public static class RateLimitingExtensions
                         AutoReplenishment = true,
                     }));
 
+            // Per tenant, and deliberately small: a manual payment is a human action taken a
+            // handful of times, and each one stores a file and pages a reviewer.
+            limiter.AddPolicy(AppConstants.RateLimits.Uploads, context =>
+                RateLimitPartition.GetTokenBucketLimiter(
+                    ResolvePartitionKey(context),
+                    _ => new TokenBucketRateLimiterOptions
+                    {
+                        TokenLimit = 10,
+                        TokensPerPeriod = 10,
+                        ReplenishmentPeriod = TimeSpan.FromMinutes(10),
+                        QueueLimit = 0,
+                        AutoReplenishment = true,
+                    }));
+
             // Generous by design. Meta retries webhooks aggressively and de-subscribes endpoints
             // that reject or stall, so throttling this one costs delivery receipts.
             limiter.AddPolicy(AppConstants.RateLimits.Webhook, _ =>

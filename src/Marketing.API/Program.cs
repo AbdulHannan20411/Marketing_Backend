@@ -89,6 +89,11 @@ try
                 options.JsonSerializerOptions.Converters.Add(converter);
             }
 
+            foreach (var converter in Marketing.Application.DTOs.Payments.PaymentContractJson.Converters)
+            {
+                options.JsonSerializerOptions.Converters.Add(converter);
+            }
+
             // Every other enum crosses the wire as a camelCase string. Integers would break every
             // badge and filter silently, because the client compares exact literals such as
             // "subscribed".

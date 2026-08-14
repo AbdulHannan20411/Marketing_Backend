@@ -463,6 +463,70 @@ public sealed class ContactImportBatchConfiguration : BaseEntityConfiguration<Co
     }
 }
 
+/// <summary>Fluent configuration for <see cref="PaymentRequest"/>.</summary>
+public sealed class PaymentRequestConfiguration : BaseEntityConfiguration<PaymentRequest>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<PaymentRequest> builder)
+    {
+        builder.ToTable("payment_requests");
+
+        builder.Property(request => request.PlanName).IsRequired().HasMaxLength(120);
+        builder.Property(request => request.BillingCycle).IsRequired().HasMaxLength(16).HasConversion<string>();
+        builder.Property(request => request.Amount).HasPrecision(18, 2);
+        builder.Property(request => request.Currency).IsRequired().HasMaxLength(3);
+        builder.Property(request => request.Channel).IsRequired().HasMaxLength(24).HasConversion<string>();
+        builder.Property(request => request.Status).IsRequired().HasMaxLength(16).HasConversion<string>();
+        builder.Property(request => request.Reference).HasMaxLength(120);
+        builder.Property(request => request.Note).HasMaxLength(1000);
+        builder.Property(request => request.ProofStorageKey).IsRequired().HasMaxLength(400);
+        builder.Property(request => request.ProofFileName).HasMaxLength(260);
+        builder.Property(request => request.ProofContentType).HasMaxLength(120);
+        builder.Property(request => request.Organisation).HasMaxLength(200);
+        builder.Property(request => request.SubmittedByName).HasMaxLength(200);
+        builder.Property(request => request.SubmittedByEmail).HasMaxLength(256);
+        builder.Property(request => request.ReviewedByName).HasMaxLength(200);
+        builder.Property(request => request.RejectionReason).HasMaxLength(1000);
+
+        // The review queue reads by status, newest first.
+        builder.HasIndex(request => new { request.Status, request.SubmittedAt });
+
+        // A tenant's own history, and the "one open request" check.
+        builder.HasIndex(request => new { request.TenantId, request.Status, request.SubmittedAt });
+
+        builder.HasOne(request => request.SubscriptionPlan)
+            .WithMany()
+            .HasForeignKey(request => request.SubscriptionPlanId)
+            // A plan that has been paid for must not be deletable out from under the record of
+            // that payment.
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+/// <summary>Fluent configuration for <see cref="PaymentChannelSetting"/>.</summary>
+public sealed class PaymentChannelSettingConfiguration : BaseEntityConfiguration<PaymentChannelSetting>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<PaymentChannelSetting> builder)
+    {
+        builder.ToTable("payment_channel_settings");
+
+        builder.Property(channel => channel.Channel).IsRequired().HasMaxLength(24).HasConversion<string>();
+        builder.Property(channel => channel.DisplayName).IsRequired().HasMaxLength(80);
+        builder.Property(channel => channel.AccountTitle).HasMaxLength(160);
+        builder.Property(channel => channel.AccountNumber).HasMaxLength(64);
+        builder.Property(channel => channel.BankName).HasMaxLength(120);
+        builder.Property(channel => channel.QrStorageKey).HasMaxLength(400);
+        builder.Property(channel => channel.QrContentType).HasMaxLength(120);
+        builder.Property(channel => channel.Instructions).HasColumnType("text[]").IsRequired();
+
+        // One row per channel. Partial, matching the soft-delete convention.
+        builder.HasIndex(channel => channel.Channel)
+            .IsUnique()
+            .HasFilter("is_deleted = false");
+    }
+}
+
 /// <summary>Fluent configuration for <see cref="ContactImportExport"/>.</summary>
 public sealed class ContactImportExportConfiguration : BaseEntityConfiguration<ContactImportExport>
 {

@@ -26,7 +26,7 @@ public sealed class AuthenticationServiceTests
     private readonly IPasswordHasher _passwordHasher = Substitute.For<IPasswordHasher>();
     private readonly ITokenService _tokenService = Substitute.For<ITokenService>();
     private readonly StubCurrentUser _currentUser = new();
-    private readonly IRepository<UserToken> _userTokens = Substitute.For<IRepository<UserToken>>();
+    private readonly IUserTokenRepository _userTokens = Substitute.For<IUserTokenRepository>();
     private readonly IAccountActivationService _activation = Substitute.For<IAccountActivationService>();
     private readonly IPasswordPolicy _passwordPolicy =
         new PasswordPolicy(Options.Create(new AuthenticationPolicyOptions()));
@@ -374,12 +374,10 @@ public sealed class AuthenticationServiceTests
 
         _tokenService.HashSecureToken("presented").Returns("presented-hash");
 
-        _userTokens.FirstOrDefaultAsync(
-            Arg.Any<System.Linq.Expressions.Expression<Func<UserToken, bool>>>(),
-            Arg.Any<CancellationToken>()).Returns(token);
-
-        _userTokens.GetForUpdateAsync(token.Id, Arg.Any<CancellationToken>()).Returns(token);
-        _users.GetForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
+        // Redemption resolves the token by hash with the tenant filter bypassed, because the
+        // caller is anonymous at that point and the token belongs to an organisation.
+        _userTokens.FindByHashAsync("presented-hash", Arg.Any<CancellationToken>()).Returns(token);
+        _users.FindWithRolesAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
 
         return token;
     }

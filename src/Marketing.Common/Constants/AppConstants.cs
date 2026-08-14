@@ -155,6 +155,16 @@ public static class AppConstants
         /// <summary>Platform administration endpoints, partitioned by user.</summary>
         public const string Admin = "rl:admin";
 
+        /// <summary>
+        /// Endpoints that accept an uploaded file.
+        /// <para>
+        /// Tight on purpose. These write attacker-supplied bytes to storage and put them in front
+        /// of a member of staff, so the cost of an abusive caller is disk and someone's attention
+        /// rather than CPU.
+        /// </para>
+        /// </summary>
+        public const string Uploads = "rl:uploads";
+
         /// <summary>Default budget applied to everything else.</summary>
         public const string Default = "rl:default";
     }

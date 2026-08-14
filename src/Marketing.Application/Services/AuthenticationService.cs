@@ -26,7 +26,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
     private readonly ICurrentUser _currentUser;
-    private readonly IRepository<UserToken> _userTokens;
+    private readonly IUserTokenRepository _userTokens;
     private readonly IAccountActivationService _activation;
     private readonly IPasswordPolicy _passwordPolicy;
     private readonly AuthenticationPolicyOptions _policy;
@@ -53,7 +53,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
         IDateTimeProvider dateTimeProvider,
         IRequestContext requestContext,
         ICurrentUser currentUser,
-        IRepository<UserToken> userTokens,
+        IUserTokenRepository userTokens,
         IAccountActivationService activation,
         IPasswordPolicy passwordPolicy,
         IOptions<AuthenticationPolicyOptions> policy,
@@ -311,6 +311,18 @@ public sealed partial class AuthenticationService : IAuthenticationService
 
         token.ConsumedOn = _dateTimeProvider.UtcNow;
 
+        // Accepting the invitation *is* completing onboarding, which is what Pending means. The
+        // organisation is created Pending because nobody had accepted yet; without this the very
+        // first administrator is refused for a state only their own acceptance can clear, and the
+        // invitation flow is a dead end unless a platform administrator flips the status by hand.
+        //
+        // Only from Pending. A tenant that was suspended or cancelled stays that way — an
+        // outstanding invitation link must never resurrect an organisation somebody switched off.
+        if (user.Tenant is { Status: TenantStatus.Pending } pending)
+        {
+            pending.Status = TenantStatus.Active;
+        }
+
         EnsureAccountUsable(user);
 
         var tokens = IssueSession(user, Guid.NewGuid());
@@ -430,9 +442,14 @@ public sealed partial class AuthenticationService : IAuthenticationService
             throw new AuthenticationException("invalid_token");
         }
 
-       // var hash = _tokenService.HashSecureToken(presented);
+        var hash = _tokenService.HashSecureToken(presented);
 
-        var token = await _userTokens.FirstOrDefaultAsync(entry => entry.TokenHash == presented, cancellationToken)
+        // Through the repository, which ignores the tenant filter. This request is anonymous — the
+        // caller is accepting an invitation or resetting a password and has no tenant yet — so a
+        // token belonging to an organisation is invisible to the ordinary query and a valid link
+        // comes back as "invalid_token". The hash is the credential; the tenant is what resolving
+        // it tells us.
+        var token = await _userTokens.FindByHashAsync(hash, cancellationToken)
                     ?? throw new AuthenticationException("invalid_token");
 
         if (token.Purpose != purpose || !token.IsUsable(_dateTimeProvider.UtcNow))
@@ -440,13 +457,12 @@ public sealed partial class AuthenticationService : IAuthenticationService
             throw new AuthenticationException("invalid_token");
         }
 
-        var tracked = await _userTokens.GetForUpdateAsync(token.Id, cancellationToken)
-                      ?? throw new AuthenticationException("invalid_token");
-
-        var user = await _userRepository.GetForUpdateAsync(token.UserId, cancellationToken)
+        // Also filter-free, and for the same reason: the user this token belongs to sits inside the
+        // tenant the anonymous caller cannot yet see.
+        var user = await _userRepository.FindWithRolesAsync(token.UserId, cancellationToken)
                    ?? throw new AuthenticationException("invalid_token");
 
-        return (tracked, user);
+        return (token, user);
     }
 
     /// <inheritdoc />

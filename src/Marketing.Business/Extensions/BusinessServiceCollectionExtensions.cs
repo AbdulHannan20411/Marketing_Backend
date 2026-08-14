@@ -23,6 +23,7 @@ public static class BusinessServiceCollectionExtensions
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<ITenantRepository, TenantRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<IUserTokenRepository, UserTokenRepository>();
         services.AddScoped<ISqlQueryExecutor, SqlQueryExecutor>();
         services.AddScoped<IQueryExecutor, QueryExecutor>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();

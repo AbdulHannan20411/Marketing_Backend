@@ -36,4 +36,16 @@ public interface IUserRepository : IRepository<User>
     /// <param name="userId">User identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<IReadOnlyList<string>> GetRoleNamesAsync(long userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the active platform administrators.
+    /// </summary>
+    /// <remarks>
+    /// Lives on the repository because it has to ignore the tenant filter: platform staff carry no
+    /// tenant, so any query for them made while a tenant scope is entered matches nobody. That
+    /// failure is silent — an empty list reads exactly like "there are none" — which is how a
+    /// notification meant for a reviewer disappears without an error anywhere.
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<IReadOnlyList<User>> GetPlatformAdministratorsAsync(CancellationToken cancellationToken = default);
 }

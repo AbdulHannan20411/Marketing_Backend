@@ -8,6 +8,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using static Marketing.Common.Constants.AppConstants;
 
+using static Marketing.Common.Constants.ContractEnums;
+
 namespace Marketing.DataAccess.Seed;
 
 /// <summary>
@@ -52,6 +54,7 @@ public sealed partial class DatabaseSeeder
     {
         await SeedRolesAsync(cancellationToken);
         await SeedSuperAdministratorAsync(bootstrapAdminEmail, bootstrapAdminPassword, cancellationToken);
+        await SeedPaymentChannelsAsync(cancellationToken);
     }
 
     /// <summary>
@@ -116,6 +119,77 @@ public sealed partial class DatabaseSeeder
         await _context.SaveChangesAsync(cancellationToken);
 
         LogRolesSeeded(created, reconciled);
+    }
+
+    /// <summary>
+    /// Seeds the manual payment channels, once.
+    /// </summary>
+    /// <remarks>
+    /// Placeholder account numbers on purpose. They are structurally correct so the checkout screen
+    /// renders, and obviously not real so nobody mistakes them for somewhere to send money — a
+    /// plausible-looking wrong account number is worse than an empty one. A platform administrator
+    /// replaces them, and no QR image is seeded because a fake one would be scanned.
+    /// </remarks>
+    private async Task SeedPaymentChannelsAsync(CancellationToken cancellationToken)
+    {
+        if (await _context.PaymentChannelSettings.IgnoreQueryFilters().AnyAsync(cancellationToken))
+        {
+            return;
+        }
+
+        _context.PaymentChannelSettings.AddRange(
+            new PaymentChannelSetting
+            {
+                Channel = PaymentChannel.JazzCash,
+                DisplayName = "JazzCash",
+                AccountTitle = "CONFIGURE THIS ACCOUNT",
+                AccountNumber = "0000 0000000",
+                BankName = null,
+                Instructions =
+                [
+                    "Open the JazzCash app and choose Scan QR.",
+                    "Scan the code and enter the exact amount shown above.",
+                    "Complete the transfer and take a screenshot of the receipt.",
+                ],
+                IsActive = false,
+                SortOrder = 1,
+            },
+            new PaymentChannelSetting
+            {
+                Channel = PaymentChannel.EasyPaisa,
+                DisplayName = "EasyPaisa",
+                AccountTitle = "CONFIGURE THIS ACCOUNT",
+                AccountNumber = "0000 0000000",
+                BankName = null,
+                Instructions =
+                [
+                    "Open the EasyPaisa app and choose Scan QR.",
+                    "Scan the code and enter the exact amount shown above.",
+                    "Complete the transfer and take a screenshot of the receipt.",
+                ],
+                IsActive = false,
+                SortOrder = 2,
+            },
+            new PaymentChannelSetting
+            {
+                Channel = PaymentChannel.BankTransfer,
+                DisplayName = "Bank transfer",
+                AccountTitle = "CONFIGURE THIS ACCOUNT",
+                AccountNumber = "0000000000000000",
+                BankName = "CONFIGURE THIS BANK",
+                Instructions =
+                [
+                    "Transfer the exact amount shown above to the account details listed.",
+                    "Use your organisation name as the payment reference.",
+                    "Save the transfer receipt and upload it here.",
+                ],
+                IsActive = false,
+                SortOrder = 3,
+            });
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        LogPaymentChannelsSeeded();
     }
 
     private async Task SeedSuperAdministratorAsync(
@@ -196,4 +270,10 @@ public sealed partial class DatabaseSeeder
         Level = LogLevel.Warning,
         Message = "Seeded bootstrap super administrator {Email}. Rotate this password immediately.")]
     private partial void LogSuperAdministratorSeeded(string email);
+
+    [LoggerMessage(
+        EventId = 2970,
+        Level = LogLevel.Information,
+        Message = "Seeded the manual payment channels, inactive until an administrator configures them.")]
+    private partial void LogPaymentChannelsSeeded();
 }

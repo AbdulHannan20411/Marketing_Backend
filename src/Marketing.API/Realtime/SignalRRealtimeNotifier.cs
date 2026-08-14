@@ -1,4 +1,5 @@
 using Marketing.Application.DTOs.Campaigns;
+using Marketing.Application.DTOs.Payments;
 using Marketing.Application.DTOs.Workspace;
 using Marketing.Application.Interfaces;
 using Microsoft.AspNetCore.SignalR;
@@ -61,6 +62,22 @@ public sealed partial class SignalRRealtimeNotifier : IRealtimeNotifier
             RealtimeEvents.ImportProgress,
             progress,
             cancellationToken);
+
+    /// <inheritdoc />
+    public async Task PublishPaymentRequestAsync(
+        long? tenantId,
+        PaymentRequestEvent payment,
+        CancellationToken cancellationToken = default)
+    {
+        // Reviewers always, because the queue is theirs to work.
+        await SendAsync(RealtimeHub.PlatformGroup(), RealtimeEvents.PaymentRequestUpdated, payment, cancellationToken);
+
+        if (tenantId is { } id)
+        {
+            await SendAsync(
+                RealtimeHub.TenantGroup(id), RealtimeEvents.PaymentRequestUpdated, payment, cancellationToken);
+        }
+    }
 
     /// <summary>
     /// Sends to a group, swallowing transport failures.

@@ -42,6 +42,15 @@ public sealed class RealtimeHub : Hub
     /// <summary>Group name carrying everything addressed to one user.</summary>
     public static string UserGroup(long userId) => $"user:{userId:N}";
 
+    /// <summary>
+    /// Group name carrying everything addressed to platform staff.
+    /// <para>
+    /// Membership is decided here from the authenticated principal, never asked for by the client.
+    /// A tenant able to join this group would see every other organisation's payment amounts.
+    /// </para>
+    /// </summary>
+    public static string PlatformGroup() => "platform";
+
     /// <inheritdoc />
     public override async Task OnConnectedAsync()
     {
@@ -55,6 +64,13 @@ public sealed class RealtimeHub : Hub
         if (_tenantContext.TenantId is { } tenantId)
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, TenantGroup(tenantId));
+        }
+
+        // Decided from the role claim, so a customer cannot subscribe their way into the review
+        // stream by asking.
+        if (_currentUser.IsSuperAdmin)
+        {
+            await Groups.AddToGroupAsync(Context.ConnectionId, PlatformGroup());
         }
 
         await base.OnConnectedAsync();

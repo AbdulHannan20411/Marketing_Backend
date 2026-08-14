@@ -17,17 +17,35 @@ namespace Marketing.API.Controllers;
 public sealed class SubscriptionController : ApiControllerBase
 {
     private readonly IBillingService _billing;
+    private readonly ITenantScopeResolver _scope;
 
     /// <summary>Initialises a new instance.</summary>
-    public SubscriptionController(IBillingService billing) => _billing = billing;
+    public SubscriptionController(IBillingService billing, ITenantScopeResolver scope)
+    {
+        _billing = billing;
+        _scope = scope;
+    }
 
     /// <summary>Returns the subscription, its plan and live usage counts.</summary>
+    /// <remarks>
+    /// Accepts <c>adminId</c> like every other scoped endpoint. Without it a Super Admin reads with
+    /// the tenant filter bypassed, and this query takes the first subscription it finds — which is
+    /// some arbitrary organisation's, not the one being looked at.
+    /// </remarks>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The subscription snapshot.</response>
     [HttpGet]
     [RequirePermission(Permissions.Settings.Subscription)]
     [ProducesResponseType(typeof(ApiResponse<SubscriptionSnapshot>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetAsync(CancellationToken cancellationToken) =>
-        Success(await _billing.GetSubscriptionAsync(cancellationToken));
+    public async Task<IActionResult> GetAsync(
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(await _billing.GetSubscriptionAsync(cancellationToken));
+    }
 
     /// <summary>Moves to another plan.</summary>
     /// <remarks>

@@ -124,13 +124,21 @@ public sealed class AuditingSaveChangesInterceptor : SaveChangesInterceptor
         // Reassigning a row to a different tenant is never a legitimate update. Blocking it here
         // means a mass-assignment bug in a DTO mapping cannot move data across the isolation
         // boundary, no matter which layer introduced it.
-        var tenantProperty = entry.Property(nameof(BaseEntity.TenantId));
-
-        if (tenantProperty.IsModified &&
-            !Equals(tenantProperty.OriginalValue, tenantProperty.CurrentValue))
+        //
+        // Guarded the same way the insert path is: TenantId lives on BaseEntity in C#, but entities
+        // that own no tenant do not map it — Tenant itself being the obvious one, since a tenant has
+        // no owning tenant. Reading the property unconditionally throws on those, which turns any
+        // update to an organisation into a 500.
+        if (entry.Entity is ITenantScoped)
         {
-            throw new ForbiddenException(
-                $"The owning tenant of {entry.Entity.GetType().Name} cannot be changed.");
+            var tenantProperty = entry.Property(nameof(BaseEntity.TenantId));
+
+            if (tenantProperty.IsModified &&
+                !Equals(tenantProperty.OriginalValue, tenantProperty.CurrentValue))
+            {
+                throw new ForbiddenException(
+                    $"The owning tenant of {entry.Entity.GetType().Name} cannot be changed.");
+            }
         }
 
         entry.Entity.ModifiedBy = userId;

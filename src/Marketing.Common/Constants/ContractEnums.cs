@@ -546,6 +546,61 @@ public static class ContractEnums
         /// <summary>Messages are close to the plan limit.</summary>
         [JsonStringEnumMemberName("messages.limit")]
         MessagesLimit,
+
+        /// <summary>A customer submitted proof of payment for review.</summary>
+        [JsonStringEnumMemberName("payment.submitted")]
+        PaymentSubmitted,
+
+        /// <summary>A submitted payment was approved and the plan granted.</summary>
+        [JsonStringEnumMemberName("payment.approved")]
+        PaymentApproved,
+
+        /// <summary>A submitted payment was rejected.</summary>
+        [JsonStringEnumMemberName("payment.rejected")]
+        PaymentRejected,
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Manual payment
+    // -------------------------------------------------------------------------------------
+
+    // Both enums below serialise PascalCase, against the camelCase policy the rest of this file
+    // follows, because the manual-payment contract was specified that way and the client matches on
+    // the literals. Declared per type rather than by loosening the global policy.
+
+    /// <summary>How a customer sent the money.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter<PaymentChannel>))]
+    public enum PaymentChannel
+    {
+        /// <summary>JazzCash mobile wallet.</summary>
+        JazzCash,
+
+        /// <summary>EasyPaisa mobile wallet.</summary>
+        EasyPaisa,
+
+        /// <summary>A direct bank transfer.</summary>
+        BankTransfer,
+    }
+
+    /// <summary>Where a submitted payment has got to.</summary>
+    /// <remarks>
+    /// Distinct from <see cref="PaymentStatus"/>, which describes a captured payment. This one
+    /// describes a human review, and only <see cref="Approved"/> grants a plan.
+    /// </remarks>
+    [JsonConverter(typeof(JsonStringEnumConverter<PaymentRequestStatus>))]
+    public enum PaymentRequestStatus
+    {
+        /// <summary>Submitted and awaiting review.</summary>
+        Pending,
+
+        /// <summary>Reviewed and accepted. The plan has been granted.</summary>
+        Approved,
+
+        /// <summary>Reviewed and refused. The reason is on the request.</summary>
+        Rejected,
+
+        /// <summary>Withdrawn by the customer before anyone reviewed it.</summary>
+        Cancelled,
     }
 
     // -------------------------------------------------------------------------------------

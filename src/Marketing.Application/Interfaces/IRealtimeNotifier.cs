@@ -65,6 +65,23 @@ public interface IRealtimeNotifier
         long tenantId,
         ImportProgress progress,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Pushes a manual payment's state to the submitting workspace and to platform reviewers.
+    /// </summary>
+    /// <remarks>
+    /// Two audiences, one call, because both need the same event: the review queue refreshes and
+    /// the customer's subscription page re-reads its entitlements without a reload. The tenant is
+    /// passed explicitly rather than read from ambient context, because a reviewer's decision runs
+    /// under no tenant of its own.
+    /// </remarks>
+    /// <param name="tenantId">Workspace that submitted it, or null if it has none.</param>
+    /// <param name="payment">Current state of the request.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task PublishPaymentRequestAsync(
+        long? tenantId,
+        DTOs.Payments.PaymentRequestEvent payment,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>An import's live state, as pushed to the wizard.</summary>
@@ -91,4 +108,7 @@ public static class RealtimeEvents
 
     /// <summary>An import's status or counters changed.</summary>
     public const string ImportProgress = "importProgress";
+
+    /// <summary>A manual payment was submitted or decided.</summary>
+    public const string PaymentRequestUpdated = "paymentRequestUpdated";
 }

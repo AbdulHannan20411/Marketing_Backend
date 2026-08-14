@@ -2212,6 +2212,122 @@ namespace Marketing.DataAccess.Migrations
                     b.ToTable("payments", (string)null);
                 });
 
+            modelBuilder.Entity("Marketing.DataAccess.Entities.PaymentChannelSetting", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("account_number");
+
+                    b.Property<string>("AccountTitle")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)")
+                        .HasColumnName("account_title");
+
+                    b.Property<string>("BankName")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("bank_name");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("channel");
+
+                    b.Property<long>("CreatedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTimeOffset>("CreatedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_on");
+
+                    b.Property<long?>("DeletedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<DateTimeOffset?>("DeletedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("deleted_on");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("display_name");
+
+                    b.PrimitiveCollection<List<string>>("Instructions")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("instructions");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<long?>("ModifiedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("modified_by");
+
+                    b.Property<DateTimeOffset?>("ModifiedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("modified_on");
+
+                    b.Property<string>("QrContentType")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("qr_content_type");
+
+                    b.Property<string>("QrStorageKey")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)")
+                        .HasColumnName("qr_storage_key");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order");
+
+                    b.Property<long?>("TenantId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_payment_channel_settings");
+
+                    b.HasIndex("Channel")
+                        .IsUnique()
+                        .HasDatabaseName("ix_payment_channel_settings_channel")
+                        .HasFilter("is_deleted = false");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("ix_payment_channel_settings_is_deleted")
+                        .HasFilter("is_deleted = false");
+
+                    b.ToTable("payment_channel_settings", (string)null);
+                });
+
             modelBuilder.Entity("Marketing.DataAccess.Entities.PaymentMethod", b =>
                 {
                     b.Property<long>("Id")
@@ -2316,6 +2432,201 @@ namespace Marketing.DataAccess.Migrations
                         .HasFilter("is_deleted = false");
 
                     b.ToTable("payment_methods", (string)null);
+                });
+
+            modelBuilder.Entity("Marketing.DataAccess.Entities.PaymentRequest", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<string>("BillingCycle")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("billing_cycle");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("channel");
+
+                    b.Property<long>("CreatedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTimeOffset>("CreatedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_on");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<long?>("DeletedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<DateTimeOffset?>("DeletedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("deleted_on");
+
+                    b.Property<long?>("InvoiceId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("invoice_id");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<long?>("ModifiedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("modified_by");
+
+                    b.Property<DateTimeOffset?>("ModifiedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("modified_on");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("note");
+
+                    b.Property<string>("Organisation")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("organisation");
+
+                    b.Property<string>("PlanName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("plan_name");
+
+                    b.Property<string>("ProofContentType")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("proof_content_type");
+
+                    b.Property<string>("ProofFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)")
+                        .HasColumnName("proof_file_name");
+
+                    b.Property<long>("ProofSizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("proof_size_bytes");
+
+                    b.Property<string>("ProofStorageKey")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)")
+                        .HasColumnName("proof_storage_key");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("reference");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("rejection_reason");
+
+                    b.Property<DateTimeOffset?>("ReviewedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("reviewed_at");
+
+                    b.Property<string>("ReviewedByName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("reviewed_by_name");
+
+                    b.Property<long?>("ReviewedByUserId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("reviewed_by_user_id");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("SubmittedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("submitted_at");
+
+                    b.Property<string>("SubmittedByEmail")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("submitted_by_email");
+
+                    b.Property<string>("SubmittedByName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("submitted_by_name");
+
+                    b.Property<long>("SubmittedByUserId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("submitted_by_user_id");
+
+                    b.Property<long>("SubscriptionPlanId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("subscription_plan_id");
+
+                    b.Property<long?>("TenantId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_payment_requests");
+
+                    b.HasIndex("InvoiceId")
+                        .HasDatabaseName("ix_payment_requests_invoice_id");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("ix_payment_requests_is_deleted")
+                        .HasFilter("is_deleted = false");
+
+                    b.HasIndex("SubscriptionPlanId")
+                        .HasDatabaseName("ix_payment_requests_subscription_plan_id");
+
+                    b.HasIndex("Status", "SubmittedAt")
+                        .HasDatabaseName("ix_payment_requests_status_submitted_at");
+
+                    b.HasIndex("TenantId", "Id")
+                        .HasDatabaseName("ix_payment_requests_tenant_id_id");
+
+                    b.HasIndex("TenantId", "Status", "SubmittedAt")
+                        .HasDatabaseName("ix_payment_requests_tenant_id_status_submitted_at");
+
+                    b.ToTable("payment_requests", (string)null);
                 });
 
             modelBuilder.Entity("Marketing.DataAccess.Entities.PermissionSet", b =>
@@ -3830,6 +4141,25 @@ namespace Marketing.DataAccess.Migrations
                         .HasConstraintName("fk_payments_invoices_invoice_id");
 
                     b.Navigation("Invoice");
+                });
+
+            modelBuilder.Entity("Marketing.DataAccess.Entities.PaymentRequest", b =>
+                {
+                    b.HasOne("Marketing.DataAccess.Entities.Invoice", "Invoice")
+                        .WithMany()
+                        .HasForeignKey("InvoiceId")
+                        .HasConstraintName("fk_payment_requests_invoices_invoice_id");
+
+                    b.HasOne("Marketing.DataAccess.Entities.SubscriptionPlan", "SubscriptionPlan")
+                        .WithMany()
+                        .HasForeignKey("SubscriptionPlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_payment_requests_subscription_plans_subscription_plan_id");
+
+                    b.Navigation("Invoice");
+
+                    b.Navigation("SubscriptionPlan");
                 });
 
             modelBuilder.Entity("Marketing.DataAccess.Entities.RefreshToken", b =>
