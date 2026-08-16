@@ -3925,6 +3925,12 @@ namespace Marketing.DataAccess.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("messaging_limit");
 
+                    b.Property<string>("MessagingTier")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("messaging_tier");
+
                     b.Property<long?>("ModifiedBy")
                         .HasColumnType("bigint")
                         .HasColumnName("modified_by");
@@ -3943,6 +3949,12 @@ namespace Marketing.DataAccess.Migrations
                         .HasMaxLength(8)
                         .HasColumnType("character varying(8)")
                         .HasColumnName("quality_rating");
+
+                    b.Property<string>("RegistrationPin")
+                        .HasMaxLength(6)
+                        .HasColumnType("character(6)")
+                        .HasColumnName("registration_pin")
+                        .IsFixedLength();
 
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()

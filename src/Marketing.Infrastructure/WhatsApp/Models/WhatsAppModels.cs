@@ -30,12 +30,17 @@ public sealed record GraphCursors(
 /// <param name="VerifiedName">Business name Meta has verified for the number.</param>
 /// <param name="QualityRating">Meta's current quality rating: GREEN, YELLOW or RED.</param>
 /// <param name="CodeVerificationStatus">Whether the number has completed verification.</param>
+/// <param name="MessagingTier">
+/// Daily unique-customer ceiling, as <c>TIER_1K</c> and similar. Meta omits it on numbers it has
+/// not yet tiered.
+/// </param>
 public sealed record WhatsAppPhoneNumber(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("display_phone_number")] string DisplayPhoneNumber,
     [property: JsonPropertyName("verified_name")] string? VerifiedName,
     [property: JsonPropertyName("quality_rating")] string? QualityRating,
-    [property: JsonPropertyName("code_verification_status")] string? CodeVerificationStatus);
+    [property: JsonPropertyName("code_verification_status")] string? CodeVerificationStatus,
+    [property: JsonPropertyName("messaging_limit_tier")] string? MessagingTier = null);
 
 /// <summary>A message template as Meta holds it.</summary>
 /// <param name="Id">Template identifier.</param>
@@ -137,3 +142,57 @@ public sealed record TemplateParameter([property: JsonPropertyName("text")] stri
     [JsonPropertyName("type")]
     public string Type { get; } = "text";
 }
+
+/// <summary>
+/// Graph's acknowledgement of a write it has nothing else to say about.
+/// </summary>
+/// <remarks>
+/// Meta answers <c>{"success": true}</c> to several calls. Modelled rather than ignored so a
+/// response of <c>false</c> is visible to the caller instead of being read as success by silence.
+/// </remarks>
+/// <param name="Success">Whether the call was accepted.</param>
+public sealed record GraphSuccess([property: JsonPropertyName("success")] bool Success);
+
+/// <summary>A WhatsApp Business Account.</summary>
+/// <param name="Id">Account identifier.</param>
+/// <param name="Name">Business name.</param>
+/// <param name="TemplateNamespace">Namespace templates are published under.</param>
+/// <param name="ReviewStatus">Where Meta's review of the account stands.</param>
+public sealed record WhatsAppBusinessAccount(
+    [property: JsonPropertyName("id")] string? Id,
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("message_template_namespace")] string? TemplateNamespace,
+    [property: JsonPropertyName("account_review_status")] string? ReviewStatus);
+
+/// <summary>The handle returned by a media upload.</summary>
+/// <param name="Id">Media identifier a send refers to.</param>
+public sealed record MediaUploadResponse([property: JsonPropertyName("id")] string Id);
+
+/// <summary>
+/// Where a media id's bytes can be read from.
+/// </summary>
+/// <remarks>
+/// The URL is short-lived and needs the business token as a bearer, which is why media is fetched
+/// server-side and re-served from our own storage rather than linked to directly.
+/// </remarks>
+/// <param name="Url">Temporary download URL.</param>
+/// <param name="MimeType">Media type.</param>
+/// <param name="FileSize">Size in bytes.</param>
+/// <param name="Id">Media identifier.</param>
+public sealed record MediaHandle(
+    [property: JsonPropertyName("url")] string? Url,
+    [property: JsonPropertyName("mime_type")] string? MimeType,
+    [property: JsonPropertyName("file_size")] long FileSize,
+    [property: JsonPropertyName("id")] string? Id);
+
+/// <summary>What Meta returns when a template is created.</summary>
+/// <param name="Id">Meta's identifier for the template.</param>
+/// <param name="Status">Review status, normally <c>PENDING</c>.</param>
+/// <param name="Category">
+/// The category Meta assigned. Meta categorises on content, so this can differ from the category
+/// submitted — the caller stores what came back, not what was asked for.
+/// </param>
+public sealed record TemplateMutationResponse(
+    [property: JsonPropertyName("id")] string? Id,
+    [property: JsonPropertyName("status")] string? Status,
+    [property: JsonPropertyName("category")] string? Category);

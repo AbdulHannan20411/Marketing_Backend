@@ -60,6 +60,96 @@ public interface IWhatsAppCloudApi
         [AliasAs("code")] string code,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Subscribes this app to a business account's webhooks.
+    /// </summary>
+    /// <remarks>
+    /// Without this call Meta sends no webhooks at all for the account — no inbound messages, no
+    /// delivery receipts, no template verdicts. It is the most commonly missed step in onboarding,
+    /// and its symptom is silence rather than an error.
+    /// </remarks>
+    /// <param name="wabaId">WhatsApp Business Account identifier.</param>
+    /// <param name="authorization">Bearer token, supplied explicitly during onboarding.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [Post("/{wabaId}/subscribed_apps")]
+    public Task<GraphSuccess> SubscribeAppAsync(
+        string wabaId,
+        [Header("Authorization")] string authorization,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Registers a phone number for Cloud API sending.
+    /// </summary>
+    /// <remarks>
+    /// Required before the number can send anything. The PIN is two-factor material the caller
+    /// generates and stores; re-registering later needs the same value.
+    /// </remarks>
+    /// <param name="phoneNumberId">Phone number identifier.</param>
+    /// <param name="payload">Registration body carrying the messaging product and the PIN.</param>
+    /// <param name="authorization">Bearer token, supplied explicitly during onboarding.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [Post("/{phoneNumberId}/register")]
+    public Task<GraphSuccess> RegisterPhoneNumberAsync(
+        string phoneNumberId,
+        [Body] object payload,
+        [Header("Authorization")] string authorization,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Reads a business account, for its name and messaging tier.</summary>
+    /// <param name="wabaId">WhatsApp Business Account identifier.</param>
+    /// <param name="fields">Fields to return.</param>
+    /// <param name="authorization">Bearer token, supplied explicitly during onboarding.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [Get("/{wabaId}")]
+    public Task<WhatsAppBusinessAccount> GetBusinessAccountAsync(
+        string wabaId,
+        [Header("Authorization")] string authorization,
+        [AliasAs("fields")] string fields = "id,name,message_template_namespace,account_review_status",
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Uploads media and returns the handle a send refers to.</summary>
+    /// <param name="phoneNumberId">Phone number the media belongs to.</param>
+    /// <param name="file">The bytes, as a multipart part.</param>
+    /// <param name="messagingProduct">Always <c>whatsapp</c>.</param>
+    /// <param name="type">Media MIME type.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [Multipart]
+    [Post("/{phoneNumberId}/media")]
+    public Task<MediaUploadResponse> UploadMediaAsync(
+        string phoneNumberId,
+        StreamPart file,
+        [AliasAs("messaging_product")] string messagingProduct,
+        [AliasAs("type")] string type,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Resolves a media id to the short-lived URL its bytes can be read from.</summary>
+    /// <param name="mediaId">Media identifier from a webhook or an upload.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [Get("/{mediaId}")]
+    public Task<MediaHandle> GetMediaAsync(
+        string mediaId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Creates a message template and submits it to Meta for review.</summary>
+    /// <param name="wabaId">WhatsApp Business Account identifier.</param>
+    /// <param name="payload">Template definition.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [Post("/{wabaId}/message_templates")]
+    public Task<TemplateMutationResponse> CreateTemplateAsync(
+        string wabaId,
+        [Body] object payload,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Edits a rejected template, which resubmits it.</summary>
+    /// <param name="metaTemplateId">Meta's identifier for the template.</param>
+    /// <param name="payload">Fields to change.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [Post("/{metaTemplateId}")]
+    public Task<GraphSuccess> UpdateTemplateAsync(
+        string metaTemplateId,
+        [Body] object payload,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Sends a message.</summary>
     /// <param name="phoneNumberId">Sending phone number identifier.</param>
     /// <param name="payload">

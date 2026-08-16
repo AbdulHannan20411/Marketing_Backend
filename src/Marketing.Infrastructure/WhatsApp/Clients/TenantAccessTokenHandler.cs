@@ -59,6 +59,14 @@ public sealed partial class TenantAccessTokenHandler : DelegatingHandler
             return await base.SendAsync(request, cancellationToken);
         }
 
+        // A caller that supplied its own token keeps it. The onboarding calls — subscribing to
+        // webhooks, registering the number — happen before the token has been stored, so there is
+        // nothing for this handler to look up; overwriting their header would send an empty one.
+        if (request.Headers.Authorization is not null)
+        {
+            return await base.SendAsync(request, cancellationToken);
+        }
+
         await using var scope = _scopeFactory.CreateAsyncScope();
 
         // Resolved inside the scope but read here: the tenant itself comes from an ambient source -

@@ -42,6 +42,16 @@ public sealed class WhatsAppConnection : BaseEntity, IRequiresTenant
     /// <summary>Messages sent in the rolling 24-hour window.</summary>
     public int MessagesLast24h { get; set; }
 
+    /// <summary>
+    /// Meta's daily ceiling on unique customers this number may start conversations with.
+    /// </summary>
+    /// <remarks>
+    /// Read from Meta on connect and refreshed by the account-update webhook. Defaults to the
+    /// lowest tier, which is where an unverified business genuinely starts — assuming anything
+    /// higher would let the platform promise a send volume Meta will refuse.
+    /// </remarks>
+    public MessagingTier MessagingTier { get; set; } = MessagingTier.Tier250;
+
     /// <summary>Instant the connection was established.</summary>
     public DateTimeOffset? ConnectedAt { get; set; }
 
@@ -50,6 +60,16 @@ public sealed class WhatsAppConnection : BaseEntity, IRequiresTenant
 
     /// <summary>Template namespace alias.</summary>
     public string TemplateNamespaceAlias { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Six-digit PIN this number was registered with.
+    /// </summary>
+    /// <remarks>
+    /// Two-factor material for the customer's number: Meta asks for the same value if the number is
+    /// ever re-registered, so it is kept rather than regenerated. Never returned in a DTO, for the
+    /// same reason the access token is not.
+    /// </remarks>
+    public string? RegistrationPin { get; set; }
 
     /// <summary>
     /// Encrypted system-user access token.

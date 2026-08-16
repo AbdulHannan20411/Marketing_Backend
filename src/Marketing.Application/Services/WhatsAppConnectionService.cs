@@ -156,13 +156,49 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
 
         try
         {
+            // Subscribe first. Without it Meta delivers nothing for this account — no inbound
+            // messages, no receipts, no template verdicts — and the failure is silent: the
+            // connection looks healthy and the inbox simply never fills. Doing it before the
+            // profile read means a refusal here stops the connection rather than producing a
+            // connected-looking account that can never receive anything.
+            await _gateway.SubscribeToWebhooksAsync(wabaId, accessToken, cancellationToken);
+
+            // Registration is what makes the number able to send. The PIN is two-factor material
+            // Meta will ask for again if the number is ever re-registered, so it is generated once
+            // and kept rather than regenerated on each attempt.
+            connection.RegistrationPin ??= NewRegistrationPin();
+
+            await _gateway.RegisterPhoneNumberAsync(
+                phoneNumberId, connection.RegistrationPin, accessToken, cancellationToken);
+
             var number = await _gateway.GetPhoneNumberAsync(phoneNumberId, cancellationToken);
 
             connection.DisplayPhoneNumber = number.DisplayPhoneNumber;
             connection.VerifiedName = number.VerifiedName ?? string.Empty;
             connection.QualityRating = ParseQuality(number.QualityRating);
+
+            // Absent means "leave what we had". Meta omits the tier on numbers it has not yet
+            // rated, and defaulting to the lowest would tell the customer their throughput had
+            // dropped when nothing changed.
+            connection.MessagingTier = ParseTier(number.MessagingTier) ?? connection.MessagingTier;
+
+            var account = await _gateway.GetBusinessAccountAsync(wabaId, accessToken, cancellationToken);
+
+            connection.TemplateNamespaceAlias = account.TemplateNamespace ?? connection.TemplateNamespaceAlias;
+
             connection.Status = ConnectionStatus.Connected;
             connection.ConnectedAt = _clock.UtcNow;
+        }
+        catch (BusinessRuleException)
+        {
+            // Subscription or registration refused. The credential is kept for the same reason a
+            // failed verification keeps it — the operator can usually fix the cause and retry
+            // without starting signup again — but the connection is not claimed as working.
+            connection.Status = ConnectionStatus.Error;
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            throw;
         }
         catch (ExternalServiceException exception)
         {
@@ -189,6 +225,34 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         return Map(connection);
     }
 
+    /// <summary>
+    /// Reads Meta's tier string, or null when it says nothing.
+    /// </summary>
+    /// <remarks>
+    /// Meta reports <c>TIER_1K</c> and similar. Null is returned rather than the lowest tier so the
+    /// caller can distinguish "Meta did not say" from "Meta said 250".
+    /// </remarks>
+    private static MessagingTier? ParseTier(string? tier) => tier?.Trim().ToUpperInvariant() switch
+    {
+        "TIER_50" or "TIER_250" => MessagingTier.Tier250,
+        "TIER_1K" => MessagingTier.Tier1K,
+        "TIER_10K" => MessagingTier.Tier10K,
+        "TIER_100K" => MessagingTier.Tier100K,
+        "TIER_UNLIMITED" or "UNLIMITED" => MessagingTier.Unlimited,
+        _ => null,
+    };
+
+    /// <summary>
+    /// Generates the six-digit PIN Meta requires to register a number.
+    /// </summary>
+    /// <remarks>
+    /// Cryptographically random rather than sequential or derived: it is two-factor material for
+    /// the customer's number, and a guessable one would let somebody else re-register it.
+    /// </remarks>
+    private static string NewRegistrationPin() =>
+        System.Security.Cryptography.RandomNumberGenerator.GetInt32(100_000, 1_000_000)
+            .ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     private static QualityRating ParseQuality(string? rating) =>
         Enum.TryParse<QualityRating>(rating, ignoreCase: true, out var parsed) ? parsed : QualityRating.Green;
 
@@ -202,6 +266,7 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
             connection.QualityRating,
             connection.MessagingLimit,
             connection.MessagesLast24h,
+            connection.MessagingTier,
             connection.ConnectedAt,
             connection.WebhookHealthy,
             connection.TemplateNamespaceAlias);

@@ -53,7 +53,49 @@ public interface IWhatsAppGateway
         string languageCode,
         IReadOnlyList<string> bodyParameters,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Subscribes this app to a business account's webhooks.
+    /// </summary>
+    /// <remarks>
+    /// Nothing arrives from Meta until this succeeds — no inbound messages, no delivery receipts,
+    /// no template verdicts. Its absence looks exactly like a quiet account, which is why the
+    /// connection flow treats a failure here as a failure to connect rather than a warning.
+    /// </remarks>
+    /// <param name="wabaId">Business account identifier.</param>
+    /// <param name="accessToken">The tenant's business token.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task SubscribeToWebhooksAsync(
+        string wabaId,
+        string accessToken,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Registers a phone number so it can send.</summary>
+    /// <param name="phoneNumberId">Phone number identifier.</param>
+    /// <param name="pin">Six-digit two-factor PIN, generated and stored by the caller.</param>
+    /// <param name="accessToken">The tenant's business token.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task RegisterPhoneNumberAsync(
+        string phoneNumberId,
+        string pin,
+        string accessToken,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Reads a business account, for its name, namespace and messaging tier.</summary>
+    /// <param name="wabaId">Business account identifier.</param>
+    /// <param name="accessToken">The tenant's business token.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<MetaBusinessAccount> GetBusinessAccountAsync(
+        string wabaId,
+        string accessToken,
+        CancellationToken cancellationToken = default);
 }
+
+/// <summary>A business account as Meta holds it.</summary>
+/// <param name="Id">Account identifier.</param>
+/// <param name="Name">Business name.</param>
+/// <param name="TemplateNamespace">Namespace templates are published under.</param>
+public sealed record MetaBusinessAccount(string Id, string? Name, string? TemplateNamespace);
 
 /// <summary>A business access token issued by Meta.</summary>
 /// <param name="Value">The token. Encrypted before storage and never logged.</param>
@@ -65,11 +107,17 @@ public sealed record MetaAccessToken(string Value, DateTimeOffset? ExpiresAtUtc)
 /// <param name="DisplayPhoneNumber">Number in international display format.</param>
 /// <param name="VerifiedName">Business name Meta has verified.</param>
 /// <param name="QualityRating">Meta's rating: green, yellow or red.</param>
+/// <param name="MessagingTier">
+/// Meta's daily unique-customer ceiling, reported as <c>TIER_1K</c> and similar. Null when Meta
+/// does not return it, which the caller treats as "leave what we had" rather than as the lowest
+/// tier — silently demoting a number on a missing field would misreport what it can send.
+/// </param>
 public sealed record MetaPhoneNumber(
     string Id,
     string DisplayPhoneNumber,
     string? VerifiedName,
-    string? QualityRating);
+    string? QualityRating,
+    string? MessagingTier = null);
 
 /// <summary>A message template as Meta holds it.</summary>
 /// <param name="Id">Meta's template identifier.</param>

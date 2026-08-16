@@ -34,6 +34,16 @@ public sealed class AuditTrailInterceptor : SaveChangesInterceptor
         nameof(User.SecurityStamp),
         nameof(RefreshToken.TokenHash),
         nameof(RefreshToken.ReplacedByTokenHash),
+
+        // Single-use invitation and reset tokens. Hashed, but a hash in a second table is still a
+        // second place to attack.
+        nameof(UserToken.TokenHash),
+
+        // The tenant's Meta credential and the PIN its number was registered with. The token is
+        // encrypted at rest, which the audit copy would not be reasoning about; the PIN is plain
+        // two-factor material for a phone number the customer owns.
+        nameof(WhatsAppConnection.EncryptedAccessToken),
+        nameof(WhatsAppConnection.RegistrationPin),
     };
 
     /// <summary>Entity types that are not themselves audited.</summary>

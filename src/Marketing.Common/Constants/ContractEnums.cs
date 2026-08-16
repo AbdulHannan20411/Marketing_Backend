@@ -206,6 +206,42 @@ public static class ContractEnums
         Error,
     }
 
+    /// <summary>
+    /// Meta's daily ceiling on how many <em>unique customers</em> a number may start conversations
+    /// with.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from the rolling 24-hour message count the connection screen already shows. It caps
+    /// conversations opened, not messages sent, so a campaign can sit inside the send limit and
+    /// still be refused for reaching too many new people.
+    /// <para>
+    /// Meta decides it and raises it on quality and volume. It is read and reported, never
+    /// requested, which is why the client renders it as a fact rather than a setting.
+    /// </para>
+    /// </remarks>
+    public enum MessagingTier
+    {
+        /// <summary>250 unique customers a day. Where an unverified business starts.</summary>
+        [JsonStringEnumMemberName("tier_250")]
+        Tier250,
+
+        /// <summary>1,000 unique customers a day.</summary>
+        [JsonStringEnumMemberName("tier_1k")]
+        Tier1K,
+
+        /// <summary>10,000 unique customers a day.</summary>
+        [JsonStringEnumMemberName("tier_10k")]
+        Tier10K,
+
+        /// <summary>100,000 unique customers a day.</summary>
+        [JsonStringEnumMemberName("tier_100k")]
+        Tier100K,
+
+        /// <summary>No ceiling.</summary>
+        [JsonStringEnumMemberName("unlimited")]
+        Unlimited,
+    }
+
     /// <summary>Meta's quality rating for a number or template.</summary>
     public enum QualityRating
     {

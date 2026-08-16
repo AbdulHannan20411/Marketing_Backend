@@ -1,3 +1,4 @@
+using Marketing.Common.Exceptions;
 using Marketing.Application.Interfaces;
 using Marketing.Common.Helpers;
 using Marketing.Infrastructure.WhatsApp.Clients;
@@ -64,8 +65,66 @@ public sealed class MetaWhatsAppGateway : IWhatsAppGateway
             number.Id,
             number.DisplayPhoneNumber,
             number.VerifiedName,
-            number.QualityRating);
+            number.QualityRating,
+            number.MessagingTier);
     }
+
+    /// <inheritdoc />
+    public async Task SubscribeToWebhooksAsync(
+        string wabaId,
+        string accessToken,
+        CancellationToken cancellationToken = default)
+    {
+        // Passed explicitly: this runs during connect, before the token is stored, so the handler
+        // that normally supplies it has nothing to look up.
+        var result = await _client.SubscribeAppAsync(wabaId, Bearer(accessToken), cancellationToken);
+
+        if (!result.Success)
+        {
+            // Refused rather than warned about. A connection without a webhook subscription looks
+            // healthy and receives nothing, which is the hardest failure of this integration to
+            // diagnose after the fact.
+            throw new BusinessRuleException(
+                "whatsapp_subscribe_failed",
+                "Meta refused to subscribe this app to the account's updates. Reconnect the number.");
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task RegisterPhoneNumberAsync(
+        string phoneNumberId,
+        string pin,
+        string accessToken,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _client.RegisterPhoneNumberAsync(
+            phoneNumberId,
+            new { messaging_product = "whatsapp", pin },
+            Bearer(accessToken),
+            cancellationToken);
+
+        if (!result.Success)
+        {
+            throw new BusinessRuleException(
+                "whatsapp_register_failed",
+                "Meta refused to register this number for sending. Check it is not already in use on WhatsApp.");
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<MetaBusinessAccount> GetBusinessAccountAsync(
+        string wabaId,
+        string accessToken,
+        CancellationToken cancellationToken = default)
+    {
+        var account = await _client.GetBusinessAccountAsync(
+            wabaId, Bearer(accessToken), cancellationToken: cancellationToken);
+
+        return new MetaBusinessAccount(account.Id ?? wabaId, account.Name, account.TemplateNamespace);
+    }
+
+    /// <summary>Formats a token as an Authorization header value.</summary>
+    private static string Bearer(string accessToken) => $"Bearer {accessToken}";
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<MetaTemplate>> GetTemplatesAsync(

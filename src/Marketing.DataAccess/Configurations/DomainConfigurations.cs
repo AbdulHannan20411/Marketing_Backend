@@ -126,6 +126,7 @@ public sealed class WhatsAppConnectionConfiguration : BaseEntityConfiguration<Wh
 
         builder.Property(connection => connection.Status).IsRequired().HasMaxLength(16).HasConversion<string>();
         builder.Property(connection => connection.QualityRating).IsRequired().HasMaxLength(8).HasConversion<string>();
+        builder.Property(connection => connection.MessagingTier).IsRequired().HasMaxLength(16).HasConversion<string>();
         builder.Property(connection => connection.WabaId).HasMaxLength(64);
         builder.Property(connection => connection.PhoneNumberId).HasMaxLength(64);
         builder.Property(connection => connection.DisplayPhoneNumber).HasMaxLength(32);
@@ -134,6 +135,7 @@ public sealed class WhatsAppConnectionConfiguration : BaseEntityConfiguration<Wh
         builder.Property(connection => connection.BusinessCategory).HasMaxLength(120);
         builder.Property(connection => connection.TemplateNamespaceAlias).HasMaxLength(120);
         builder.Property(connection => connection.EncryptedAccessToken).HasMaxLength(2048);
+        builder.Property(connection => connection.RegistrationPin).HasMaxLength(6).IsFixedLength();
 
         builder.HasIndex(connection => connection.TenantId)
             .IsUnique()

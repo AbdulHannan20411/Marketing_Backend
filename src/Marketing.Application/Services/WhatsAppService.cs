@@ -71,6 +71,7 @@ public sealed class WhatsAppService : IWhatsAppService
                 entity.QualityRating,
                 entity.MessagingLimit,
                 entity.MessagesLast24h,
+                entity.MessagingTier,
                 entity.ConnectedAt,
                 entity.WebhookHealthy,
                 entity.TemplateNamespaceAlias)),

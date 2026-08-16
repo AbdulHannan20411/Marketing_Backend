@@ -18,6 +18,10 @@ namespace Marketing.Application.DTOs.WhatsApp;
 /// <param name="QualityRating">Meta's current quality rating.</param>
 /// <param name="MessagingLimit">Rolling 24-hour ceiling.</param>
 /// <param name="MessagesLast24h">Messages sent in the rolling window.</param>
+/// <param name="MessagingTier">
+/// Meta's daily ceiling on unique customers. Reported, never requested — the client renders it as a
+/// fact rather than a setting.
+/// </param>
 /// <param name="ConnectedAt">Instant the connection was established.</param>
 /// <param name="WebhookHealthy">Whether Meta's webhook is delivering.</param>
 /// <param name="TemplateNamespaceAlias">Template namespace alias.</param>
@@ -30,6 +34,7 @@ public sealed record WhatsAppConnectionResponse(
     QualityRating QualityRating,
     int MessagingLimit,
     int MessagesLast24h,
+    MessagingTier MessagingTier,
     DateTimeOffset? ConnectedAt,
     bool WebhookHealthy,
     string TemplateNamespaceAlias)
@@ -44,6 +49,7 @@ public sealed record WhatsAppConnectionResponse(
         QualityRating.Green,
         MessagingLimit: 0,
         MessagesLast24h: 0,
+        MessagingTier.Tier250,
         ConnectedAt: null,
         WebhookHealthy: false,
         TemplateNamespaceAlias: string.Empty);
