@@ -2,6 +2,7 @@ using Marketing.Business.Repositories.Interfaces;
 using Marketing.DataAccess.Context;
 using Marketing.DataAccess.Entities;
 using Microsoft.EntityFrameworkCore;
+using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Business.Repositories.Implementations;
 
@@ -24,7 +25,13 @@ public sealed class WhatsAppConnectionRepository : Repository<WhatsAppConnection
             // every candidate. The soft-delete predicate is reapplied by hand, and the caller has
             // already verified the payload signature.
             .IgnoreQueryFilters()
-            .Where(connection => !connection.IsDeleted && connection.PhoneNumberId == phoneNumberId)
+            .Where(connection => !connection.IsDeleted
+                                 && connection.PhoneNumberId == phoneNumberId
+                                 // Disconnecting leaves the number on the row as history, so a
+                                 // stale row would otherwise still answer for a number a different
+                                 // tenant has since connected - and this query spans every tenant.
+                                 // Only a live connection may claim inbound traffic.
+                                 && connection.Status != ConnectionStatus.Disconnected)
             .FirstOrDefaultAsync(cancellationToken);
 
     /// <inheritdoc />

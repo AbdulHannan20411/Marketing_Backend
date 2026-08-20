@@ -42,6 +42,12 @@
   </ItemGroup>
   <ItemGroup Label="Cross-cutting infrastructure">
     <PackageVersion Include="StackExchange.Redis" Version="2.9.25" />
+    <!--
+      Timezone arithmetic for recurring campaigns. Carries its own copy of the IANA database,
+      which the BCL cannot supply here: InvariantGlobalization is on solution-wide and leaves
+      TimeZoneInfo knowing only UTC. Apache-2.0.
+    -->
+    <PackageVersion Include="NodaTime" Version="3.3.3" />
     <PackageVersion Include="Quartz" Version="3.19.1" />
     <PackageVersion Include="Quartz.Extensions.Hosting" Version="3.19.1" />
     <PackageVersion Include="Quartz.Extensions.DependencyInjection" Version="3.19.1" />

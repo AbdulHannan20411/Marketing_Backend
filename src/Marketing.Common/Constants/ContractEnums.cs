@@ -729,4 +729,90 @@ public static class ContractEnums
         /// <summary>Down.</summary>
         Outage,
     }
+
+    /// <summary>How often a campaign repeats.</summary>
+    public enum RecurrenceFrequency
+    {
+        /// <summary>A single dispatch. Every other rule field is ignored.</summary>
+        Once,
+
+        /// <summary>Every <c>interval</c> days.</summary>
+        Daily,
+
+        /// <summary>Every <c>interval</c> weeks, on the selected weekdays.</summary>
+        Weekly,
+
+        /// <summary>Every <c>interval</c> months.</summary>
+        Monthly,
+
+        /// <summary>Every <c>interval</c> years, in the selected month.</summary>
+        Yearly,
+    }
+
+    /// <summary>How a monthly or yearly rule picks its day.</summary>
+    public enum MonthlyMode
+    {
+        /// <summary>A fixed date, for example the 15th. Clamped in short months.</summary>
+        DayOfMonth,
+
+        /// <summary>An ordinal weekday, for example the third Wednesday.</summary>
+        DayOfWeek,
+    }
+
+    /// <summary>Which occurrence of a weekday within a month.</summary>
+    public enum MonthlyOrdinal
+    {
+        /// <summary>The first matching weekday.</summary>
+        First,
+
+        /// <summary>The second matching weekday.</summary>
+        Second,
+
+        /// <summary>The third matching weekday.</summary>
+        Third,
+
+        /// <summary>The fourth matching weekday.</summary>
+        Fourth,
+
+        /// <summary>
+        /// The final matching weekday - the fourth or the fifth depending on the month, never a
+        /// month that is skipped for want of a fifth.
+        /// </summary>
+        Last,
+    }
+
+    /// <summary>What stops a recurring campaign.</summary>
+    public enum RecurrenceEndCondition
+    {
+        /// <summary>Nothing. It repeats until paused or cancelled.</summary>
+        Never,
+
+        /// <summary>A calendar date, in the campaign's own timezone.</summary>
+        OnDate,
+
+        /// <summary>A number of firings.</summary>
+        AfterCount,
+    }
+
+    /// <summary>Lifecycle of one firing of a campaign.</summary>
+    public enum CampaignRunStatus
+    {
+        /// <summary>Claimed, not yet dispatching.</summary>
+        Pending,
+
+        /// <summary>Dispatching.</summary>
+        Running,
+
+        /// <summary>Every recipient reached a terminal state.</summary>
+        Completed,
+
+        /// <summary>Abandoned. <c>failureReason</c> says why.</summary>
+        Failed,
+
+        /// <summary>
+        /// Deliberately not sent - a missed occurrence collapsed by the catch-up policy, or an
+        /// empty audience. Recorded rather than dropped so the history has no unexplained gaps.
+        /// </summary>
+        Skipped,
+    }
 }

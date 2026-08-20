@@ -132,6 +132,21 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         CancellationToken cancellationToken)
     {
         var tenantId = _tenantContext.RequireTenantId();
+
+        // Inbound webhooks are routed by phone number id alone, so letting two tenants hold one
+        // number would deliver a customer's conversations to a stranger. A unique index enforces
+        // this, but the index alone surfaces as a 500 from the driver; checking first turns it into
+        // an answer the operator can act on.
+        var claimant = await _connections.FindByPhoneNumberIdAsync(phoneNumberId, cancellationToken);
+
+        if (claimant is not null && claimant.TenantId != tenantId)
+        {
+            throw new BusinessRuleException(
+                "whatsapp_number_already_connected",
+                "That phone number is already connected to another workspace. Disconnect it there "
+                + "first, or connect a different number.");
+        }
+
         var connection = await _connections.FindForTenantAsync(tenantId, cancellationToken);
 
         // Stored first so the auth handler can find the token when the verification call below

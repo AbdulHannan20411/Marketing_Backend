@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Marketing.DataAccess.Context;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Marketing.DataAccess.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260817200426_AddWhatsAppPhoneNumberUniqueIndex")]
+    partial class AddWhatsAppPhoneNumberUniqueIndex
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -359,12 +362,6 @@ namespace Marketing.DataAccess.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("delivered_count");
 
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)")
-                        .HasColumnName("description");
-
                     b.Property<int>("FailedCount")
                         .HasColumnType("integer")
                         .HasColumnName("failed_count");
@@ -374,10 +371,6 @@ namespace Marketing.DataAccess.Migrations
                         .HasColumnType("boolean")
                         .HasDefaultValue(false)
                         .HasColumnName("is_deleted");
-
-                    b.Property<DateTimeOffset?>("LastRunAtUtc")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("last_run_at_utc");
 
                     b.Property<long?>("MessageTemplateId")
                         .HasColumnType("bigint")
@@ -397,14 +390,6 @@ namespace Marketing.DataAccess.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("name");
 
-                    b.Property<DateTimeOffset?>("NextRunAtUtc")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("next_run_at_utc");
-
-                    b.Property<int>("OccurrencesRun")
-                        .HasColumnType("integer")
-                        .HasColumnName("occurrences_run");
-
                     b.Property<int>("ReadCount")
                         .HasColumnType("integer")
                         .HasColumnName("read_count");
@@ -412,10 +397,6 @@ namespace Marketing.DataAccess.Migrations
                     b.Property<DateTimeOffset?>("RecipientsQueuedOn")
                         .HasColumnType("timestamptz")
                         .HasColumnName("recipients_queued_on");
-
-                    b.Property<string>("RecurrenceJson")
-                        .HasColumnType("jsonb")
-                        .HasColumnName("recurrence_json");
 
                     b.Property<DateTimeOffset?>("ResumeAfter")
                         .HasColumnType("timestamptz")
@@ -451,11 +432,6 @@ namespace Marketing.DataAccess.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("tenant_id");
 
-                    b.Property<string>("TimeZone")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("time_zone");
-
                     b.HasKey("Id")
                         .HasName("pk_campaigns");
 
@@ -465,10 +441,6 @@ namespace Marketing.DataAccess.Migrations
 
                     b.HasIndex("MessageTemplateId")
                         .HasDatabaseName("ix_campaigns_message_template_id");
-
-                    b.HasIndex("NextRunAtUtc")
-                        .HasDatabaseName("ix_campaigns_next_run_at_utc")
-                        .HasFilter("next_run_at_utc IS NOT NULL AND is_deleted = false");
 
                     b.HasIndex("Status", "ScheduledAt")
                         .HasDatabaseName("ix_campaigns_status_scheduled_at");
@@ -606,236 +578,6 @@ namespace Marketing.DataAccess.Migrations
                         .HasDatabaseName("ix_campaign_messages_tenant_id_id");
 
                     b.ToTable("campaign_messages", (string)null);
-                });
-
-            modelBuilder.Entity("Marketing.DataAccess.Entities.CampaignRecipient", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
-
-                    b.Property<long>("CampaignRunId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("campaign_run_id");
-
-                    b.Property<long>("ContactId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("contact_id");
-
-                    b.Property<long>("CreatedBy")
-                        .HasColumnType("bigint")
-                        .HasColumnName("created_by");
-
-                    b.Property<DateTimeOffset>("CreatedOn")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("created_on");
-
-                    b.Property<long?>("DeletedBy")
-                        .HasColumnType("bigint")
-                        .HasColumnName("deleted_by");
-
-                    b.Property<DateTimeOffset?>("DeletedOn")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("deleted_on");
-
-                    b.Property<string>("FailureReason")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
-                        .HasColumnName("failure_reason");
-
-                    b.Property<bool>("IsDeleted")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false)
-                        .HasColumnName("is_deleted");
-
-                    b.Property<string>("MetaMessageId")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("meta_message_id");
-
-                    b.Property<long?>("ModifiedBy")
-                        .HasColumnType("bigint")
-                        .HasColumnName("modified_by");
-
-                    b.Property<DateTimeOffset?>("ModifiedOn")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("modified_on");
-
-                    b.Property<string>("PhoneNumber")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("phone_number");
-
-                    b.Property<uint>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("status");
-
-                    b.Property<long?>("TenantId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("tenant_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_campaign_recipients");
-
-                    b.HasIndex("IsDeleted")
-                        .HasDatabaseName("ix_campaign_recipients_is_deleted")
-                        .HasFilter("is_deleted = false");
-
-                    b.HasIndex("MetaMessageId")
-                        .HasDatabaseName("ix_campaign_recipients_meta_message_id")
-                        .HasFilter("meta_message_id IS NOT NULL");
-
-                    b.HasIndex("CampaignRunId", "ContactId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_campaign_recipients_campaign_run_id_contact_id")
-                        .HasFilter("is_deleted = false");
-
-                    b.HasIndex("TenantId", "Id")
-                        .HasDatabaseName("ix_campaign_recipients_tenant_id_id");
-
-                    b.ToTable("campaign_recipients", (string)null);
-                });
-
-            modelBuilder.Entity("Marketing.DataAccess.Entities.CampaignRun", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
-
-                    b.Property<int>("AudienceSize")
-                        .HasColumnType("integer")
-                        .HasColumnName("audience_size");
-
-                    b.Property<long>("CampaignId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("campaign_id");
-
-                    b.Property<int>("ClickedCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("clicked_count");
-
-                    b.Property<DateTimeOffset?>("CompletedAt")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("completed_at");
-
-                    b.Property<long>("CreatedBy")
-                        .HasColumnType("bigint")
-                        .HasColumnName("created_by");
-
-                    b.Property<DateTimeOffset>("CreatedOn")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("created_on");
-
-                    b.Property<long?>("DeletedBy")
-                        .HasColumnType("bigint")
-                        .HasColumnName("deleted_by");
-
-                    b.Property<DateTimeOffset?>("DeletedOn")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("deleted_on");
-
-                    b.Property<int>("DeliveredCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("delivered_count");
-
-                    b.Property<int>("FailedCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("failed_count");
-
-                    b.Property<string>("FailureReason")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
-                        .HasColumnName("failure_reason");
-
-                    b.Property<bool>("IsDeleted")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false)
-                        .HasColumnName("is_deleted");
-
-                    b.Property<long?>("ModifiedBy")
-                        .HasColumnType("bigint")
-                        .HasColumnName("modified_by");
-
-                    b.Property<DateTimeOffset?>("ModifiedOn")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("modified_on");
-
-                    b.Property<int>("OccurrenceNumber")
-                        .HasColumnType("integer")
-                        .HasColumnName("occurrence_number");
-
-                    b.Property<int>("ReadCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("read_count");
-
-                    b.Property<uint>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
-
-                    b.Property<DateTimeOffset>("ScheduledForUtc")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("scheduled_for_utc");
-
-                    b.Property<int>("SentCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("sent_count");
-
-                    b.Property<int>("SkippedCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("skipped_count");
-
-                    b.Property<DateTimeOffset?>("StartedAt")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("started_at");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("status");
-
-                    b.Property<long?>("TenantId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("tenant_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_campaign_runs");
-
-                    b.HasIndex("IsDeleted")
-                        .HasDatabaseName("ix_campaign_runs_is_deleted")
-                        .HasFilter("is_deleted = false");
-
-                    b.HasIndex("CampaignId", "OccurrenceNumber")
-                        .IsUnique()
-                        .HasDatabaseName("ix_campaign_runs_campaign_id_occurrence_number")
-                        .HasFilter("is_deleted = false");
-
-                    b.HasIndex("CampaignId", "ScheduledForUtc")
-                        .HasDatabaseName("ix_campaign_runs_campaign_id_scheduled_for_utc");
-
-                    b.HasIndex("TenantId", "Id")
-                        .HasDatabaseName("ix_campaign_runs_tenant_id_id");
-
-                    b.ToTable("campaign_runs", (string)null);
                 });
 
             modelBuilder.Entity("Marketing.DataAccess.Entities.Contact", b =>
@@ -4313,30 +4055,6 @@ namespace Marketing.DataAccess.Migrations
                     b.Navigation("Contact");
                 });
 
-            modelBuilder.Entity("Marketing.DataAccess.Entities.CampaignRecipient", b =>
-                {
-                    b.HasOne("Marketing.DataAccess.Entities.CampaignRun", "CampaignRun")
-                        .WithMany("Recipients")
-                        .HasForeignKey("CampaignRunId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_campaign_recipients_campaign_runs_campaign_run_id");
-
-                    b.Navigation("CampaignRun");
-                });
-
-            modelBuilder.Entity("Marketing.DataAccess.Entities.CampaignRun", b =>
-                {
-                    b.HasOne("Marketing.DataAccess.Entities.Campaign", "Campaign")
-                        .WithMany("Runs")
-                        .HasForeignKey("CampaignId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_campaign_runs_campaigns_campaign_id");
-
-                    b.Navigation("Campaign");
-                });
-
             modelBuilder.Entity("Marketing.DataAccess.Entities.ContactGroupMember", b =>
                 {
                     b.HasOne("Marketing.DataAccess.Entities.ContactGroup", "ContactGroup")
@@ -4542,16 +4260,6 @@ namespace Marketing.DataAccess.Migrations
                         .HasConstraintName("fk_user_tokens_users_user_id");
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Marketing.DataAccess.Entities.Campaign", b =>
-                {
-                    b.Navigation("Runs");
-                });
-
-            modelBuilder.Entity("Marketing.DataAccess.Entities.CampaignRun", b =>
-                {
-                    b.Navigation("Recipients");
                 });
 
             modelBuilder.Entity("Marketing.DataAccess.Entities.Contact", b =>

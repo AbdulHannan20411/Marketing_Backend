@@ -140,6 +140,14 @@ public sealed class WhatsAppConnectionConfiguration : BaseEntityConfiguration<Wh
         builder.HasIndex(connection => connection.TenantId)
             .IsUnique()
             .HasFilter("is_deleted = false");
+
+        // A number belongs to one tenant at a time. Inbound webhooks carry no tenant and are routed
+        // solely by this identifier, so two live rows sharing one number would hand a tenant's
+        // conversations to whichever row the planner happened to return. Disconnected rows are
+        // excluded because they keep the number as history and no longer answer for it.
+        builder.HasIndex(connection => connection.PhoneNumberId)
+            .IsUnique()
+            .HasFilter("is_deleted = false AND status <> 'Disconnected'");
     }
 }
 
@@ -190,16 +198,81 @@ public sealed class CampaignConfiguration : BaseEntityConfiguration<Campaign>
         builder.Property(campaign => campaign.AudienceGroupIds)
             .HasColumnType("bigint[]");
 
+        builder.Property(campaign => campaign.Description).HasMaxLength(1000);
+        builder.Property(campaign => campaign.TimeZone).HasMaxLength(64);
+        builder.Property(campaign => campaign.RecurrenceJson).HasColumnType("jsonb");
+
         builder.HasIndex(campaign => new { campaign.TenantId, campaign.Status, campaign.CreatedOn });
 
         // The dispatcher's poll: campaigns due to start or due to resume, across every tenant.
         // Status first because it is the selective column - most rows are drafts or completed.
         builder.HasIndex(campaign => new { campaign.Status, campaign.ScheduledAt });
 
+        // The recurring dispatcher's poll. Filtered so the index holds only rows that can ever
+        // match: a campaign with no next occurrence is most of the table and none of the answers.
+        builder.HasIndex(campaign => campaign.NextRunAtUtc)
+            .HasFilter("next_run_at_utc IS NOT NULL AND is_deleted = false");
+
         builder.HasOne(campaign => campaign.MessageTemplate)
             .WithMany()
             .HasForeignKey(campaign => campaign.MessageTemplateId)
             .OnDelete(DeleteBehavior.SetNull);
+    }
+}
+
+/// <summary>Fluent configuration for <see cref="CampaignRun"/>.</summary>
+public sealed class CampaignRunConfiguration : BaseEntityConfiguration<CampaignRun>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<CampaignRun> builder)
+    {
+        builder.ToTable("campaign_runs");
+
+        builder.Property(run => run.Status).IsRequired().HasMaxLength(16).HasConversion<string>();
+        builder.Property(run => run.FailureReason).HasMaxLength(500);
+
+        // The idempotency claim. Two pollers racing the same minute, a redelivered message, or a
+        // retry after a timeout all collide here instead of dispatching the occurrence twice.
+        builder.HasIndex(run => new { run.CampaignId, run.OccurrenceNumber })
+            .IsUnique()
+            .HasFilter("is_deleted = false");
+
+        // The run history read: newest first for one campaign.
+        builder.HasIndex(run => new { run.CampaignId, run.ScheduledForUtc });
+
+        builder.HasOne(run => run.Campaign)
+            .WithMany(campaign => campaign.Runs)
+            .HasForeignKey(run => run.CampaignId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+/// <summary>Fluent configuration for <see cref="CampaignRecipient"/>.</summary>
+public sealed class CampaignRecipientConfiguration : BaseEntityConfiguration<CampaignRecipient>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<CampaignRecipient> builder)
+    {
+        builder.ToTable("campaign_recipients");
+
+        builder.Property(recipient => recipient.PhoneNumber).IsRequired().HasMaxLength(32);
+        builder.Property(recipient => recipient.Status).IsRequired().HasMaxLength(16).HasConversion<string>();
+        builder.Property(recipient => recipient.MetaMessageId).HasMaxLength(128);
+        builder.Property(recipient => recipient.FailureReason).HasMaxLength(500);
+
+        // What lets a crashed dispatch resume without messaging anyone twice.
+        builder.HasIndex(recipient => new { recipient.CampaignRunId, recipient.ContactId })
+            .IsUnique()
+            .HasFilter("is_deleted = false");
+
+        // Delivery receipts arrive carrying Meta's id and nothing else that identifies the send.
+        builder.HasIndex(recipient => recipient.MetaMessageId)
+            .HasFilter("meta_message_id IS NOT NULL");
+
+        builder.HasOne(recipient => recipient.CampaignRun)
+            .WithMany(run => run.Recipients)
+            .HasForeignKey(recipient => recipient.CampaignRunId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
 
