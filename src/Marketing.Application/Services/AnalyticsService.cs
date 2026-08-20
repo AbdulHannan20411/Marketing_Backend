@@ -1,4 +1,6 @@
 using Marketing.Application.DTOs.Campaigns;
+using Marketing.Application.Services.Campaigns;
+using Marketing.Common.Exceptions;
 using Marketing.Application.DTOs.Dashboard;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Repositories.Interfaces;
@@ -7,6 +9,8 @@ using Marketing.Common.Requests;
 using Marketing.Common.Responses;
 using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;
+using static Marketing.Common.Constants.AppConstants;
+using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Application.Services;
 
@@ -194,13 +198,92 @@ public sealed class AnalyticsService : IAnalyticsService
 public sealed class CampaignService : ICampaignService
 {
     private readonly IRepository<Campaign> _campaigns;
+    private readonly IRepository<CampaignRun> _runs;
+    private readonly IRepository<CampaignMessage> _messages;
     private readonly IQueryExecutor _queries;
 
     /// <summary>Initialises a new instance.</summary>
-    public CampaignService(IRepository<Campaign> campaigns, IQueryExecutor queries)
+    public CampaignService(
+        IRepository<Campaign> campaigns,
+        IRepository<CampaignRun> runs,
+        IRepository<CampaignMessage> messages,
+        IQueryExecutor queries)
     {
         _campaigns = campaigns;
+        _runs = runs;
+        _messages = messages;
         _queries = queries;
+    }
+
+    /// <inheritdoc />
+    public async Task<CampaignResponse> GetCampaignAsync(
+        string campaignId,
+        CancellationToken cancellationToken = default)
+    {
+        var id = PublicId.Parse(PublicId.Campaign, campaignId, "campaign");
+
+        var campaign = await _queries.FirstOrDefaultAsync(
+            _campaigns.Query().Where(candidate => candidate.Id == id),
+            cancellationToken)
+            ?? throw new NotFoundException("Campaign", campaignId);
+
+        return CampaignMapper.ToResponse(campaign);
+    }
+
+    /// <inheritdoc />
+    public async Task<PagedResult<CampaignRunResponse>> GetRunsAsync(
+        string campaignId,
+        PageRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var id = PublicId.Parse(PublicId.Campaign, campaignId, "campaign");
+
+        // Ordered by the instant the occurrence was due rather than by when it was written, so a
+        // manual run started before an overdue scheduled one still reads in schedule order.
+        var query = _runs.Query()
+            .Where(run => run.CampaignId == id)
+            .OrderByDescending(run => run.ScheduledForUtc)
+            .ThenByDescending(run => run.OccurrenceNumber);
+
+        var page = await _queries.ToPagedAsync(query, request.Page, request.PageSize, cancellationToken);
+
+        // Counters are rolled onto the run when it closes, so a run still in flight would otherwise
+        // read as all zeroes while it is the one the operator is actually watching. Recounted here
+        // from the message rows, which are the only record that cannot be stale.
+        var live = page.Items
+            .Where(run => run.Status is CampaignRunStatus.Pending or CampaignRunStatus.Running)
+            .Select(run => run.Id)
+            .ToList();
+
+        if (live.Count > 0)
+        {
+            var counts = await _queries.ToListAsync(
+                _messages.Query()
+                    .Where(message => message.CampaignRunId != null && live.Contains(message.CampaignRunId.Value))
+                    .GroupBy(message => new { RunId = message.CampaignRunId!.Value, message.Status })
+                    .Select(group => new { group.Key.RunId, group.Key.Status, Count = group.Count() }),
+                cancellationToken);
+
+            foreach (var run in page.Items.Where(candidate => live.Contains(candidate.Id)))
+            {
+                var forRun = counts.Where(entry => entry.RunId == run.Id).ToList();
+
+                int CountOf(CampaignMessageStatus wanted) =>
+                    forRun.FirstOrDefault(entry => entry.Status == wanted)?.Count ?? 0;
+
+                run.AudienceSize = forRun.Sum(entry => entry.Count);
+                run.SentCount = CountOf(CampaignMessageStatus.Sent)
+                                + CountOf(CampaignMessageStatus.Delivered)
+                                + CountOf(CampaignMessageStatus.Read);
+                run.DeliveredCount = CountOf(CampaignMessageStatus.Delivered) + CountOf(CampaignMessageStatus.Read);
+                run.ReadCount = CountOf(CampaignMessageStatus.Read);
+                run.FailedCount = CountOf(CampaignMessageStatus.Failed);
+            }
+        }
+
+        return page.Map(CampaignMapper.ToResponse);
     }
 
     /// <inheritdoc />
@@ -210,45 +293,15 @@ public sealed class CampaignService : ICampaignService
         // Unpaged, matching the contract: the client filters and paginates in memory today. If a
         // tenant is likely to exceed a couple of hundred campaigns this becomes a PagedResult,
         // which is a breaking change and so belongs before launch rather than after.
+        //
+        // The whole entity is loaded rather than projected. The response now carries the recurrence
+        // rule, the group ids and the run timestamps, and a hand-written projection is one more
+        // place for a new field to be forgotten - which reads as a value that is present on the
+        // detail screen and missing in the list.
         var rows = await _queries.ToListAsync(
-            _campaigns.Query()
-                .OrderByDescending(campaign => campaign.CreatedOn)
-                .Select(campaign => new
-                {
-                    campaign.Id,
-                    campaign.Name,
-                    campaign.TemplateName,
-                    campaign.Status,
-                    campaign.AudienceSize,
-                    campaign.SentCount,
-                    campaign.DeliveredCount,
-                    campaign.ReadCount,
-                    campaign.ClickedCount,
-                    campaign.FailedCount,
-                    campaign.AudienceLabel,
-                    campaign.ScheduledAt,
-                    campaign.CompletedAt,
-                    campaign.CreatedByName,
-                    campaign.CreatedOn,
-                }),
+            _campaigns.Query().OrderByDescending(campaign => campaign.CreatedOn),
             cancellationToken);
 
-        return [.. rows.Select(row => new CampaignResponse(
-            PublicId.From(PublicId.Campaign, row.Id),
-            row.Name,
-            row.TemplateName,
-            row.Status,
-            new CampaignMetricsResponse(
-                row.AudienceSize,
-                row.SentCount,
-                row.DeliveredCount,
-                row.ReadCount,
-                row.ClickedCount,
-                row.FailedCount),
-            row.AudienceLabel,
-            row.ScheduledAt,
-            row.CompletedAt,
-            row.CreatedByName,
-            row.CreatedOn))];
+        return [.. rows.Select(CampaignMapper.ToResponse)];
     }
 }

@@ -36,12 +36,25 @@ public sealed record MessageTemplateDraft(
 /// <param name="TemplateId">Template to send.</param>
 /// <param name="AudienceLabel">Human-readable audience description.</param>
 /// <param name="GroupIds">Groups making up the audience.</param>
+/// <param name="Description">Free-text description.</param>
 public sealed record CampaignDraft(
     string Name,
     string TemplateId,
     string AudienceLabel = "",
-    IReadOnlyList<string>? GroupIds = null);
+    IReadOnlyList<string>? GroupIds = null,
+    string Description = "");
 
-/// <summary>Request to schedule a campaign.</summary>
-/// <param name="ScheduledAt">When to dispatch. Must be in the future.</param>
-public sealed record ScheduleCampaignRequest(DateTimeOffset ScheduledAt);
+/// <summary>
+/// Request to schedule a campaign, as a one-off instant or as a repeating rule.
+/// </summary>
+/// <remarks>
+/// Both members are optional and the client sends both today. <see cref="Recurrence"/> wins when it
+/// is present and describes anything other than a single occurrence; a <c>once</c> rule also wins,
+/// because it carries the timezone and <see cref="ScheduledAt"/> does not. A request carrying
+/// neither is refused rather than silently scheduling nothing.
+/// </remarks>
+/// <param name="ScheduledAt">When to dispatch a one-off. Must be in the future.</param>
+/// <param name="Recurrence">How the campaign repeats.</param>
+public sealed record ScheduleCampaignRequest(
+    DateTimeOffset? ScheduledAt = null,
+    RecurrenceRule? Recurrence = null);

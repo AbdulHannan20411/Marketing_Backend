@@ -5,6 +5,7 @@ using Marketing.Application.DTOs.WhatsApp;
 using Marketing.Application.Interfaces;
 using Marketing.Application.Services;
 using Marketing.Common.Constants;
+using Marketing.Common.Requests;
 using Marketing.Common.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -224,5 +225,49 @@ public sealed class CampaignsController : ApiControllerBase
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
         return Success(await _campaigns.GetCampaignsAsync(cancellationToken));
+    }
+
+    /// <summary>Returns one campaign, with its recurrence rule and audience.</summary>
+    /// <param name="id">Campaign identifier.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The campaign.</response>
+    /// <response code="404">No such campaign.</response>
+    [HttpGet("{id}")]
+    [RequirePermission(Permissions.WhatsApp.CampaignsReports, Permissions.WhatsApp.CampaignsCreate)]
+    [ProducesResponseType(typeof(ApiResponse<CampaignResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetByIdAsync(
+        string id,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(await _campaigns.GetCampaignAsync(id, cancellationToken));
+    }
+
+    /// <summary>Returns a campaign's firings, newest first.</summary>
+    /// <remarks>
+    /// A recurring campaign is many sends, not one. The campaign's own counters are lifetime totals
+    /// across every run; these are the counters for each firing on its own.
+    /// </remarks>
+    /// <param name="id">Campaign identifier.</param>
+    /// <param name="request">Paging.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The runs.</response>
+    [HttpGet("{id}/runs")]
+    [RequirePermission(Permissions.WhatsApp.CampaignsReports, Permissions.WhatsApp.CampaignsCreate)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<CampaignRunResponse>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetRunsAsync(
+        string id,
+        [FromQuery] PageRequest request,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(await _campaigns.GetRunsAsync(id, request, cancellationToken));
     }
 }

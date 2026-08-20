@@ -1,5 +1,6 @@
 using Marketing.Application.DTOs.Campaigns;
 using Marketing.Application.Interfaces;
+using Marketing.Application.Services.Campaigns;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Exceptions;
 using Marketing.Common.Helpers;
@@ -41,12 +42,36 @@ public interface ICampaignWriteService
 
     /// <summary>Cancels a scheduled, running or paused campaign.</summary>
     public Task<CampaignResponse> CancelAsync(string campaignId, CancellationToken cancellationToken = default);
+
+    /// <summary>Copies a campaign into a new draft.</summary>
+    public Task<CampaignResponse> DuplicateAsync(string campaignId, CancellationToken cancellationToken = default);
+
+    /// <summary>Returns a paused campaign to scheduled, or to draft if it has no schedule.</summary>
+    public Task<CampaignResponse> ResumeAsync(string campaignId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Fires a scheduled campaign immediately without disturbing its schedule.
+    /// </summary>
+    /// <param name="campaignId">Campaign to run.</param>
+    /// <param name="idempotencyKey">Optional client key; a run already in flight is returned instead.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<CampaignRunResponse> RunNowAsync(
+        string campaignId,
+        string? idempotencyKey,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Counts the distinct, contactable audience across a set of groups.</summary>
+    public Task<PreviewAudienceResponse> PreviewAudienceAsync(
+        PreviewAudienceRequest request,
+        CancellationToken cancellationToken = default);
 }
 
 /// <inheritdoc cref="ICampaignWriteService" />
 public sealed class CampaignWriteService : ICampaignWriteService
 {
     private readonly IRepository<Campaign> _campaigns;
+    private readonly IRepository<CampaignRun> _runs;
+    private readonly IRecurrenceCalculator _recurrence;
     private readonly IRepository<MessageTemplate> _templates;
     private readonly IRepository<ContactGroupMember> _groupMembers;
     private readonly IQueryExecutor _queries;
@@ -59,6 +84,8 @@ public sealed class CampaignWriteService : ICampaignWriteService
     /// <summary>Initialises a new instance.</summary>
     public CampaignWriteService(
         IRepository<Campaign> campaigns,
+        IRepository<CampaignRun> runs,
+        IRecurrenceCalculator recurrence,
         IRepository<MessageTemplate> templates,
         IRepository<ContactGroupMember> groupMembers,
         IQueryExecutor queries,
@@ -69,6 +96,8 @@ public sealed class CampaignWriteService : ICampaignWriteService
         IDateTimeProvider clock)
     {
         _campaigns = campaigns;
+        _runs = runs;
+        _recurrence = recurrence;
         _templates = templates;
         _groupMembers = groupMembers;
         _queries = queries;
@@ -96,6 +125,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
             MessageTemplateId = template.Id,
             TemplateName = template.Name,
             Status = CampaignStatus.Draft,
+            Description = draft.Description.Trim(),
             AudienceLabel = draft.AudienceLabel,
             AudienceGroupIds = ParseGroupIds(draft.GroupIds),
             AudienceSize = await CountAudienceAsync(draft.GroupIds, cancellationToken),
@@ -132,6 +162,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
         campaign.Name = draft.Name.Trim();
         campaign.MessageTemplateId = template.Id;
         campaign.TemplateName = template.Name;
+        campaign.Description = draft.Description.Trim();
         campaign.AudienceLabel = draft.AudienceLabel;
         campaign.AudienceGroupIds = ParseGroupIds(draft.GroupIds);
         campaign.AudienceSize = await CountAudienceAsync(draft.GroupIds, cancellationToken);
@@ -168,19 +199,219 @@ public sealed class CampaignWriteService : ICampaignWriteService
 
         var campaign = await LoadForUpdateAsync(campaignId, cancellationToken);
 
-        if (request.ScheduledAt <= _clock.UtcNow)
-        {
-            throw new ValidationException(
-                nameof(request.ScheduledAt),
-                "Choose a time in the future.");
-        }
-
         EnsureTransitionAllowed(campaign, CampaignStatus.Scheduled, [CampaignStatus.Draft, CampaignStatus.Scheduled]);
 
+        // The rule wins when there is one, including a "once" rule: it carries the timezone and a
+        // bare instant does not, and the client sends both during the transition.
+        if (request.Recurrence is { } rule)
+        {
+            ApplyRecurrence(campaign, rule);
+        }
+        else if (request.ScheduledAt is { } scheduledAt)
+        {
+            if (scheduledAt <= _clock.UtcNow)
+            {
+                throw new ValidationException(nameof(request.ScheduledAt), "Choose a time in the future.");
+            }
+
+            campaign.RecurrenceJson = null;
+            campaign.TimeZone = null;
+            campaign.ScheduledAt = scheduledAt;
+            campaign.NextRunAtUtc = scheduledAt;
+        }
+        else
+        {
+            // Refused rather than treated as "schedule for nothing", which would leave a campaign
+            // sitting in the scheduled state that no poll would ever pick up.
+            throw new ValidationException(
+                nameof(request.Recurrence),
+                "Provide either a recurrence rule or a scheduled time.");
+        }
+
         campaign.Status = CampaignStatus.Scheduled;
-        campaign.ScheduledAt = request.ScheduledAt;
 
         return await CommitAndPublishAsync(campaign, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<CampaignResponse> DuplicateAsync(
+        string campaignId,
+        CancellationToken cancellationToken = default)
+    {
+        var source = await LoadForUpdateAsync(campaignId, cancellationToken);
+
+        var copy = new Campaign
+        {
+            TenantId = source.TenantId,
+            Name = $"{source.Name} (copy)",
+            Description = source.Description,
+            MessageTemplateId = source.MessageTemplateId,
+            TemplateName = source.TemplateName,
+            Status = CampaignStatus.Draft,
+            AudienceLabel = source.AudienceLabel,
+            AudienceGroupIds = [.. source.AudienceGroupIds],
+            AudienceSize = source.AudienceSize,
+
+            // The rule is carried over: duplicating a weekly campaign should give a weekly draft,
+            // not silently turn it into a one-off. Everything describing what already happened -
+            // counters, run history, timestamps - is not, because none of it is true of the copy.
+            RecurrenceJson = source.RecurrenceJson,
+            TimeZone = source.TimeZone,
+
+            CreatedByName = _currentUser.DisplayName ?? "Unknown",
+        };
+
+        _campaigns.Add(copy);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return Map(copy);
+    }
+
+    /// <inheritdoc />
+    public async Task<CampaignResponse> ResumeAsync(
+        string campaignId,
+        CancellationToken cancellationToken = default)
+    {
+        var campaign = await LoadForUpdateAsync(campaignId, cancellationToken);
+
+        if (campaign.Status != CampaignStatus.Paused)
+        {
+            throw new BusinessRuleException(
+                "campaign_not_paused",
+                $"A {campaign.Status.ToString().ToLowerInvariant()} campaign cannot be resumed.");
+        }
+
+        var rule = CampaignMapper.ReadRecurrence(campaign.RecurrenceJson);
+
+        if (rule is not null)
+        {
+            // Recomputed from now, never restored. A campaign paused for three weeks does not wake
+            // up owing three sends, and the catch-up policy is not the right answer either: those
+            // occurrences were deliberately suppressed, not missed.
+            campaign.NextRunAtUtc = _recurrence.Next(rule, _clock.UtcNow, campaign.OccurrencesRun);
+            campaign.Status = campaign.NextRunAtUtc is null ? CampaignStatus.Completed : CampaignStatus.Scheduled;
+        }
+        else
+        {
+            campaign.Status = campaign.ScheduledAt is not null && campaign.ScheduledAt > _clock.UtcNow
+                ? CampaignStatus.Scheduled
+                : CampaignStatus.Draft;
+        }
+
+        campaign.ResumeAfter = null;
+
+        return await CommitAndPublishAsync(campaign, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<CampaignRunResponse> RunNowAsync(
+        string campaignId,
+        string? idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        var campaign = await LoadForUpdateAsync(campaignId, cancellationToken);
+
+        if (campaign.Status != CampaignStatus.Scheduled)
+        {
+            throw new BusinessRuleException(
+                "campaign_not_scheduled",
+                $"Only a scheduled campaign can be run early. This one is "
+                + $"{campaign.Status.ToString().ToLowerInvariant()}.");
+        }
+
+        if (campaign.AudienceSize == 0)
+        {
+            throw new BusinessRuleException(
+                "empty_audience",
+                "This campaign has no recipients. Choose an audience before running it.");
+        }
+
+        // A run already in flight is returned rather than a second one started. This is what makes
+        // a double-clicked button safe: the second click gets the first run back, not a second send
+        // to the whole audience, which cannot be recalled.
+        var inFlight = await _queries.FirstOrDefaultAsync(
+            _runs.Query()
+                .Where(run => run.CampaignId == campaign.Id
+                              && (run.Status == CampaignRunStatus.Pending
+                                  || run.Status == CampaignRunStatus.Running))
+                .OrderByDescending(run => run.OccurrenceNumber),
+            cancellationToken);
+
+        if (inFlight is not null)
+        {
+            return CampaignMapper.ToResponse(inFlight);
+        }
+
+        var now = _clock.UtcNow;
+
+        var run = new CampaignRun
+        {
+            TenantId = campaign.TenantId,
+            Campaign = campaign,
+            OccurrenceNumber = await NextOccurrenceNumberAsync(campaign.Id, cancellationToken),
+            Status = CampaignRunStatus.Pending,
+            TriggeredManually = true,
+            ScheduledForUtc = now,
+        };
+
+        _runs.Add(run);
+
+        // NextRunAtUtc and OccurrencesRun are both left alone on purpose. Monday is still Monday,
+        // and an operator asking for an extra send has not consumed one of the firings an
+        // "after N occurrences" rule promised them.
+        campaign.LastRunAtUtc = now;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return CampaignMapper.ToResponse(run);
+    }
+
+    /// <inheritdoc />
+    public async Task<PreviewAudienceResponse> PreviewAudienceAsync(
+        PreviewAudienceRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return new PreviewAudienceResponse(
+            await CountAudienceAsync(request.GroupIds, cancellationToken));
+    }
+
+    /// <summary>Validates a rule, stores it, and computes the first occurrence.</summary>
+    private void ApplyRecurrence(Campaign campaign, RecurrenceRule rule)
+    {
+        var next = _recurrence.Next(rule, _clock.UtcNow)
+                   ?? throw new ValidationException(
+                       "recurrence",
+                       "That rule has no occurrences in the future. Check the start date and the end condition.");
+
+        campaign.RecurrenceJson = CampaignMapper.WriteRecurrence(rule);
+        campaign.TimeZone = rule.TimeZone;
+        campaign.NextRunAtUtc = next;
+
+        // A one-off keeps ScheduledAt populated so the list and the detail page read the same as
+        // they always did; a repeating rule has no single instant and must not pretend otherwise.
+        campaign.ScheduledAt = rule.IsSingleOccurrence ? next : null;
+    }
+
+    /// <summary>
+    /// The next free position in a campaign's run series.
+    /// </summary>
+    /// <remarks>
+    /// Read from the run table rather than from <c>OccurrencesRun</c>, because a manual run
+    /// allocates a number without incrementing that counter. Two callers racing here both land on
+    /// the same number and the unique index settles it, which is the intended outcome.
+    /// </remarks>
+    private async Task<int> NextOccurrenceNumberAsync(long campaignId, CancellationToken cancellationToken)
+    {
+        var highest = await _queries.FirstOrDefaultAsync(
+            _runs.Query()
+                .Where(run => run.CampaignId == campaignId)
+                .OrderByDescending(run => run.OccurrenceNumber)
+                .Select(run => (int?)run.OccurrenceNumber),
+            cancellationToken);
+
+        return (highest ?? 0) + 1;
     }
 
     /// <inheritdoc />
@@ -354,30 +585,19 @@ public sealed class CampaignWriteService : ICampaignWriteService
 
         // Distinct, because a contact in two chosen groups is one recipient, not two - and the
         // audience size is what the customer is billed against.
+        //
+        // Unsubscribed and blocked contacts are excluded here rather than at send time. Counting
+        // them would quote the operator a number the dispatcher then refuses to honour, and the
+        // gap would look like messages going missing.
         return await _queries.CountAsync(
             _groupMembers.Query()
-                .Where(member => parsed.Contains(member.ContactGroupId) && !member.Contact.IsDeleted)
+                .Where(member => parsed.Contains(member.ContactGroupId)
+                                 && !member.Contact.IsDeleted
+                                 && member.Contact.Status == ContactStatus.Subscribed)
                 .Select(member => member.ContactId)
                 .Distinct(),
             cancellationToken);
     }
 
-    private static CampaignResponse Map(Campaign campaign) =>
-        new(
-            PublicId.From(PublicId.Campaign, campaign.Id),
-            campaign.Name,
-            campaign.TemplateName,
-            campaign.Status,
-            new CampaignMetricsResponse(
-                campaign.AudienceSize,
-                campaign.SentCount,
-                campaign.DeliveredCount,
-                campaign.ReadCount,
-                campaign.ClickedCount,
-                campaign.FailedCount),
-            campaign.AudienceLabel,
-            campaign.ScheduledAt,
-            campaign.CompletedAt,
-            campaign.CreatedByName,
-            campaign.CreatedOn);
+    private static CampaignResponse Map(Campaign campaign) => CampaignMapper.ToResponse(campaign);
 }

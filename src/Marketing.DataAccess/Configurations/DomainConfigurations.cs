@@ -247,35 +247,6 @@ public sealed class CampaignRunConfiguration : BaseEntityConfiguration<CampaignR
     }
 }
 
-/// <summary>Fluent configuration for <see cref="CampaignRecipient"/>.</summary>
-public sealed class CampaignRecipientConfiguration : BaseEntityConfiguration<CampaignRecipient>
-{
-    /// <inheritdoc />
-    protected override void ConfigureEntity(EntityTypeBuilder<CampaignRecipient> builder)
-    {
-        builder.ToTable("campaign_recipients");
-
-        builder.Property(recipient => recipient.PhoneNumber).IsRequired().HasMaxLength(32);
-        builder.Property(recipient => recipient.Status).IsRequired().HasMaxLength(16).HasConversion<string>();
-        builder.Property(recipient => recipient.MetaMessageId).HasMaxLength(128);
-        builder.Property(recipient => recipient.FailureReason).HasMaxLength(500);
-
-        // What lets a crashed dispatch resume without messaging anyone twice.
-        builder.HasIndex(recipient => new { recipient.CampaignRunId, recipient.ContactId })
-            .IsUnique()
-            .HasFilter("is_deleted = false");
-
-        // Delivery receipts arrive carrying Meta's id and nothing else that identifies the send.
-        builder.HasIndex(recipient => recipient.MetaMessageId)
-            .HasFilter("meta_message_id IS NOT NULL");
-
-        builder.HasOne(recipient => recipient.CampaignRun)
-            .WithMany(run => run.Recipients)
-            .HasForeignKey(recipient => recipient.CampaignRunId)
-            .OnDelete(DeleteBehavior.Cascade);
-    }
-}
-
 /// <summary>Fluent configuration for <see cref="DeliveryFailure"/>.</summary>
 public sealed class DeliveryFailureConfiguration : BaseEntityConfiguration<DeliveryFailure>
 {
@@ -710,11 +681,19 @@ public sealed class CampaignMessageConfiguration : BaseEntityConfiguration<Campa
         builder.Property(message => message.MetaMessageId).HasMaxLength(128);
         builder.Property(message => message.ErrorReason).HasMaxLength(500);
 
-        // One message per contact per campaign. This is the constraint that makes a re-run safe:
-        // a retried dispatch cannot create a second row and so cannot send twice.
+        // One message per contact per firing. Scoped to the run rather than to the campaign: a
+        // weekly campaign must reach the same contact every week, which a campaign-wide constraint
+        // would forbid outright. Within one firing it still makes a retried dispatch safe, because
+        // a second row cannot be created and so a second message cannot be sent.
+        builder.HasIndex(message => new { message.CampaignRunId, message.ContactId })
+            .IsUnique()
+            .HasFilter("campaign_run_id IS NOT NULL AND is_deleted = false");
+
+        // Rows written before campaigns had runs keep the original guarantee. Every new dispatch
+        // creates a run, so this covers history rather than anything the dispatcher writes today.
         builder.HasIndex(message => new { message.CampaignId, message.ContactId })
             .IsUnique()
-            .HasFilter("is_deleted = false");
+            .HasFilter("campaign_run_id IS NULL AND is_deleted = false");
 
         // The dispatcher claims the next batch with this index; without it every batch scans the
         // whole campaign.
@@ -722,6 +701,11 @@ public sealed class CampaignMessageConfiguration : BaseEntityConfiguration<Campa
 
         // Webhook receipts arrive keyed by Meta's id and nothing else.
         builder.HasIndex(message => message.MetaMessageId);
+
+        builder.HasOne(message => message.CampaignRun)
+            .WithMany(run => run.Messages)
+            .HasForeignKey(message => message.CampaignRunId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         builder.HasOne(message => message.Campaign)
             .WithMany()

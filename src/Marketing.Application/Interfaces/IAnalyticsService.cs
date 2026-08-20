@@ -32,4 +32,20 @@ public interface ICampaignService
     /// <summary>Returns every campaign, newest first.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<IReadOnlyList<CampaignResponse>> GetCampaignsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Returns one campaign.</summary>
+    /// <param name="campaignId">Opaque campaign identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<CampaignResponse> GetCampaignAsync(
+        string campaignId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns a campaign's firings, newest first.</summary>
+    /// <param name="campaignId">Opaque campaign identifier.</param>
+    /// <param name="request">Paging.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<PagedResult<CampaignRunResponse>> GetRunsAsync(
+        string campaignId,
+        PageRequest request,
+        CancellationToken cancellationToken = default);
 }

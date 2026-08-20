@@ -1,4 +1,5 @@
 using Marketing.Application.DTOs.Campaigns;
+using Marketing.Application.Services.Campaigns;
 using Marketing.Application.DTOs.WhatsApp;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Repositories.Interfaces;
@@ -407,23 +408,7 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
 
         await _realtime.PublishCampaignProgressAsync(
             tenantId,
-            new CampaignResponse(
-                PublicId.From(PublicId.Campaign, campaign.Id),
-                campaign.Name,
-                campaign.TemplateName,
-                campaign.Status,
-                new CampaignMetricsResponse(
-                    campaign.AudienceSize,
-                    campaign.SentCount,
-                    campaign.DeliveredCount,
-                    campaign.ReadCount,
-                    campaign.ClickedCount,
-                    campaign.FailedCount),
-                campaign.AudienceLabel,
-                campaign.ScheduledAt,
-                campaign.CompletedAt,
-                campaign.CreatedByName,
-                campaign.CreatedOn),
+            CampaignMapper.ToResponse(campaign),
             cancellationToken);
     }
 

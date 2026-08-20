@@ -376,6 +376,97 @@ public sealed class CampaignWriteController : ApiControllerBase
 
         return Success(campaign, "Campaign cancelled.");
     }
+
+    /// <summary>Copies a campaign into a new draft.</summary>
+    /// <remarks>
+    /// The recurrence rule is copied; counters, run history and timestamps are not, because none of
+    /// them are true of a campaign that has not run.
+    /// </remarks>
+    /// <response code="200">The new draft.</response>
+    [HttpPost("{id}/duplicate")]
+    [RequirePermission(Permissions.WhatsApp.CampaignsCreate)]
+    [ProducesResponseType(typeof(ApiResponse<CampaignResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> DuplicateAsync(
+        string id,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        var campaign = await _campaigns.DuplicateAsync(id, cancellationToken);
+
+        return Success(campaign, $"Campaign copied to \"{campaign.Name}\".");
+    }
+
+    /// <summary>Resumes a paused campaign.</summary>
+    /// <remarks>
+    /// A recurring campaign's next occurrence is recomputed from now rather than restored, so one
+    /// paused for three weeks does not wake up owing three sends.
+    /// </remarks>
+    /// <response code="200">The resumed campaign.</response>
+    /// <response code="409">The campaign is not paused.</response>
+    [HttpPost("{id}/resume")]
+    [RequirePermission(Permissions.WhatsApp.CampaignsPause)]
+    [ProducesResponseType(typeof(ApiResponse<CampaignResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> ResumeAsync(
+        string id,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        var campaign = await _campaigns.ResumeAsync(id, cancellationToken);
+
+        return Success(campaign, "Campaign resumed.");
+    }
+
+    /// <summary>Runs a scheduled campaign immediately, without disturbing its schedule.</summary>
+    /// <remarks>
+    /// A campaign set for Monday can be run today and still runs on Monday. The extra firing does
+    /// not consume an "after N occurrences" allowance.
+    /// <para>
+    /// A run already in flight is returned rather than a second one started, so a double-clicked
+    /// button cannot send to the whole audience twice.
+    /// </para>
+    /// </remarks>
+    /// <response code="200">The run that was started.</response>
+    /// <response code="409">The campaign is not scheduled, or has no audience.</response>
+    [HttpPost("{id}/run-now")]
+    [RequirePermission(Permissions.WhatsApp.CampaignsSend)]
+    [ProducesResponseType(typeof(ApiResponse<CampaignRunResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RunNowAsync(
+        string id,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        var run = await _campaigns.RunNowAsync(id, idempotencyKey, cancellationToken);
+
+        return Success(run, "Campaign is running now. Its schedule is unchanged.");
+    }
+
+    /// <summary>Counts the distinct, contactable audience across a set of groups.</summary>
+    /// <remarks>
+    /// Deduplicated across groups and excluding unsubscribed contacts, so the wizard can show a real
+    /// number rather than a sum that double-counts anyone in two groups.
+    /// </remarks>
+    /// <response code="200">The recipient count.</response>
+    [HttpPost("preview-audience")]
+    [RequirePermission(Permissions.WhatsApp.CampaignsCreate)]
+    [ProducesResponseType(typeof(ApiResponse<PreviewAudienceResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> PreviewAudienceAsync(
+        [FromBody] PreviewAudienceRequest request,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(await _campaigns.PreviewAudienceAsync(request, cancellationToken));
+    }
 }
 
 /// <summary>Admin account administration. Platform staff only.</summary>

@@ -24,6 +24,9 @@ public static class PublicId
     /// <summary>Prefix for campaigns.</summary>
     public const string Campaign = "cmp";
 
+    /// <summary>One firing of a campaign.</summary>
+    public const string CampaignRun = "run";
+
     /// <summary>Prefix for message templates.</summary>
     public const string Template = "tpl";
 

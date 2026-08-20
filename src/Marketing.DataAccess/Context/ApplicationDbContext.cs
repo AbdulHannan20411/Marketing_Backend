@@ -95,9 +95,6 @@ public class ApplicationDbContext : DbContext
     /// <summary>Firings of a recurring campaign.</summary>
     public DbSet<CampaignRun> CampaignRuns => Set<CampaignRun>();
 
-    /// <summary>Contacts addressed by one run.</summary>
-    public DbSet<CampaignRecipient> CampaignRecipients => Set<CampaignRecipient>();
-
     /// <summary>Per-recipient campaign messages.</summary>
     public DbSet<CampaignMessage> CampaignMessages => Set<CampaignMessage>();
 

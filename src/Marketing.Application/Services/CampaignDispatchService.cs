@@ -1,4 +1,5 @@
 using Marketing.Application.DTOs.Campaigns;
+using Marketing.Application.Services.Campaigns;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Exceptions;
@@ -64,6 +65,8 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
 
     private readonly ICampaignMessageRepository _messages;
     private readonly IRepository<Campaign> _campaigns;
+    private readonly IRepository<CampaignRun> _runs;
+    private readonly IRecurrenceCalculator _recurrence;
     private readonly IRepository<ContactGroupMember> _groupMembers;
     private readonly IRepository<MessageTemplate> _templates;
     private readonly IRepository<DeliveryFailure> _failures;
@@ -80,6 +83,8 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
     public CampaignDispatchService(
         ICampaignMessageRepository messages,
         IRepository<Campaign> campaigns,
+        IRepository<CampaignRun> runs,
+        IRecurrenceCalculator recurrence,
         IRepository<ContactGroupMember> groupMembers,
         IRepository<MessageTemplate> templates,
         IRepository<DeliveryFailure> failures,
@@ -94,6 +99,8 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
     {
         _messages = messages;
         _campaigns = campaigns;
+        _runs = runs;
+        _recurrence = recurrence;
         _groupMembers = groupMembers;
         _templates = templates;
         _failures = failures;
@@ -225,12 +232,28 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
     {
         var now = _clock.UtcNow;
 
+        // A recurring campaign that is due opens a new firing rather than resuming the last one.
+        if (campaign.Status == CampaignStatus.Scheduled
+            && campaign.NextRunAtUtc is { } dueAt
+            && dueAt <= now
+            && CampaignMapper.ReadRecurrence(campaign.RecurrenceJson) is { } rule)
+        {
+            return await TryOpenOccurrenceAsync(campaign, rule, dueAt, cancellationToken);
+        }
+
         switch (campaign.Status)
         {
             case CampaignStatus.Scheduled when campaign.ScheduledAt <= now:
             case CampaignStatus.Paused when campaign.ResumeAfter is { } resume && resume <= now:
                 campaign.Status = CampaignStatus.Sending;
                 campaign.ResumeAfter = null;
+
+                // A one-off gets a run too, so every message ever written belongs to a firing and
+                // the run history reads the same for both kinds of campaign.
+                if (campaign.ActiveCampaignRunId is null)
+                {
+                    await OpenRunAsync(campaign, campaign.ScheduledAt ?? now, false, cancellationToken);
+                }
 
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -244,6 +267,191 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
                 // stays paused: ResumeAfter is null, and only the allowance path ever sets it.
                 return false;
         }
+    }
+
+    /// <summary>
+    /// Opens the firing a recurring campaign is due for, after re-checking that it can still send.
+    /// </summary>
+    /// <remarks>
+    /// Everything checked here was already checked when the campaign was scheduled. It is checked
+    /// again because a campaign scheduled in September and firing in December has had three months
+    /// in which Meta could un-approve the template, the account could be disconnected, or the groups
+    /// could be emptied.
+    /// </remarks>
+    private async Task<bool> TryOpenOccurrenceAsync(
+        Campaign campaign,
+        RecurrenceRule rule,
+        DateTimeOffset dueAt,
+        CancellationToken cancellationToken)
+    {
+        var now = _clock.UtcNow;
+
+        // Catch-up: after an outage a daily campaign has one missed occurrence and an hourly one has
+        // six. Firing them all sends six identical messages to the same people, so only the most
+        // recent is fired and the rest are recorded as skipped - visible in the history rather than
+        // silently absent.
+        var missed = _recurrence.Between(rule, dueAt, now, campaign.OccurrencesRun);
+
+        foreach (var skipped in missed.Take(Math.Max(0, missed.Count - 1)))
+        {
+            await OpenRunAsync(campaign, skipped, false, cancellationToken);
+            await CloseRunAsync(
+                campaign,
+                CampaignRunStatus.Skipped,
+                "Missed while the service was unavailable. Only the most recent occurrence was sent.",
+                cancellationToken);
+        }
+
+        var fireAt = missed.Count > 0 ? missed[^1] : dueAt;
+
+        if (await FindBlockingReasonAsync(campaign, cancellationToken) is { } reason)
+        {
+            // Paused, not failed. A paused campaign can be fixed and resumed; a failed one usually
+            // means somebody rebuilds it from scratch.
+            await OpenRunAsync(campaign, fireAt, false, cancellationToken);
+            await CloseRunAsync(campaign, CampaignRunStatus.Skipped, reason, cancellationToken);
+
+            campaign.Status = CampaignStatus.Paused;
+            campaign.NextRunAtUtc = null;
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            LogOccurrenceBlocked(campaign.Id, reason);
+
+            return false;
+        }
+
+        await OpenRunAsync(campaign, fireAt, false, cancellationToken);
+
+        campaign.Status = CampaignStatus.Sending;
+        campaign.ResumeAfter = null;
+
+        // A fresh audience for each firing. Without this reset the campaign would re-send to the
+        // snapshot taken the first time it ran, which is the opposite of what a recurring campaign
+        // to "new customers this week" is for.
+        campaign.RecipientsQueuedOn = null;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return true;
+    }
+
+    /// <summary>Why this campaign cannot send right now, or null when it can.</summary>
+    private async Task<string?> FindBlockingReasonAsync(Campaign campaign, CancellationToken cancellationToken)
+    {
+        var connection = await _connections.FindForTenantAsync(
+            _tenantContext.RequireTenantId(),
+            cancellationToken);
+
+        if (connection is not { Status: ConnectionStatus.Connected, PhoneNumberId: { Length: > 0 } })
+        {
+            return "WhatsApp is not connected. Reconnect the account to resume this campaign.";
+        }
+
+        if (campaign.MessageTemplateId is not { } templateId)
+        {
+            return "The campaign has no template.";
+        }
+
+        var status = await _queries.FirstOrDefaultAsync(
+            _templates.Query()
+                .Where(template => template.Id == templateId)
+                .Select(template => (TemplateStatus?)template.Status),
+            cancellationToken);
+
+        // Meta pauses and disables templates on poor recipient feedback, without warning and long
+        // after approval.
+        return status switch
+        {
+            null => "The template this campaign uses no longer exists.",
+            TemplateStatus.Approved => null,
+            _ => $"\"{campaign.TemplateName}\" is {status.ToString()!.ToLowerInvariant()} at Meta "
+                 + "and cannot be sent. Fix the template, then resume the campaign.",
+        };
+    }
+
+    /// <summary>Claims one occurrence, which is what stops it being dispatched twice.</summary>
+    /// <remarks>
+    /// The row is written before any message goes out and <c>(CampaignId, OccurrenceNumber)</c> is
+    /// unique, so two pollers in the same minute, a redelivery, or a retry after a timeout collide
+    /// on the insert rather than each sending to the whole audience.
+    /// </remarks>
+    private async Task OpenRunAsync(
+        Campaign campaign,
+        DateTimeOffset scheduledFor,
+        bool triggeredManually,
+        CancellationToken cancellationToken)
+    {
+        var highest = await _queries.FirstOrDefaultAsync(
+            _runs.Query()
+                .Where(run => run.CampaignId == campaign.Id)
+                .OrderByDescending(run => run.OccurrenceNumber)
+                .Select(run => (int?)run.OccurrenceNumber),
+            cancellationToken);
+
+        var run = new CampaignRun
+        {
+            TenantId = campaign.TenantId,
+            CampaignId = campaign.Id,
+            OccurrenceNumber = (highest ?? 0) + 1,
+            Status = CampaignRunStatus.Running,
+            TriggeredManually = triggeredManually,
+            ScheduledForUtc = scheduledFor,
+            StartedAt = _clock.UtcNow,
+        };
+
+        _runs.Add(run);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        campaign.ActiveCampaignRunId = run.Id;
+        campaign.LastRunAtUtc = scheduledFor;
+        campaign.OccurrencesRun++;
+    }
+
+    /// <summary>Closes the active firing and rolls its counters up from the messages it sent.</summary>
+    /// <remarks>
+    /// Counted from the message rows rather than incremented alongside the campaign's own counters.
+    /// Two counters maintained in parallel drift the first time a send path forgets one of them, and
+    /// the message rows are the only record that cannot be wrong.
+    /// </remarks>
+    private async Task CloseRunAsync(
+        Campaign campaign,
+        CampaignRunStatus status,
+        string? failureReason,
+        CancellationToken cancellationToken)
+    {
+        if (campaign.ActiveCampaignRunId is not { } runId)
+        {
+            return;
+        }
+
+        var run = await _runs.GetForUpdateAsync(runId, cancellationToken);
+
+        if (run is not null)
+        {
+            var counts = await _queries.ToListAsync(
+                _messages.Query()
+                    .Where(message => message.CampaignRunId == runId)
+                    .GroupBy(message => message.Status)
+                    .Select(group => new { Status = group.Key, Count = group.Count() }),
+                cancellationToken);
+
+            int CountOf(CampaignMessageStatus wanted) =>
+                counts.FirstOrDefault(entry => entry.Status == wanted)?.Count ?? 0;
+
+            run.Status = status;
+            run.FailureReason = failureReason;
+            run.CompletedAt = _clock.UtcNow;
+            run.AudienceSize = counts.Sum(entry => entry.Count);
+            run.SentCount = CountOf(CampaignMessageStatus.Sent)
+                            + CountOf(CampaignMessageStatus.Delivered)
+                            + CountOf(CampaignMessageStatus.Read);
+            run.DeliveredCount = CountOf(CampaignMessageStatus.Delivered) + CountOf(CampaignMessageStatus.Read);
+            run.ReadCount = CountOf(CampaignMessageStatus.Read);
+            run.FailedCount = CountOf(CampaignMessageStatus.Failed);
+        }
+
+        campaign.ActiveCampaignRunId = null;
     }
 
     /// <summary>Writes one message row per recipient, once per campaign.</summary>
@@ -280,6 +488,7 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
             {
                 TenantId = tenantId,
                 CampaignId = campaign.Id,
+                CampaignRunId = campaign.ActiveCampaignRunId,
                 ContactId = recipient.ContactId,
                 PhoneNumber = recipient.PhoneNumber,
                 Status = CampaignMessageStatus.Pending,
@@ -373,8 +582,27 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
 
         if (remaining == 0)
         {
-            campaign.Status = CampaignStatus.Completed;
-            campaign.CompletedAt = _clock.UtcNow;
+            await CloseRunAsync(campaign, CampaignRunStatus.Completed, null, cancellationToken);
+
+            var rule = CampaignMapper.ReadRecurrence(campaign.RecurrenceJson);
+            var next = rule is null
+                ? null
+                : _recurrence.Next(rule, _clock.UtcNow, campaign.OccurrencesRun);
+
+            if (next is { } nextRun)
+            {
+                // Back to scheduled, not completed. The campaign fires again, and stamping a
+                // completion time on it would have the client render "Completed 14 Aug" on
+                // something due to run on Monday.
+                campaign.Status = CampaignStatus.Scheduled;
+                campaign.NextRunAtUtc = nextRun;
+            }
+            else
+            {
+                campaign.Status = CampaignStatus.Completed;
+                campaign.CompletedAt = _clock.UtcNow;
+                campaign.NextRunAtUtc = null;
+            }
         }
 
         connection.MessagesLast24h = (await _messages.GetSendTimesSinceAsync(
@@ -479,28 +707,18 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
 
         await _realtime.PublishCampaignProgressAsync(
             tenantId,
-            new CampaignResponse(
-                PublicId.From(PublicId.Campaign, campaign.Id),
-                campaign.Name,
-                campaign.TemplateName,
-                campaign.Status,
-                new CampaignMetricsResponse(
-                    campaign.AudienceSize,
-                    campaign.SentCount,
-                    campaign.DeliveredCount,
-                    campaign.ReadCount,
-                    campaign.ClickedCount,
-                    campaign.FailedCount),
-                campaign.AudienceLabel,
-                campaign.ScheduledAt,
-                campaign.CompletedAt,
-                campaign.CreatedByName,
-                campaign.CreatedOn),
+            CampaignMapper.ToResponse(campaign),
             cancellationToken);
     }
 
     /// <summary>How much of the rolling window is left, and when more becomes available.</summary>
     private readonly record struct Allowance(int Remaining, DateTimeOffset? CapacityReturnsAt);
+
+    [LoggerMessage(
+        EventId = 2706,
+        Level = LogLevel.Warning,
+        Message = "Campaign {CampaignId} was paused instead of firing: {Reason}")]
+    private partial void LogOccurrenceBlocked(long campaignId, string reason);
 
     [LoggerMessage(
         EventId = 2701,

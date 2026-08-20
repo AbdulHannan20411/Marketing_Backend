@@ -21,6 +21,17 @@ public sealed class CampaignMessage : BaseEntity, IRequiresTenant
     /// <summary>Campaign this message belongs to.</summary>
     public long CampaignId { get; set; }
 
+    /// <summary>
+    /// Firing this message belongs to.
+    /// <para>
+    /// Nullable only for rows written before campaigns had runs. Every dispatch now creates one,
+    /// including a one-off send, so that uniqueness is scoped to the firing rather than to the
+    /// campaign - a weekly campaign must reach the same contact every week, which a campaign-wide
+    /// constraint forbids outright.
+    /// </para>
+    /// </summary>
+    public long? CampaignRunId { get; set; }
+
     /// <summary>Recipient.</summary>
     public long ContactId { get; set; }
 
@@ -55,6 +66,9 @@ public sealed class CampaignMessage : BaseEntity, IRequiresTenant
 
     /// <summary>Campaign navigation.</summary>
     public Campaign Campaign { get; set; } = null!;
+
+    /// <summary>Run navigation.</summary>
+    public CampaignRun? CampaignRun { get; set; }
 
     /// <summary>Contact navigation.</summary>
     public Contact Contact { get; set; } = null!;

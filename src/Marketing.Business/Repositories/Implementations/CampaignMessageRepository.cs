@@ -35,12 +35,17 @@ public sealed class CampaignMessageRepository : Repository<CampaignMessage>, ICa
                     || (campaign.Status == CampaignStatus.Scheduled
                         && campaign.ScheduledAt != null
                         && campaign.ScheduledAt <= utcNow)
+                    // A recurring campaign is due on its computed occurrence rather than on a
+                    // fixed instant, and it returns here after every firing rather than once.
+                    || (campaign.Status == CampaignStatus.Scheduled
+                        && campaign.NextRunAtUtc != null
+                        && campaign.NextRunAtUtc <= utcNow)
                     || (campaign.Status == CampaignStatus.Paused
                         && campaign.ResumeAfter != null
                         && campaign.ResumeAfter <= utcNow)))
-            // Oldest schedule first, so a campaign that has been waiting is not starved by one
-            // scheduled a moment ago.
-            .OrderBy(campaign => campaign.ScheduledAt)
+            // Oldest due time first, whichever kind of schedule supplied it, so a campaign that
+            // has been waiting is not starved by one scheduled a moment ago.
+            .OrderBy(campaign => campaign.NextRunAtUtc ?? campaign.ScheduledAt)
             .Take(maximum)
             .Select(campaign => new DueCampaign(campaign.Id, campaign.TenantId!.Value))
             .ToListAsync(cancellationToken);

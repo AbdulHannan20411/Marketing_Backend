@@ -92,6 +92,16 @@ public sealed class Campaign : BaseEntity, IRequiresTenant
     /// </summary>
     public int OccurrencesRun { get; set; }
 
+    /// <summary>
+    /// The firing currently in flight, or null when nothing is being dispatched.
+    /// <para>
+    /// Every message written while this is set is stamped with it, which is what lets one campaign
+    /// message the same contact on Monday and again the following Monday without the two colliding.
+    /// Cleared when the run finishes.
+    /// </para>
+    /// </summary>
+    public long? ActiveCampaignRunId { get; set; }
+
     /// <summary>Instant dispatch is scheduled for.</summary>
     public DateTimeOffset? ScheduledAt { get; set; }
 
@@ -155,6 +165,15 @@ public sealed class CampaignRun : BaseEntity, IRequiresTenant
     /// <summary>Lifecycle state.</summary>
     public CampaignRunStatus Status { get; set; } = CampaignRunStatus.Pending;
 
+    /// <summary>
+    /// True when an operator pressed Run now rather than the schedule firing.
+    /// <para>
+    /// Recorded so an unexpected send is explainable months later, and so the run history can
+    /// distinguish "the schedule did this" from "somebody did this".
+    /// </para>
+    /// </summary>
+    public bool TriggeredManually { get; set; }
+
     /// <summary>Instant this occurrence was due, in UTC.</summary>
     public DateTimeOffset ScheduledForUtc { get; set; }
 
@@ -193,41 +212,8 @@ public sealed class CampaignRun : BaseEntity, IRequiresTenant
     /// <summary>Campaign navigation.</summary>
     public Campaign? Campaign { get; set; }
 
-    /// <summary>Recipients of this run.</summary>
-    public List<CampaignRecipient> Recipients { get; set; } = [];
-}
-
-/// <summary>
-/// One contact addressed by one run.
-/// <para>
-/// This is what lets a crashed dispatch resume without messaging anyone twice: the row is written
-/// before the send and <c>(RunId, ContactId)</c> is unique, so a resumed worker skips whatever it
-/// already claimed. It is also what delivery receipts are matched against, since Meta returns its
-/// own message id and nothing else that identifies the send.
-/// </para>
-/// </summary>
-public sealed class CampaignRecipient : BaseEntity, IRequiresTenant
-{
-    /// <summary>Run this recipient belongs to.</summary>
-    public long CampaignRunId { get; set; }
-
-    /// <summary>Contact addressed.</summary>
-    public long ContactId { get; set; }
-
-    /// <summary>Number the message was addressed to, as it stood at fire time.</summary>
-    public string PhoneNumber { get; set; } = string.Empty;
-
-    /// <summary>Delivery state.</summary>
-    public CampaignMessageStatus Status { get; set; } = CampaignMessageStatus.Pending;
-
-    /// <summary>Meta's message identifier, once accepted.</summary>
-    public string? MetaMessageId { get; set; }
-
-    /// <summary>Why this recipient failed or was skipped.</summary>
-    public string? FailureReason { get; set; }
-
-    /// <summary>Run navigation.</summary>
-    public CampaignRun? CampaignRun { get; set; }
+    /// <summary>Messages sent by this run.</summary>
+    public List<CampaignMessage> Messages { get; set; } = [];
 }
 
 /// <summary>One message that could not be delivered.</summary>
