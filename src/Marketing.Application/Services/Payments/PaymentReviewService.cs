@@ -294,6 +294,11 @@ public sealed class PaymentReviewService : IPaymentReviewService
         subscription.CurrentPeriodStart = now;
         subscription.CurrentPeriodEnd = periodEnd;
         subscription.ExpiresAt = periodEnd;
+        
+        // The expiry countdown starts again. Left set, it would hold the last period's
+        // threshold and suppress every reminder for this one - a subscription that warned
+        // nobody because it had warned somebody once before.
+        subscription.LastExpiryReminderDay = null;
         subscription.NextRenewalAt = subscription.AutoRenew ? periodEnd : null;
         subscription.Amount = request.Amount;
         subscription.Currency = request.Currency;

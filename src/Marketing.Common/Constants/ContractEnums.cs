@@ -815,4 +815,28 @@ public static class ContractEnums
         /// </summary>
         Skipped,
     }
+
+    /// <summary>How far a user has got through the product tour.</summary>
+    /// <remarks>
+    /// Wire values are snake_case rather than the camelCase the rest of this file defaults to, so
+    /// each carries an explicit name. The client compares them as exact string literals.
+    /// </remarks>
+    public enum OnboardingStatus
+    {
+        /// <summary>Never started. Also the answer for a user who has no stored state.</summary>
+        [JsonStringEnumMemberName("not_started")]
+        NotStarted,
+
+        /// <summary>Started and not yet finished. <c>stepIndex</c> says where.</summary>
+        [JsonStringEnumMemberName("in_progress")]
+        InProgress,
+
+        /// <summary>Walked to the end.</summary>
+        [JsonStringEnumMemberName("completed")]
+        Completed,
+
+        /// <summary>Dismissed deliberately. Distinct from completed, so the two can be told apart.</summary>
+        [JsonStringEnumMemberName("skipped")]
+        Skipped,
+    }
 }

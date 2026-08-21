@@ -119,6 +119,22 @@ public sealed class TenantSubscription : BaseEntity, IRequiresTenant
     /// <summary>Whether the subscription renews automatically.</summary>
     public bool AutoRenew { get; set; } = true;
 
+    /// <summary>
+    /// Days-remaining threshold the most recent expiry reminder was sent for, or null if none has
+    /// been sent for the current period.
+    /// </summary>
+    /// <remarks>
+    /// The whole idempotency mechanism, and deliberately a threshold rather than a timestamp.
+    /// Reminders count down 7, 6, 5 ... 1, so each is strictly lower than the last; a reminder is
+    /// sent only when the current threshold is below this value. That makes a second run in the
+    /// same day a no-op, survives a restart, and needs no separate table.
+    /// <para>
+    /// Cleared when the period moves - a renewed subscription starts its next countdown from
+    /// scratch.
+    /// </para>
+    /// </remarks>
+    public int? LastExpiryReminderDay { get; set; }
+
     /// <summary>Instant the trial ends.</summary>
     public DateTimeOffset? TrialEndsAt { get; set; }
 

@@ -1,4 +1,5 @@
 using static Marketing.Common.Constants.AppConstants;
+using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.DataAccess.Entities;
 
@@ -45,6 +46,34 @@ public sealed class User : BaseEntity, ITenantScoped
 
     /// <summary>Consecutive failed sign-in attempts. Reset on success.</summary>
     public int FailedLoginAttempts { get; set; }
+
+    /// <summary>
+    /// How far this user has got through the product tour.
+    /// </summary>
+    /// <remarks>
+    /// Columns on the user rather than a table of their own. It is a one-to-one relationship with
+    /// three fields that are read together and written together, so a separate table would add a
+    /// join to every read and a row-exists branch to every write, in exchange for nothing.
+    /// <para>
+    /// The default is <see cref="OnboardingStatus.NotStarted"/>, which is also the right answer for
+    /// a user nobody has stored anything for - so "no state" needs no special handling anywhere.
+    /// </para>
+    /// </remarks>
+    public OnboardingStatus OnboardingStatus { get; set; } = OnboardingStatus.NotStarted;
+
+    /// <summary>
+    /// Zero-based position an interrupted tour had reached.
+    /// </summary>
+    /// <remarks>
+    /// An index rather than a step identifier, deliberately. The step list is derived from the
+    /// user's own navigation and changes with their permissions and plan, so a stored identifier
+    /// could name a step that no longer exists for them; an index is simply clamped to the new
+    /// length.
+    /// </remarks>
+    public int OnboardingStepIndex { get; set; }
+
+    /// <summary>Instant the tour state last changed.</summary>
+    public DateTimeOffset? OnboardingUpdatedOn { get; set; }
 
     /// <summary>Instant the temporary lockout expires, in UTC.</summary>
     public DateTimeOffset? LockoutEndsOn { get; set; }

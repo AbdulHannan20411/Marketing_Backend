@@ -13,6 +13,13 @@ public sealed class UserConfiguration : BaseEntityConfiguration<User>
     {
         builder.ToTable("users");
 
+        // Stored as a string, matching every other contract enum: the value is legible in the table
+        // and survives a reordering of the enum members, which an integer would not.
+        builder.Property(user => user.OnboardingStatus)
+            .IsRequired()
+            .HasMaxLength(16)
+            .HasConversion<string>();
+
         builder.Property(user => user.Email)
             .IsRequired()
             .HasMaxLength(320);

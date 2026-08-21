@@ -202,6 +202,11 @@ public sealed class BillingService : IBillingService
             subscription.CurrentPeriodStart = _clock.UtcNow;
             subscription.CurrentPeriodEnd = _clock.UtcNow.AddMonths(target.RenewalPeriodMonths);
             subscription.ExpiresAt = subscription.CurrentPeriodEnd;
+            
+            // The expiry countdown starts again. Left set, it would hold the last period's
+            // threshold and suppress every reminder for this one - a subscription that warned
+            // nobody because it had warned somebody once before.
+            subscription.LastExpiryReminderDay = null;
             subscription.NextRenewalAt = subscription.AutoRenew ? subscription.CurrentPeriodEnd : null;
         }
 
@@ -339,6 +344,9 @@ public sealed class BillingService : IBillingService
         subscription.AutoRenew = true;
         subscription.NextRenewalAt = subscription.CurrentPeriodEnd;
         subscription.ExpiresAt = subscription.CurrentPeriodEnd;
+
+        // Reinstated, so any countdown recorded while it was winding down no longer applies.
+        subscription.LastExpiryReminderDay = null;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 

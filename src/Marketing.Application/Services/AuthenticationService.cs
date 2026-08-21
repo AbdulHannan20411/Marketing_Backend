@@ -1,3 +1,5 @@
+using System.Net.Mail;
+using System.Net;
 using Marketing.Application.Configurations;
 using Marketing.Application.DTOs.Auth;
 using Marketing.Application.Interfaces;
@@ -29,6 +31,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
     private readonly IUserTokenRepository _userTokens;
     private readonly IAccountActivationService _activation;
     private readonly IPasswordPolicy _passwordPolicy;
+    private readonly IEmailSender _emailSender;
     private readonly AuthenticationPolicyOptions _policy;
     private readonly ILogger<AuthenticationService> _logger;
 
@@ -56,6 +59,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
         IUserTokenRepository userTokens,
         IAccountActivationService activation,
         IPasswordPolicy passwordPolicy,
+        IEmailSender emailSender,
         IOptions<AuthenticationPolicyOptions> policy,
         ILogger<AuthenticationService> logger)
     {
@@ -72,6 +76,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
         _userTokens = userTokens;
         _activation = activation;
         _passwordPolicy = passwordPolicy;
+        _emailSender = emailSender;
         _policy = policy.Value;
         _logger = logger;
 
@@ -371,6 +376,210 @@ public sealed partial class AuthenticationService : IAuthenticationService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         LogPasswordReset(user.Id, _requestContext.CorrelationId);
+    }
+
+    /// <inheritdoc />
+    public async Task<CurrentUserResponse> UpdateProfileAsync(
+        UpdateProfileRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var userId = _currentUser.UserId ?? throw new AuthenticationException("not_authenticated");
+
+        var user = await _userRepository.GetForUpdateAsync(userId, cancellationToken)
+                   ?? throw new NotFoundException(nameof(User), userId);
+
+        // Proved once, up front, for the whole request. Changing the address on an account is an
+        // account-takeover step - whoever controls the address controls password resets - so a
+        // session left open on a shared machine must not be enough on its own. Renaming yourself is
+        // not dangerous and is deliberately not gated: asking for a password to change a display
+        // name teaches people to type it without thinking.
+        if (request.RequiresPassword)
+        {
+            var (isValid, _) = _passwordHasher.Verify(request.CurrentPassword ?? string.Empty, user.PasswordHash);
+
+            if (!isValid)
+            {
+                throw new ValidationException(
+                    nameof(request.CurrentPassword),
+                    "That is not your current password.");
+            }
+        }
+
+        var previousEmail = user.Email;
+        var emailChanged = false;
+
+        if (request.DisplayName is not null)
+        {
+            var displayName = request.DisplayName.Trim();
+
+            if (displayName.Length == 0)
+            {
+                throw new ValidationException(nameof(request.DisplayName), "Enter your name.");
+            }
+
+            if (displayName.Length > 120)
+            {
+                throw new ValidationException(nameof(request.DisplayName), "That name is too long.");
+            }
+
+            user.DisplayName = displayName;
+        }
+
+        if (request.Email is not null)
+        {
+            var email = request.Email.Trim();
+
+            if (!MailAddress.TryCreate(email, out _))
+            {
+                throw new ValidationException(nameof(request.Email), "Enter a valid email address.");
+            }
+
+            var normalized = email.ToLowerInvariant();
+
+            if (!string.Equals(normalized, user.NormalizedEmail, StringComparison.Ordinal))
+            {
+                if (await _userRepository.IsEmailTakenAsync(normalized, user.Id, cancellationToken))
+                {
+                    throw new BusinessRuleException(
+                        "email_in_use",
+                        "Another account already uses that address.");
+                }
+
+                user.Email = email;
+                user.NormalizedEmail = normalized;
+                emailChanged = true;
+            }
+        }
+
+        if (request.NewPassword is not null)
+        {
+            _passwordPolicy.Validate(request.NewPassword, nameof(request.NewPassword));
+
+            user.PasswordHash = _passwordHasher.Hash(request.NewPassword);
+
+            await RevokeOtherSessionsAsync(user, "Password changed.", cancellationToken);
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // After the commit, and best-effort. The old address is the only place a takeover can be
+        // reported from, which makes this the single most valuable safeguard here - but a bounced
+        // warning must not roll back a change the user asked for and has already been told about.
+        if (emailChanged)
+        {
+            await NotifyAddressChangedAsync(user, previousEmail, cancellationToken);
+        }
+
+        LogProfileUpdated(user.Id, emailChanged, request.NewPassword is not null);
+
+        return await GetCurrentUserAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<OnboardingStateResponse> GetOnboardingStateAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var userId = _currentUser.UserId ?? throw new AuthenticationException("not_authenticated");
+
+        var user = await _userRepository.GetForUpdateAsync(userId, cancellationToken)
+                   ?? throw new NotFoundException(nameof(User), userId);
+
+        // Never a 404. A user with nothing stored is not-started at step zero, which is what the
+        // column defaults to - so first sign-in needs no special case here or in the client.
+        return new OnboardingStateResponse(
+            user.OnboardingStatus,
+            user.OnboardingStepIndex,
+            user.OnboardingUpdatedOn);
+    }
+
+    /// <inheritdoc />
+    public async Task<OnboardingStateResponse> UpdateOnboardingStateAsync(
+        UpdateOnboardingStateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var userId = _currentUser.UserId ?? throw new AuthenticationException("not_authenticated");
+
+        var user = await _userRepository.GetForUpdateAsync(userId, cancellationToken)
+                   ?? throw new NotFoundException(nameof(User), userId);
+
+        user.OnboardingStatus = request.Status;
+
+        // Clamped rather than validated. The server cannot know how many steps this user's tour has
+        // - the list is derived from their own navigation - so the only wrong value it can rule out
+        // is a negative one, and refusing the write would lose the status alongside it.
+        user.OnboardingStepIndex = Math.Max(0, request.StepIndex);
+        user.OnboardingUpdatedOn = _dateTimeProvider.UtcNow;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return new OnboardingStateResponse(
+            user.OnboardingStatus,
+            user.OnboardingStepIndex,
+            user.OnboardingUpdatedOn);
+    }
+
+    /// <summary>Warns the address that was replaced, so a takeover cannot happen quietly.</summary>
+    private async Task NotifyAddressChangedAsync(
+        User user,
+        string previousEmail,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _emailSender.SendAsync(
+                new EmailMessage(
+                    previousEmail,
+                    user.DisplayName,
+                    "The email address on your account was changed",
+                    $"<p>Hello {WebUtility.HtmlEncode(user.DisplayName)},</p>"
+                    + "<p>The email address on your account was changed to "
+                    + $"<strong>{WebUtility.HtmlEncode(user.Email)}</strong>.</p>"
+                    + "<p>If this was you, no action is needed. <strong>If it was not, contact "
+                    + "support immediately</strong> - someone else may have access to your "
+                    + "account.</p>",
+                    $"Hello {user.DisplayName},\n\n"
+                    + $"The email address on your account was changed to {user.Email}.\n\n"
+                    + "If this was you, no action is needed. If it was not, contact support "
+                    + "immediately - someone else may have access to your account."),
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LogAddressChangeWarningFailed(exception, user.Id);
+        }
+    }
+
+    /// <summary>
+    /// Ends every session but the caller's own.
+    /// </summary>
+    /// <remarks>
+    /// Signing someone out of the tab they just used to change their password is hostile and
+    /// teaches nothing, so that one session is re-stamped and survives the rotation.
+    /// </remarks>
+    private async Task RevokeOtherSessionsAsync(User user, string reason, CancellationToken cancellationToken)
+    {
+        var utcNow = _dateTimeProvider.UtcNow;
+        var currentSessionId = _currentUser.SessionId;
+
+        user.SecurityStamp = Guid.NewGuid();
+
+        var sessions = await _refreshTokenRepository.GetActiveSessionsAsync(user.Id, utcNow, cancellationToken);
+
+        foreach (var session in sessions)
+        {
+            if (currentSessionId is { } keep && session.SessionId == keep)
+            {
+                session.SecurityStamp = user.SecurityStamp;
+                continue;
+            }
+
+            session.RevokedOn = utcNow;
+            session.RevokedReason = reason;
+        }
     }
 
     /// <inheritdoc />
@@ -682,6 +891,19 @@ public sealed partial class AuthenticationService : IAuthenticationService
         Level = LogLevel.Warning,
         Message = "Password reset completed for user {UserId}; all sessions revoked. CorrelationId: {CorrelationId}")]
     private partial void LogPasswordReset(long userId, string correlationId);
+
+    [LoggerMessage(
+        EventId = 2012,
+        Level = LogLevel.Information,
+        Message = "User {UserId} updated their profile. Email changed: {EmailChanged}. "
+                  + "Password changed: {PasswordChanged}.")]
+    private partial void LogProfileUpdated(long userId, bool emailChanged, bool passwordChanged);
+
+    [LoggerMessage(
+        EventId = 2013,
+        Level = LogLevel.Warning,
+        Message = "Could not warn the previous address that user {UserId} changed their email.")]
+    private partial void LogAddressChangeWarningFailed(Exception exception, long userId);
 
     [LoggerMessage(
         EventId = 2011,

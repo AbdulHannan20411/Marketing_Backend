@@ -82,6 +82,35 @@ public interface IAuthenticationService
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task ChangePasswordAsync(ChangePasswordRequest request, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Changes the signed-in user's own name, address or password, in one transaction.
+    /// </summary>
+    /// <remarks>
+    /// The user is taken from the token and never from the request. Accepting an identifier here
+    /// would let any authenticated caller edit any other account by guessing one.
+    /// </remarks>
+    /// <param name="request">The fields to change. Absent means leave alone.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<CurrentUserResponse> UpdateProfileAsync(
+        UpdateProfileRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns the signed-in user's progress through the product tour.</summary>
+    /// <remarks>
+    /// A user nobody has stored anything for is <c>not_started</c> at step zero, never a 404. "No
+    /// state" and "not started" are the same thing, and a 404 would make every first sign-in look
+    /// like an error in the logs.
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<OnboardingStateResponse> GetOnboardingStateAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Records the signed-in user's progress through the product tour.</summary>
+    /// <param name="request">The state to store.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<OnboardingStateResponse> UpdateOnboardingStateAsync(
+        UpdateOnboardingStateRequest request,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Returns the profile of the signed-in user.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<CurrentUserResponse> GetCurrentUserAsync(CancellationToken cancellationToken = default);

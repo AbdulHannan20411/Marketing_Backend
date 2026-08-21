@@ -87,4 +87,21 @@ public sealed class UserRepository : Repository<User>, IUserRepository
                                !userRole.IsDeleted && userRole.Role.Name == Roles.SuperAdmin))
             .OrderBy(user => user.Id)
             .ToListAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<User>> GetTenantAdministratorsAsync(
+        long tenantId,
+        CancellationToken cancellationToken = default) =>
+        await Set
+            // No principal on a scheduled job, so the ambient tenant is null and the filter would
+            // exclude every candidate. The tenant is pinned explicitly on the next line instead.
+            .IgnoreQueryFilters()
+            .Where(user => !user.IsDeleted
+                           && user.TenantId == tenantId
+                           && user.Status == UserStatus.Active
+                           && user.UserRoles.Any(userRole =>
+                               !userRole.IsDeleted
+                               && userRole.Role.Name == Roles.Admin))
+            .OrderBy(user => user.Id)
+            .ToListAsync(cancellationToken);
 }

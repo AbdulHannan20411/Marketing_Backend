@@ -4,6 +4,7 @@ using Marketing.Application.DTOs.Auth;
 using Marketing.Application.Services;
 using Marketing.Business.Repositories.Interfaces;
 using static Marketing.Common.Constants.AppConstants;
+using static Marketing.Common.Constants.ContractEnums;
 using Marketing.Common.Exceptions;
 using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;
@@ -28,6 +29,7 @@ public sealed class AuthenticationServiceTests
     private readonly StubCurrentUser _currentUser = new();
     private readonly IUserTokenRepository _userTokens = Substitute.For<IUserTokenRepository>();
     private readonly IAccountActivationService _activation = Substitute.For<IAccountActivationService>();
+    private readonly IEmailSender _emailSender = Substitute.For<IEmailSender>();
     private readonly IPasswordPolicy _passwordPolicy =
         new PasswordPolicy(Options.Create(new AuthenticationPolicyOptions()));
     private readonly FixedDateTimeProvider _clock = new(Now);
@@ -77,6 +79,7 @@ public sealed class AuthenticationServiceTests
             _userTokens,
             _activation,
             _passwordPolicy,
+            _emailSender,
             Options.Create(_policy),
             NullLogger<AuthenticationService>.Instance);
     }
@@ -570,5 +573,207 @@ public sealed class AuthenticationServiceTests
 
         // Reporting otherwise would turn the endpoint into an account-enumeration oracle.
         await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task Renaming_yourself_does_not_ask_for_a_password()
+    {
+        // Deliberately ungated. Asking for a password to change a display name teaches people to
+        // type it without thinking, which is what makes the gate on the address worth anything.
+        var user = ActiveUser();
+        _currentUser.UserId = UserId;
+        _users.GetForUpdateAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+        _users.FindWithRolesAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+
+        await CreateService().UpdateProfileAsync(
+            new UpdateProfileRequest(DisplayName: "Amara Okafor"),
+            TestContext.Current.CancellationToken);
+
+        user.DisplayName.Should().Be("Amara Okafor");
+        _passwordHasher.DidNotReceive().Verify(Arg.Any<string>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task Changing_the_address_requires_the_current_password()
+    {
+        var user = ActiveUser();
+        _currentUser.UserId = UserId;
+        _users.GetForUpdateAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+        _passwordHasher.Verify("wrong", user.PasswordHash).Returns((false, false));
+
+        var act = () => CreateService().UpdateProfileAsync(
+            new UpdateProfileRequest(Email: "new@acme.test", CurrentPassword: "wrong"));
+
+        await act.Should().ThrowAsync<ValidationException>();
+
+        // Unchanged: a rejected request must not half-apply.
+        user.Email.Should().Be("operator@acme.test");
+    }
+
+    [Fact]
+    public async Task An_address_another_account_uses_is_refused()
+    {
+        var user = ActiveUser();
+        _currentUser.UserId = UserId;
+        _users.GetForUpdateAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+        _passwordHasher.Verify("correct", user.PasswordHash).Returns((true, false));
+        _users.IsEmailTakenAsync("taken@acme.test", UserId, Arg.Any<CancellationToken>()).Returns(true);
+
+        var act = () => CreateService().UpdateProfileAsync(
+            new UpdateProfileRequest(Email: "taken@acme.test", CurrentPassword: "correct"));
+
+        (await act.Should().ThrowAsync<BusinessRuleException>())
+            .Which.ErrorCode.Should().Be("email_in_use");
+    }
+
+    [Fact]
+    public async Task Changing_the_address_warns_the_address_it_replaced()
+    {
+        // The old address is the only place a takeover can be reported from, which makes this the
+        // single most valuable safeguard on the endpoint.
+        var user = ActiveUser();
+        _currentUser.UserId = UserId;
+        _users.GetForUpdateAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+        _users.FindWithRolesAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+        _passwordHasher.Verify("correct", user.PasswordHash).Returns((true, false));
+        _users.IsEmailTakenAsync(Arg.Any<string>(), UserId, Arg.Any<CancellationToken>()).Returns(false);
+
+        await CreateService().UpdateProfileAsync(
+            new UpdateProfileRequest(Email: "amara@acme.test", CurrentPassword: "correct"),
+            TestContext.Current.CancellationToken);
+
+        user.Email.Should().Be("amara@acme.test");
+        user.NormalizedEmail.Should().Be("amara@acme.test");
+
+        await _emailSender.Received(1).SendAsync(
+            Arg.Is<EmailMessage>(message => message != null && message.ToAddress == "operator@acme.test"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_bounced_warning_does_not_undo_the_change()
+    {
+        // The change is already committed by the time the warning goes out. Failing the request
+        // here would tell the user their address did not change when it did.
+        var user = ActiveUser();
+        _currentUser.UserId = UserId;
+        _users.GetForUpdateAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+        _users.FindWithRolesAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+        _passwordHasher.Verify("correct", user.PasswordHash).Returns((true, false));
+        _users.IsEmailTakenAsync(Arg.Any<string>(), UserId, Arg.Any<CancellationToken>()).Returns(false);
+        _emailSender
+            .SendAsync(Arg.Any<EmailMessage>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new InvalidOperationException("smtp down"));
+
+        var act = () => CreateService().UpdateProfileAsync(
+            new UpdateProfileRequest(Email: "amara@acme.test", CurrentPassword: "correct"));
+
+        await act.Should().NotThrowAsync();
+        user.Email.Should().Be("amara@acme.test");
+    }
+
+    [Fact]
+    public async Task Name_address_and_password_all_apply_in_one_call()
+    {
+        // The whole reason for accepting the password here. Split across two endpoints, the address
+        // change is confirmed with a password the other call has already replaced, and the combined
+        // change fails every time.
+        var user = ActiveUser();
+        _currentUser.UserId = UserId;
+        _users.GetForUpdateAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+        _users.FindWithRolesAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+        _passwordHasher.Verify("correct", user.PasswordHash).Returns((true, false));
+        _passwordHasher.Hash("NewPassphrase123").Returns("new-hash");
+        _users.IsEmailTakenAsync(Arg.Any<string>(), UserId, Arg.Any<CancellationToken>()).Returns(false);
+
+        await CreateService().UpdateProfileAsync(new UpdateProfileRequest(
+            DisplayName: "Amara Okafor",
+            Email: "amara@acme.test",
+            NewPassword: "NewPassphrase123",
+            CurrentPassword: "correct"),
+            TestContext.Current.CancellationToken);
+
+        user.DisplayName.Should().Be("Amara Okafor");
+        user.Email.Should().Be("amara@acme.test");
+        user.PasswordHash.Should().Be("new-hash");
+    }
+
+    [Fact]
+    public async Task An_absent_field_is_left_alone_rather_than_cleared()
+    {
+        var user = ActiveUser();
+        _currentUser.UserId = UserId;
+        _users.GetForUpdateAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+        _users.FindWithRolesAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+
+        await CreateService().UpdateProfileAsync(
+            new UpdateProfileRequest(DisplayName: "Renamed"),
+            TestContext.Current.CancellationToken);
+
+        user.Email.Should().Be("operator@acme.test");
+        user.PasswordHash.Should().Be("stored-hash");
+    }
+
+    [Fact]
+    public async Task A_name_that_trims_to_nothing_is_refused()
+    {
+        var user = ActiveUser();
+        _currentUser.UserId = UserId;
+        _users.GetForUpdateAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+
+        var act = () => CreateService().UpdateProfileAsync(new UpdateProfileRequest(DisplayName: "   "));
+
+        await act.Should().ThrowAsync<ValidationException>();
+    }
+
+    [Fact]
+    public async Task A_user_with_no_stored_tour_state_is_not_started_rather_than_missing()
+    {
+        // "No state" and "not started" are the same thing. A 404 here would make every first
+        // sign-in look like an error in the logs.
+        var user = ActiveUser();
+        _currentUser.UserId = UserId;
+        _users.GetForUpdateAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+
+        var state = await CreateService().GetOnboardingStateAsync(TestContext.Current.CancellationToken);
+
+        state.Status.Should().Be(OnboardingStatus.NotStarted);
+        state.StepIndex.Should().Be(0);
+        state.UpdatedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Tour_progress_is_stored_and_stamped_by_the_server()
+    {
+        var user = ActiveUser();
+        _currentUser.UserId = UserId;
+        _users.GetForUpdateAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+
+        var state = await CreateService().UpdateOnboardingStateAsync(
+            new UpdateOnboardingStateRequest(OnboardingStatus.InProgress, 2),
+            TestContext.Current.CancellationToken);
+
+        state.Status.Should().Be(OnboardingStatus.InProgress);
+        state.StepIndex.Should().Be(2);
+
+        // The clock is the server's. A timestamp the caller controls is not evidence of anything.
+        state.UpdatedAt.Should().Be(Now);
+    }
+
+    [Fact]
+    public async Task A_negative_step_is_clamped_rather_than_refused()
+    {
+        // Refusing would lose the status alongside the index, and the server cannot validate the
+        // upper bound anyway - the step list is derived from the user's own navigation.
+        var user = ActiveUser();
+        _currentUser.UserId = UserId;
+        _users.GetForUpdateAsync(UserId, Arg.Any<CancellationToken>()).Returns(user);
+
+        var state = await CreateService().UpdateOnboardingStateAsync(
+            new UpdateOnboardingStateRequest(OnboardingStatus.Skipped, -4),
+            TestContext.Current.CancellationToken);
+
+        state.StepIndex.Should().Be(0);
+        state.Status.Should().Be(OnboardingStatus.Skipped);
     }
 }

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Marketing.DataAccess.Context;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Marketing.DataAccess.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260821065828_AddSubscriptionExpiryReminderMarker")]
+    partial class AddSubscriptionExpiryReminderMarker
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -3738,20 +3741,6 @@ namespace Marketing.DataAccess.Migrations
                         .HasMaxLength(320)
                         .HasColumnType("character varying(320)")
                         .HasColumnName("normalized_email");
-
-                    b.Property<string>("OnboardingStatus")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("onboarding_status");
-
-                    b.Property<int>("OnboardingStepIndex")
-                        .HasColumnType("integer")
-                        .HasColumnName("onboarding_step_index");
-
-                    b.Property<DateTimeOffset?>("OnboardingUpdatedOn")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("onboarding_updated_on");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()

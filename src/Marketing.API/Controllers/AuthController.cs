@@ -204,4 +204,75 @@ public sealed class AuthController : ApiControllerBase
 
         return Success(profile);
     }
+
+    /// <summary>Changes the signed-in user's own name, address or password.</summary>
+    /// <remarks>
+    /// Every field is optional; absent means leave alone, never clear. All three are applied in one
+    /// transaction, so there is no ordering to get right and no partial success to explain.
+    /// <para>
+    /// <c>currentPassword</c> is required whenever the address or the password changes, and not for
+    /// a rename. Changing the address is an account-takeover step - whoever controls it controls
+    /// password resets - so an unattended session must not be enough on its own.
+    /// </para>
+    /// <para>
+    /// The account is taken from the token. There is deliberately no identifier in the route or the
+    /// body: accepting one would let any authenticated caller edit any other account.
+    /// </para>
+    /// </remarks>
+    /// <param name="request">The fields to change.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The updated profile.</response>
+    /// <response code="409">Another account already uses that address.</response>
+    /// <response code="422">A field failed validation, or the current password was wrong.</response>
+    [HttpPatch("me")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<CurrentUserResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UpdateCurrentUserAsync(
+        [FromBody] UpdateProfileRequest request,
+        CancellationToken cancellationToken)
+    {
+        var profile = await _authenticationService.UpdateProfileAsync(request, cancellationToken);
+
+        return Success(profile, "Your details were updated.");
+    }
+
+    /// <summary>Returns the signed-in user's progress through the product tour.</summary>
+    /// <remarks>
+    /// A user who has never been seen is <c>not_started</c> at step zero rather than a 404: "no
+    /// state" and "not started" are the same thing, and a 404 would make every first sign-in look
+    /// like an error in the logs.
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The tour state.</response>
+    [HttpGet("me/onboarding")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<OnboardingStateResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetOnboardingStateAsync(CancellationToken cancellationToken)
+    {
+        return Success(await _authenticationService.GetOnboardingStateAsync(cancellationToken));
+    }
+
+    /// <summary>Records the signed-in user's progress through the product tour.</summary>
+    /// <remarks>
+    /// Idempotent; last write wins. Per user rather than per tenant, so two colleagues in one
+    /// workspace each see the tour once.
+    /// <para>
+    /// The account comes from the token. There is deliberately no identifier in the route or body -
+    /// accepting one would let anyone reset anybody else's tour.
+    /// </para>
+    /// </remarks>
+    /// <param name="request">The state to store.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The stored state.</response>
+    [HttpPut("me/onboarding")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<OnboardingStateResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdateOnboardingStateAsync(
+        [FromBody] UpdateOnboardingStateRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Success(await _authenticationService.UpdateOnboardingStateAsync(request, cancellationToken));
+    }
 }

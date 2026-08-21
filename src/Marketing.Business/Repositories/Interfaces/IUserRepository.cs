@@ -48,4 +48,17 @@ public interface IUserRepository : IRepository<User>
     /// </remarks>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<IReadOnlyList<User>> GetPlatformAdministratorsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Active owners and administrators of one tenant, for messages addressed to whoever can act.
+    /// </summary>
+    /// <remarks>
+    /// Bypasses the tenant filter: the caller is a scheduled job with no principal, so the ambient
+    /// tenant is null and the filter would match nobody. The tenant is supplied explicitly instead.
+    /// </remarks>
+    /// <param name="tenantId">Tenant whose administrators to load.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<IReadOnlyList<User>> GetTenantAdministratorsAsync(
+        long tenantId,
+        CancellationToken cancellationToken = default);
 }

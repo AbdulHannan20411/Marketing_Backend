@@ -3,6 +3,7 @@ using FluentValidation;
 using Marketing.Application.Configurations;
 using Marketing.Application.Interfaces;
 using Marketing.Application.Services;
+using Marketing.Application.Services.Billing;
 using Marketing.Application.Services.Campaigns;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -77,6 +78,7 @@ public static class ApplicationServiceCollectionExtensions
         // Stateless and thread-safe: the tzdb provider it reads is immutable and cached by
         // NodaTime, so there is nothing per-request to hold.
         services.AddSingleton<IRecurrenceCalculator, RecurrenceCalculator>();
+        services.AddScoped<ISubscriptionExpiryReminderService, SubscriptionExpiryReminderService>();
         services.AddScoped<ICampaignWriteService, CampaignWriteService>();
         services.AddScoped<IAdminAccountService, AdminAccountService>();
         services.AddScoped<IWhatsAppConnectionService, WhatsAppConnectionService>();
