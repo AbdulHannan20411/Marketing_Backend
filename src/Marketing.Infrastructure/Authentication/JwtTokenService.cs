@@ -79,7 +79,10 @@ public sealed class JwtTokenService : ITokenService
 
         var claims = new List<Claim>(12)
         {
-            new(JwtRegisteredClaimNames.Sub, descriptor.UserId.ToString()),
+            // Invariant throughout. Claim values are compared as strings on every request, and
+            // a server running under a culture with non-ASCII digits would mint tokens whose
+            // subject and tenant no longer match anything the rest of the system looks up.
+            new(JwtRegisteredClaimNames.Sub, descriptor.UserId.ToString(CultureInfo.InvariantCulture)),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
             new(JwtRegisteredClaimNames.Email, descriptor.Email),
             new(AppConstants.Claims.Name, descriptor.Name),
@@ -117,7 +120,9 @@ public sealed class JwtTokenService : ITokenService
         // read back only through ITenantContext; no endpoint ever accepts one from a request.
         if (descriptor.TenantId is { } tenantId)
         {
-            claims.Add(new Claim(AppConstants.Claims.TenantId, tenantId.ToString()));
+            claims.Add(new Claim(
+                AppConstants.Claims.TenantId,
+                tenantId.ToString(CultureInfo.InvariantCulture)));
         }
 
         if (!string.IsNullOrWhiteSpace(descriptor.TenantSlug))

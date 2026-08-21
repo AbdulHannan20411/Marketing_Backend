@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text.Json;
@@ -47,7 +48,7 @@ public sealed class JwtTokenServiceTests
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token.Value);
 
         jwt.Claims.Should().ContainSingle(claim => claim.Type == AppConstants.Claims.TenantId)
-            .Which.Value.Should().Be(tenantId.ToString());
+            .Which.Value.Should().Be(tenantId.ToString(CultureInfo.InvariantCulture));
 
         // Single-valued role claim, as the client contract requires, plus the framework's own role
         // claim type so server-side RequireRole keeps working.

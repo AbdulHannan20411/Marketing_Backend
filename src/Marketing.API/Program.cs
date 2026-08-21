@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -22,7 +23,8 @@ using Serilog;
 // A bootstrap logger so failures during host construction - a malformed configuration file, a
 // missing signing key - are recorded instead of vanishing into an unhandled exception.
 Log.Logger = new LoggerConfiguration()
-    .WriteTo.Console()
+    // Invariant, so a bootstrap failure reads the same whatever culture the host runs under.
+    .WriteTo.Console(formatProvider: CultureInfo.InvariantCulture)
     .CreateBootstrapLogger();
 
 try

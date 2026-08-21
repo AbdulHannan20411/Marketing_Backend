@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Marketing.DataAccess.Context;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Marketing.DataAccess.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260820054022_Campaign Models")]
+    partial class CampaignModels
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2141,12 +2144,6 @@ namespace Marketing.DataAccess.Migrations
 
                     b.HasIndex("TenantId", "Id")
                         .HasDatabaseName("ix_message_templates_tenant_id_id");
-
-                    b.HasIndex("TenantId", "ModifiedOn")
-                        .HasDatabaseName("ix_message_templates_tenant_id_modified_on");
-
-                    b.HasIndex("TenantId", "Status")
-                        .HasDatabaseName("ix_message_templates_tenant_id_status");
 
                     b.HasIndex("TenantId", "Name", "Language")
                         .IsUnique()

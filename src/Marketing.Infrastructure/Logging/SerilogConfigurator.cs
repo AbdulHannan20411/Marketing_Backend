@@ -1,3 +1,4 @@
+using System.Globalization;
 using Marketing.Common.Constants;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
@@ -67,7 +68,10 @@ public static class SerilogConfigurator
         {
             configuration.WriteTo.Console(
                 outputTemplate:
-                "[{Timestamp:HH:mm:ss} {Level:u3}] {CorrelationId} {Message:lj}{NewLine}{Exception}");
+                "[{Timestamp:HH:mm:ss} {Level:u3}] {CorrelationId} {Message:lj}{NewLine}{Exception}",
+                // Log lines are read and grepped by people and by machines; neither wants the
+                // timestamps and numbers rendered in whatever culture the host happens to run under.
+                formatProvider: CultureInfo.InvariantCulture);
         }
         else
         {

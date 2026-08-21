@@ -1,3 +1,4 @@
+using System.Globalization;
 using AwesomeAssertions;
 using Marketing.Application.DTOs.Campaigns;
 using Marketing.Application.Services.Campaigns;
@@ -35,15 +36,15 @@ public sealed class RecurrenceCalculatorTests
             ordinal,
             ordinalWeekday,
             month,
-            DateOnly.Parse(startDate),
-            TimeOnly.Parse(time),
+            DateOnly.Parse(startDate, CultureInfo.InvariantCulture),
+            TimeOnly.Parse(time, CultureInfo.InvariantCulture),
             timeZone,
             endCondition,
-            endDate is null ? null : DateOnly.Parse(endDate),
+            endDate is null ? null : DateOnly.Parse(endDate, CultureInfo.InvariantCulture),
             occurrenceCount);
 
     private static DateTimeOffset Utc(string instant) =>
-        DateTimeOffset.Parse(instant).ToUniversalTime();
+        DateTimeOffset.Parse(instant, CultureInfo.InvariantCulture).ToUniversalTime();
 
     [Fact]
     public void A_one_off_fires_once_and_never_again()
@@ -119,9 +120,9 @@ public sealed class RecurrenceCalculatorTests
             monthlyMode: MonthlyMode.DayOfMonth,
             dayOfMonth: 31);
 
-        var next = _calculator.Next(rule, DateOnly.Parse(start).ToDateTime(new TimeOnly(23, 59)));
+        var next = _calculator.Next(rule, DateOnly.Parse(start, CultureInfo.InvariantCulture).ToDateTime(new TimeOnly(23, 59)));
 
-        DateOnly.FromDateTime(next!.Value.UtcDateTime).Should().Be(DateOnly.Parse(expected));
+        DateOnly.FromDateTime(next!.Value.UtcDateTime).Should().Be(DateOnly.Parse(expected, CultureInfo.InvariantCulture));
     }
 
     [Fact]
@@ -138,8 +139,8 @@ public sealed class RecurrenceCalculatorTests
         var occurrences = _calculator.Between(rule, Utc("2026-09-30T00:00:00Z"), Utc("2026-12-01T00:00:00Z"));
 
         occurrences.Select(occurrence => DateOnly.FromDateTime(occurrence.UtcDateTime)).Should().Equal(
-            DateOnly.Parse("2026-10-30"),
-            DateOnly.Parse("2026-11-27"));
+            DateOnly.Parse("2026-10-30", CultureInfo.InvariantCulture),
+            DateOnly.Parse("2026-11-27", CultureInfo.InvariantCulture));
     }
 
     [Fact]
@@ -155,7 +156,7 @@ public sealed class RecurrenceCalculatorTests
 
         var next = _calculator.Next(rule, Utc("2026-10-01T00:00:00Z"));
 
-        DateOnly.FromDateTime(next!.Value.UtcDateTime).Should().Be(DateOnly.Parse("2026-10-21"));
+        DateOnly.FromDateTime(next!.Value.UtcDateTime).Should().Be(DateOnly.Parse("2026-10-21", CultureInfo.InvariantCulture));
     }
 
     [Fact]
@@ -171,9 +172,9 @@ public sealed class RecurrenceCalculatorTests
         var occurrences = _calculator.Between(rule, Utc("2025-12-01T00:00:00Z"), Utc("2029-01-01T00:00:00Z"));
 
         occurrences.Select(occurrence => DateOnly.FromDateTime(occurrence.UtcDateTime)).Should().Equal(
-            DateOnly.Parse("2026-01-15"),
-            DateOnly.Parse("2027-01-15"),
-            DateOnly.Parse("2028-01-15"));
+            DateOnly.Parse("2026-01-15", CultureInfo.InvariantCulture),
+            DateOnly.Parse("2027-01-15", CultureInfo.InvariantCulture),
+            DateOnly.Parse("2028-01-15", CultureInfo.InvariantCulture));
     }
 
     [Fact]

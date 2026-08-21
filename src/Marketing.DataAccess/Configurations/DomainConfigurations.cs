@@ -176,6 +176,12 @@ public sealed class MessageTemplateConfiguration : BaseEntityConfiguration<Messa
         builder.HasIndex(template => new { template.TenantId, template.Name, template.Language })
             .IsUnique()
             .HasFilter("is_deleted = false");
+
+        // The templates screen's status chips and its default ordering. Category is left unindexed:
+        // it has three values, so a scan of what the tenant filter already narrowed costs less than
+        // the planner would spend consulting an index that selective.
+        builder.HasIndex(template => new { template.TenantId, template.Status });
+        builder.HasIndex(template => new { template.TenantId, template.ModifiedOn });
     }
 }
 

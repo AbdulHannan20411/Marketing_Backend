@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using static Marketing.Common.Constants.AppConstants;
 using Marketing.Common.Helpers;
@@ -135,7 +136,10 @@ public sealed class AuditTrailInterceptor : SaveChangesInterceptor
                 TenantId = entry.Entity.TenantId,
                 UserId = userId,
                 EntityName = entry.Entity.GetType().Name,
-                EntityId = entry.Entity.Id.ToString(),
+                // Invariant, not the ambient culture. An audit trail is matched and searched by this
+                // string, and a culture using non-ASCII digits would write an id that no longer
+                // equals the one written under any other culture.
+                EntityId = entry.Entity.Id.ToString(CultureInfo.InvariantCulture),
                 Action = action,
                 Changes = JsonSerializer.Serialize(changes, SerializerOptions),
                 CorrelationId = _requestContext.CorrelationId,

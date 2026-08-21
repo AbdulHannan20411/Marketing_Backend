@@ -9,7 +9,14 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!--
+      ICU is required, not optional. Country names are read from the runtime's own ISO 3166 data
+      rather than from a table copied into this repository, and under invariant globalization that
+      data is absent: RegionInfo hands back the code it was given, so "GB" renders as "GB".
+      Deployment images must carry ICU - the standard .NET Linux images do; an Alpine image needs
+      the icu-libs package.
+    -->
+    <InvariantGlobalization>false</InvariantGlobalization>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>

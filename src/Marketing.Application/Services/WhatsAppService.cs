@@ -5,6 +5,8 @@ using Marketing.Common.Exceptions;
 using Marketing.Common.Helpers;
 using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;
+using Marketing.Common.Responses;
+using Microsoft.EntityFrameworkCore;
 using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Application.Services;
@@ -23,6 +25,23 @@ public interface IWhatsAppService
     /// <summary>Returns every template.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<IReadOnlyList<MessageTemplateResponse>> GetTemplatesAsync(
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns a filtered, searched page of templates.</summary>
+    /// <param name="query">Search, filters and paging.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<PagedResult<MessageTemplateResponse>> SearchTemplatesAsync(
+        TemplateQuery query,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Counts templates by approval state, ignoring any active filter.</summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<TemplateStatusCountsResponse> CountTemplatesAsync(
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns every approved template, unpaged, for the campaign picker.</summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<IReadOnlyList<MessageTemplateResponse>> GetApprovedTemplatesAsync(
         CancellationToken cancellationToken = default);
 
     /// <summary>Refreshes templates from Meta and returns them.</summary>
@@ -109,6 +128,121 @@ public sealed class WhatsAppService : IWhatsAppService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return await GetConnectionAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PagedResult<MessageTemplateResponse>> SearchTemplatesAsync(
+        TemplateQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var filtered = _templates.Query();
+
+        if (Enum.TryParse<TemplateStatus>(query.Status, ignoreCase: true, out var status)
+            && !string.Equals(query.Status, TemplateQuery.All, StringComparison.OrdinalIgnoreCase))
+        {
+            filtered = filtered.Where(template => template.Status == status);
+        }
+
+        if (Enum.TryParse<TemplateCategory>(query.Category, ignoreCase: true, out var category)
+            && !string.Equals(query.Category, TemplateQuery.All, StringComparison.OrdinalIgnoreCase))
+        {
+            filtered = filtered.Where(template => template.Category == category);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Search))
+        {
+            var term = query.Search.Trim();
+
+            // Name and body, because an operator searching for "shipped" is remembering what the
+            // message said rather than what it was called. Header and footer are included for the
+            // same reason. Translated to SQL by EF, so the server returns a page rather than
+            // everything - filtering here in memory would leave the work exactly where it was.
+            filtered = filtered.Where(template =>
+                EF.Functions.ILike(template.Name, $"%{term}%")
+                || EF.Functions.ILike(template.BodyText, $"%{term}%")
+                || (template.HeaderText != null && EF.Functions.ILike(template.HeaderText, $"%{term}%"))
+                || (template.FooterText != null && EF.Functions.ILike(template.FooterText, $"%{term}%")));
+        }
+
+        var projected = filtered
+            // Newest-updated first: a template someone just resubmitted is the one they are looking
+            // for. CreatedOn stands in for rows never edited, which have no ModifiedOn.
+            .OrderByDescending(template => template.ModifiedOn ?? template.CreatedOn)
+            .ThenBy(template => template.Name)
+            .Select(template => new
+            {
+                template.Id,
+                template.Name,
+                template.Category,
+                template.Status,
+                template.Language,
+                template.HeaderText,
+                template.BodyText,
+                template.FooterText,
+                template.Variables,
+                template.Buttons,
+                template.QualityScore,
+                template.TimesUsed,
+                template.ModifiedOn,
+                template.CreatedOn,
+                template.RejectionReason,
+            });
+
+        var page = await _queries.ToPagedAsync(projected, query.Page, query.PageSize, cancellationToken);
+
+        return page.Map(row => new MessageTemplateResponse(
+            PublicId.From(PublicId.Template, row.Id),
+            row.Name,
+            row.Category,
+            row.Status,
+            row.Language,
+            row.HeaderText,
+            row.BodyText,
+            row.FooterText,
+            row.Variables,
+            row.Buttons,
+            row.QualityScore,
+            row.TimesUsed,
+            row.ModifiedOn ?? row.CreatedOn,
+            row.RejectionReason));
+    }
+
+    /// <inheritdoc />
+    public async Task<TemplateStatusCountsResponse> CountTemplatesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        // One grouped query rather than five round trips. The tenant filter still applies, so this
+        // counts the caller's templates and nobody else's.
+        var counts = await _queries.ToListAsync(
+            _templates.Query()
+                .GroupBy(template => template.Status)
+                .Select(group => new { Status = group.Key, Count = group.Count() }),
+            cancellationToken);
+
+        int CountOf(TemplateStatus wanted) =>
+            counts.FirstOrDefault(entry => entry.Status == wanted)?.Count ?? 0;
+
+        return new TemplateStatusCountsResponse(
+            counts.Sum(entry => entry.Count),
+            CountOf(TemplateStatus.Approved),
+            CountOf(TemplateStatus.Pending),
+            CountOf(TemplateStatus.Rejected),
+            CountOf(TemplateStatus.Paused));
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<MessageTemplateResponse>> GetApprovedTemplatesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        // Unpaged on purpose. A picker that offers "every approved template" cannot be built on a
+        // page: PageSize is clamped to 100, so asking for a large page silently returns the first
+        // hundred and hides the rest with no error anywhere. Only approved templates can be sent,
+        // and Meta's own per-account ceiling keeps this list small.
+        var all = await GetTemplatesAsync(cancellationToken);
+
+        return [.. all.Where(template => template.Status == TemplateStatus.Approved)];
     }
 
     /// <inheritdoc />

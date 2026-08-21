@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Marketing.Common.Helpers;
 
 /// <summary>
@@ -61,12 +63,12 @@ public static class Countries
     /// Returns the display name for a stored country value.
     /// </summary>
     /// <remarks>
-    /// A recognised two-letter value is returned in canonical upper case; anything else is returned
-    /// trimmed, so a name stored before this helper existed still renders rather than disappearing.
+    /// A recognised code is expanded to its English name; anything else is returned trimmed, so a
+    /// name stored before this helper existed still renders rather than disappearing.
     /// <para>
-    /// This does <b>not</b> expand a code into a country name. It used to, through ICU, but the
-    /// solution builds with <c>InvariantGlobalization</c> and ICU therefore hands back the code
-    /// unchanged. Expanding codes needs a name table this file does not carry.
+    /// The names come from the runtime's own ISO 3166 data rather than from a table copied into
+    /// this repository, which would be one more list to keep current. That requires ICU, which is
+    /// why the solution no longer builds with <c>InvariantGlobalization</c>.
     /// </para>
     /// </remarks>
     /// <param name="storedValue">ISO alpha-2 code, or an already-readable name.</param>
@@ -84,9 +86,16 @@ public static class Countries
             return trimmed;
         }
 
+        var code = trimmed.ToUpperInvariant();
+
         // Two letters that are not a known code - "XX" from a bad import - are returned as-is
         // rather than blanked, because the operator needs to see what is actually stored to fix it.
-        return trimmed.ToUpperInvariant();
+        if (!KnownCodes.Contains(code))
+        {
+            return code;
+        }
+
+        return CodeToName.TryGetValue(code, out var name) ? name : code;
     }
 
     /// <summary>
@@ -110,10 +119,44 @@ public static class Countries
             return KnownCodes.Contains(candidate) ? candidate : null;
         }
 
-        // A country name cannot be resolved to a code without a name table. Null sends the caller
-        // down its existing "select a country" path, which is a clear answer; the previous ICU
-        // walk over every installed culture returned null here anyway under this build.
-        return null;
+        // A name the platform does not recognise returns null rather than a guess, which sends the
+        // caller down its existing "select a country" path - a clear answer the operator can act on.
+        return NameToCode.GetValueOrDefault(trimmed, null!);
+    }
+
+    /// <summary>
+    /// Code to English name, for the countries this platform recognises.
+    /// </summary>
+    /// <remarks>
+    /// Built once from <see cref="RegionInfo"/> so the names track the runtime's ISO 3166 data
+    /// instead of a copy that would silently go stale. Restricted to <see cref="KnownCodes"/>: a
+    /// country the platform cannot resolve from a dialling prefix is not one it will store.
+    /// </remarks>
+    private static readonly Dictionary<string, string> CodeToName = BuildNameMap();
+
+    /// <summary>English name to code, for accepting a name where a code is expected.</summary>
+    private static readonly Dictionary<string, string> NameToCode =
+        CodeToName.ToDictionary(entry => entry.Value, entry => entry.Key, StringComparer.OrdinalIgnoreCase);
+
+    private static Dictionary<string, string> BuildNameMap()
+    {
+        var map = new Dictionary<string, string>(KnownCodes.Count, StringComparer.Ordinal);
+
+        foreach (var code in KnownCodes)
+        {
+            try
+            {
+                map[code] = new RegionInfo(code).EnglishName;
+            }
+            catch (ArgumentException)
+            {
+                // A code this runtime does not know. Skipped rather than fatal: the dialling table
+                // is the platform's own list and may legitimately outrun the installed ICU data,
+                // and one unrecognised country must not stop the type from loading at all.
+            }
+        }
+
+        return map;
     }
 
     /// <summary>

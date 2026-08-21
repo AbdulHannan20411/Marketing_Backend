@@ -160,20 +160,67 @@ public sealed class TemplatesController : ApiControllerBase
         _scope = scope;
     }
 
-    /// <summary>Returns every template.</summary>
+    /// <summary>Returns a searched, filtered page of templates.</summary>
+    /// <remarks>
+    /// Filtering and paging happen in SQL. Cleared filters arrive as the literal <c>all</c>, so
+    /// "parameter absent" and "filter cleared" are the same request rather than two code paths.
+    /// </remarks>
+    /// <param name="query">Search, filters and paging.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <response code="200">The templates.</response>
+    /// <response code="200">The matching page.</response>
     [HttpGet]
     [RequirePermission(Permissions.WhatsApp.TemplatesView)]
-    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<MessageTemplateResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<MessageTemplateResponse>>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAsync(
+        [FromQuery] TemplateQuery query,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
-        return Success(await _whatsApp.GetTemplatesAsync(cancellationToken));
+        return Success(await _whatsApp.SearchTemplatesAsync(query, cancellationToken));
+    }
+
+    /// <summary>Counts templates by approval state, across the whole collection.</summary>
+    /// <remarks>
+    /// Unfiltered on purpose. These render as badges on the status chips and have to stay still
+    /// while an operator clicks between them; counts that answered the active filter would show the
+    /// selected chip's number and every other at zero.
+    /// </remarks>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The counts.</response>
+    [HttpGet("counts")]
+    [RequirePermission(Permissions.WhatsApp.TemplatesView)]
+    [ProducesResponseType(typeof(ApiResponse<TemplateStatusCountsResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetCountsAsync(
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(await _whatsApp.CountTemplatesAsync(cancellationToken));
+    }
+
+    /// <summary>Returns every approved template, unpaged, for the campaign picker.</summary>
+    /// <remarks>
+    /// Deliberately not a page. <c>PageSize</c> is clamped to 100, so a picker built on a large page
+    /// request would silently omit the hundred-and-first template with no error to notice.
+    /// </remarks>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The approved templates.</response>
+    [HttpGet("approved")]
+    [RequirePermission(Permissions.WhatsApp.TemplatesView)]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<MessageTemplateResponse>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetApprovedAsync(
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(await _whatsApp.GetApprovedTemplatesAsync(cancellationToken));
     }
 
     /// <summary>Refreshes templates from Meta.</summary>

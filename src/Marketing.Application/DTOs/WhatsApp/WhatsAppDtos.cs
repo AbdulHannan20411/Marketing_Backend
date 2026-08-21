@@ -1,3 +1,4 @@
+using Marketing.Common.Requests;
 using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Application.DTOs.WhatsApp;
@@ -85,3 +86,49 @@ public sealed record MessageTemplateResponse(
     int TimesUsed,
     DateTimeOffset UpdatedAt,
     string? RejectionReason);
+
+/// <summary>Search, filter and paging for the templates screen.</summary>
+/// <remarks>
+/// Filters carry the literal <c>all</c> when cleared rather than being omitted, matching the
+/// convention <c>/contacts</c> set. The server therefore never has to tell "parameter absent" apart
+/// from "filter cleared", which are the same intent and would otherwise be two code paths.
+/// </remarks>
+public class TemplateQuery : PageRequest
+{
+    /// <summary>Sentinel meaning "do not filter".</summary>
+    public const string All = "all";
+
+    /// <summary>Cards the templates screen renders per page.</summary>
+    public const int GridPageSize = 10;
+
+    /// <summary>Initialises a new instance with the templates screen's page size.</summary>
+    public TemplateQuery() => SetDefaultPageSize(GridPageSize);
+
+    // Search is inherited from PageRequest. It is matched against the template's name and its
+    // body, not only the name: an operator hunting for the template that mentions "shipped" will
+    // not remember it is called order_shipped_v3, and a name-only search reads as broken.
+
+    /// <summary>Approval state to filter by, or <c>all</c>.</summary>
+    public string Status { get; init; } = All;
+
+    /// <summary>Category to filter by, or <c>all</c>.</summary>
+    public string Category { get; init; } = All;
+}
+
+/// <summary>Template counts by approval state, across the whole collection.</summary>
+/// <remarks>
+/// Deliberately unfiltered. The numbers render as badges on the status chips and have to stay still
+/// while an operator clicks between them; counts that responded to the active filter would show
+/// "Pending 3" and every other chip at zero, which answers nothing.
+/// </remarks>
+/// <param name="Total">Every template.</param>
+/// <param name="Approved">Approved by Meta and usable.</param>
+/// <param name="Pending">Submitted and awaiting a verdict.</param>
+/// <param name="Rejected">Refused by Meta.</param>
+/// <param name="Paused">Paused by Meta on recipient feedback.</param>
+public sealed record TemplateStatusCountsResponse(
+    int Total,
+    int Approved,
+    int Pending,
+    int Rejected,
+    int Paused);
