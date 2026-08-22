@@ -61,4 +61,16 @@ public interface IUserRepository : IRepository<User>
     public Task<IReadOnlyList<User>> GetTenantAdministratorsAsync(
         long tenantId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Identifiers of everyone in a tenant, whatever their role or status.</summary>
+    /// <remarks>
+    /// Every member, including inactive ones: switching a workspace off has to reach a suspended
+    /// account too, or reinstating that account later would hand back a live session into a closed
+    /// workspace.
+    /// </remarks>
+    /// <param name="tenantId">Tenant whose members to list.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<IReadOnlyList<long>> GetTenantMemberIdsAsync(
+        long tenantId,
+        CancellationToken cancellationToken = default);
 }

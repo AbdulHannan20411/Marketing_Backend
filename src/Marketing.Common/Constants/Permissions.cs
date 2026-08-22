@@ -47,6 +47,17 @@ public static class Permissions
         public const string Import = "contacts.import";
 
         /// <summary>
+        /// Discover businesses from a places provider and import them as contacts.
+        /// </summary>
+        /// <remarks>
+        /// Separate from <see cref="Import"/> because the two carry different risks. Uploading a
+        /// file the user already holds costs nothing; discovering businesses spends metered provider
+        /// credits against the workspace. Somebody trusted with a spreadsheet is not automatically
+        /// trusted with the search budget.
+        /// </remarks>
+        public const string BusinessImport = "contacts.business_import";
+
+        /// <summary>
         /// Export contacts. Separate from <see cref="View"/> because bulk extraction of personal
         /// data is the action a data-protection reviewer asks about.
         /// </summary>
@@ -206,7 +217,8 @@ public static class Permissions
         Dashboard.View, Dashboard.Statistics, Dashboard.Export,
 
         Contacts.View, Contacts.Create, Contacts.Edit, Contacts.Delete,
-        Contacts.Import, Contacts.Export, Contacts.GroupsManage, Contacts.TagsManage,
+        Contacts.Import, Contacts.BusinessImport, Contacts.Export, Contacts.GroupsManage,
+        Contacts.TagsManage,
 
         WhatsApp.Connect, WhatsApp.Disconnect, WhatsApp.TemplatesView, WhatsApp.TemplatesSync,
         WhatsApp.CampaignsCreate, WhatsApp.CampaignsEdit, WhatsApp.CampaignsDelete,

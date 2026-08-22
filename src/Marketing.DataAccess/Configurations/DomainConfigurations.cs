@@ -185,6 +185,22 @@ public sealed class MessageTemplateConfiguration : BaseEntityConfiguration<Messa
     }
 }
 
+/// <summary>Fluent configuration for the deactivation columns on <see cref="Tenant"/>.</summary>
+public sealed class TenantDeactivationConfiguration : IEntityTypeConfiguration<Tenant>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<Tenant> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.Property(tenant => tenant.DeactivationReason)
+            .HasMaxLength(24)
+            .HasConversion<string>();
+
+        builder.Property(tenant => tenant.DeactivationDetails).HasMaxLength(1000);
+    }
+}
+
 /// <summary>Fluent configuration for <see cref="Campaign"/>.</summary>
 public sealed class CampaignConfiguration : BaseEntityConfiguration<Campaign>
 {

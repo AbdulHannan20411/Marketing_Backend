@@ -347,6 +347,14 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<
             Application.Services.Billing.IInvoiceRenderer, Billing.MigraDocInvoiceRenderer>();
 
+        // Places provider. Bound even when no key is present: an unset key is a supported state
+        // meaning "this deployment does not offer business discovery", which the endpoints report
+        // cleanly rather than failing at startup over a feature most deployments will not use.
+        services.Configure<Places.PlacesOptions>(configuration.GetSection(Places.PlacesOptions.SectionName));
+
+        services.AddHttpClient<Application.Interfaces.IPlaceProvider, Places.GooglePlacesProvider>(
+            client => client.Timeout = TimeSpan.FromSeconds(15));
+
         services.AddTransient<GraphApiErrorHandler>();
         services.AddTransient<TenantAccessTokenHandler>();
 

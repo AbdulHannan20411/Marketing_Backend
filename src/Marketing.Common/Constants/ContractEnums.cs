@@ -839,4 +839,43 @@ public static class ContractEnums
         [JsonStringEnumMemberName("skipped")]
         Skipped,
     }
+
+    /// <summary>Why an owner switched their workspace off.</summary>
+    /// <remarks>
+    /// Wire values are snake_case, so each carries an explicit name. The list is fixed and shared
+    /// with the client; adding one means adding it there too or the radio simply will not appear.
+    /// </remarks>
+    public enum DeactivationReason
+    {
+        /// <summary>Cost.</summary>
+        [JsonStringEnumMemberName("too_expensive")]
+        TooExpensive,
+
+        /// <summary>The platform does not do something they need.</summary>
+        [JsonStringEnumMemberName("missing_features")]
+        MissingFeatures,
+
+        /// <summary>Going to a competitor.</summary>
+        [JsonStringEnumMemberName("switching_provider")]
+        SwitchingProvider,
+
+        /// <summary>The need has gone away.</summary>
+        [JsonStringEnumMemberName("no_longer_needed")]
+        NoLongerNeeded,
+
+        /// <summary>
+        /// Coming back later.
+        /// </summary>
+        /// <remarks>
+        /// Offered deliberately. Without it, people who intend to return pick something that
+        /// misrepresents why they left, which makes the churn data worse rather than better - and
+        /// these are the accounts most worth contacting.
+        /// </remarks>
+        [JsonStringEnumMemberName("temporary_pause")]
+        TemporaryPause,
+
+        /// <summary>Something else. Requires free text, or it says nothing at all.</summary>
+        [JsonStringEnumMemberName("other")]
+        Other,
+    }
 }

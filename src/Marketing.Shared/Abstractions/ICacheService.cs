@@ -42,6 +42,27 @@ public interface ICacheService
         CancellationToken cancellationToken = default)
         where TValue : class;
 
+    /// <summary>
+    /// Increments a counter and returns its new value, setting the expiry on first use.
+    /// </summary>
+    /// <remarks>
+    /// A distinct operation rather than get-then-set, because a quota enforced by two round trips
+    /// is not enforced at all: concurrent callers each read the same value and each write one more
+    /// than it, so the limit is exceeded by however many requests arrive together.
+    /// <para>
+    /// Returns <see langword="null"/> when the cache is unavailable. A caller enforcing a limit must
+    /// decide for itself whether an unavailable cache means allow or deny; this method will not
+    /// choose on its behalf by returning a number it did not read.
+    /// </para>
+    /// </remarks>
+    /// <param name="key">Fully-qualified cache key.</param>
+    /// <param name="expiry">Time to live, applied only when the counter is created.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<long?> IncrementAsync(
+        string key,
+        TimeSpan expiry,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Removes a single key.</summary>
     public Task RemoveAsync(
         string key,

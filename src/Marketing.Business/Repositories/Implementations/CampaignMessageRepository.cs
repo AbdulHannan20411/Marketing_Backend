@@ -21,8 +21,14 @@ public sealed class CampaignMessageRepository : Repository<CampaignMessage>, ICa
     public async Task<IReadOnlyList<DueCampaign>> FindDueCampaignsAsync(
         DateTimeOffset utcNow,
         int maximum,
-        CancellationToken cancellationToken = default) =>
-        await Context.Set<Campaign>()
+        CancellationToken cancellationToken = default)
+    {
+        var activeTenants = Context.Set<Tenant>()
+            .IgnoreQueryFilters()
+            .Where(tenant => !tenant.IsDeleted && tenant.Status == TenantStatus.Active)
+            .Select(tenant => tenant.Id);
+
+        return await Context.Set<Campaign>()
             .AsNoTracking()
             // The poller runs with no principal, so the tenant filter would match nothing. The
             // projection below returns two identifiers and no tenant-owned data; the caller enters
@@ -31,6 +37,13 @@ public sealed class CampaignMessageRepository : Repository<CampaignMessage>, ICa
             .Where(campaign =>
                 !campaign.IsDeleted
                 && campaign.TenantId != null
+
+                // The workspace has to still be switched on. Without this a deactivated or
+                // suspended tenant keeps sending: the poller runs with no principal, so the tenant
+                // filter matches nothing and every campaign row looks eligible on its own merits.
+                // Messages going out from a workspace the owner believes is off is the worst
+                // failure this feature has, and it bills them per conversation.
+                && activeTenants.Contains(campaign.TenantId.Value)
                 && (campaign.Status == CampaignStatus.Sending
                     || (campaign.Status == CampaignStatus.Scheduled
                         && campaign.ScheduledAt != null
@@ -49,6 +62,7 @@ public sealed class CampaignMessageRepository : Repository<CampaignMessage>, ICa
             .Take(maximum)
             .Select(campaign => new DueCampaign(campaign.Id, campaign.TenantId!.Value))
             .ToListAsync(cancellationToken);
+    }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<CampaignMessage>> ClaimPendingAsync(

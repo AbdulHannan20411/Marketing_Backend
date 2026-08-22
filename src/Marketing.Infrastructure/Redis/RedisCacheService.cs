@@ -160,6 +160,41 @@ public sealed class RedisCacheService : ICacheService
     }
 
     /// <inheritdoc />
+    public async Task<long?> IncrementAsync(
+        string key,
+        TimeSpan expiry,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+
+        if (!IsAvailable)
+        {
+            return null;
+        }
+
+        try
+        {
+            var database = GetDatabase();
+            var value = await database.StringIncrementAsync(key);
+
+            // Only on creation. Re-applying it on every hit would slide the window forward for as
+            // long as the caller keeps calling, so a busy user would never reach the reset.
+            if (value == 1)
+            {
+                await database.KeyExpireAsync(key, expiry);
+            }
+
+            return value;
+        }
+        catch (Exception exception) when (IsCacheFailure(exception))
+        {
+            OpenCircuit(exception, nameof(IncrementAsync), key);
+
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
     public async Task RemoveAsync(string key, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);

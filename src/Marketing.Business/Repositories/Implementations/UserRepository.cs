@@ -104,4 +104,15 @@ public sealed class UserRepository : Repository<User>, IUserRepository
                                && userRole.Role.Name == Roles.Admin))
             .OrderBy(user => user.Id)
             .ToListAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<long>> GetTenantMemberIdsAsync(
+        long tenantId,
+        CancellationToken cancellationToken = default) =>
+        await Set
+            .IgnoreQueryFilters()
+            .Where(user => !user.IsDeleted && user.TenantId == tenantId)
+            .OrderBy(user => user.Id)
+            .Select(user => user.Id)
+            .ToListAsync(cancellationToken);
 }

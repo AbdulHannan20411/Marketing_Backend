@@ -44,6 +44,28 @@ public sealed class Tenant : BaseEntity
     /// <summary>Instant the tenant was suspended, in UTC.</summary>
     public DateTimeOffset? SuspendedOn { get; set; }
 
+    /// <summary>Instant the owner switched the workspace off.</summary>
+    public DateTimeOffset? DeactivatedOn { get; set; }
+
+    /// <summary>Why they switched it off.</summary>
+    public Marketing.Common.Constants.ContractEnums.DeactivationReason? DeactivationReason { get; set; }
+
+    /// <summary>What they said, when they said anything.</summary>
+    public string? DeactivationDetails { get; set; }
+
+    /// <summary>Who did it. Recorded because "the workspace went dark" is asked about later.</summary>
+    public long? DeactivatedByUserId { get; set; }
+
+    /// <summary>
+    /// Date the data stops being kept, or null when no promise was made.
+    /// </summary>
+    /// <remarks>
+    /// Shown to the customer verbatim, which makes it a commitment rather than a note. If deletion
+    /// after this date is ever automated, a workspace that comes back must be taken out of that
+    /// queue - deleting a returning customer would be unrecoverable and entirely self-inflicted.
+    /// </remarks>
+    public DateOnly? DataRetainedUntil { get; set; }
+
     /// <summary>Commercial plan band shown on the platform screens.</summary>
     public Marketing.Common.Constants.ContractEnums.TenantPlan PlanBand { get; set; } =
         Marketing.Common.Constants.ContractEnums.TenantPlan.Starter;

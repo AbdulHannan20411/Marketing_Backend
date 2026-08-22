@@ -257,6 +257,34 @@ public static class AppConstants
 
         /// <summary>Tenant settings blob.</summary>
         public static string TenantSettings(long tenantId) => $"{TenantPrefix(tenantId)}settings";
+
+        /// <summary>
+        /// One page of business-discovery results, keyed on the search itself.
+        /// </summary>
+        /// <remarks>
+        /// Coordinates are rounded by the caller before they reach here, so nudging a pin a few
+        /// metres hits the same entry rather than paying the provider again.
+        /// </remarks>
+        public static string BusinessSearch(long tenantId, string fingerprint) =>
+            $"{TenantPrefix(tenantId)}discovery:search:{fingerprint}";
+
+        /// <summary>
+        /// The results of one search, so an import can resolve provider ids without re-querying.
+        /// </summary>
+        /// <remarks>
+        /// Tenant-prefixed like everything else, which is what stops one workspace importing
+        /// another's results by guessing a search identifier.
+        /// </remarks>
+        public static string BusinessSearchResults(long tenantId, string searchId) =>
+            $"{TenantPrefix(tenantId)}discovery:results:{searchId}";
+
+        /// <summary>Rolling counter of searches a user has run, for rate limiting.</summary>
+        public static string BusinessSearchQuota(long tenantId, long userId, string window) =>
+            $"{TenantPrefix(tenantId)}discovery:quota:user:{userId}:{window}";
+
+        /// <summary>Rolling counter of searches a tenant has run, for rate limiting.</summary>
+        public static string BusinessSearchTenantQuota(long tenantId, string window) =>
+            $"{TenantPrefix(tenantId)}discovery:quota:tenant:{window}";
     }
 
     // -------------------------------------------------------------------------------------
@@ -280,6 +308,16 @@ public static class AppConstants
 
         /// <summary>Closed. Retained only for the contractual window.</summary>
         Cancelled = 3,
+
+        /// <summary>
+        /// Switched off by its own owner. Access ends for everyone; the data is kept.
+        /// </summary>
+        /// <remarks>
+        /// Distinct from <see cref="Suspended"/>, which the platform imposes. Both stop the
+        /// workspace working, but one is a decision the customer made and the other is one made
+        /// about them - and churn reporting that cannot tell them apart is reporting nothing.
+        /// </remarks>
+        Deactivated = 4,
     }
 
     /// <summary>Lifecycle state of a user account.</summary>

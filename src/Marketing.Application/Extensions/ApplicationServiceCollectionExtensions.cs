@@ -78,6 +78,10 @@ public static class ApplicationServiceCollectionExtensions
         // Stateless and thread-safe: the tzdb provider it reads is immutable and cached by
         // NodaTime, so there is nothing per-request to hold.
         services.AddSingleton<IRecurrenceCalculator, RecurrenceCalculator>();
+        services.AddScoped<Services.BusinessDiscovery.IBusinessDiscoveryService,
+            Services.BusinessDiscovery.BusinessDiscoveryService>();
+        services.AddScoped<Services.Workspace.IWorkspaceDeactivationService,
+            Services.Workspace.WorkspaceDeactivationService>();
         services.AddScoped<ISubscriptionExpiryReminderService, SubscriptionExpiryReminderService>();
         services.AddScoped<ICampaignWriteService, CampaignWriteService>();
         services.AddScoped<IAdminAccountService, AdminAccountService>();
