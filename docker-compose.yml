@@ -1,22 +1,34 @@
 name: marketing-backend
 
+# Every credential comes from .env. Nothing secret is written here, so this file
+# is safe to commit and to read in a pull request.
+#
+# The ${VAR:?message} form fails the command with that message when a variable
+# is missing, rather than starting a container with an empty password.
+
 services:
   postgres:
     image: postgres:17-alpine
     container_name: marketing-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: marketing
-      POSTGRES_USER: marketing
-      POSTGRES_PASSWORD: marketing_dev_password
+      POSTGRES_DB: ${POSTGRES_DB:-marketing}
+      POSTGRES_USER: ${POSTGRES_USER:-marketing}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       # Deterministic collation keeps index ordering identical across machines.
       POSTGRES_INITDB_ARGS: "--locale-provider=icu --icu-locale=en-US --encoding=UTF8"
     ports:
-      - "5432:5432"
+      # Host-side only. The API reaches the database as postgres:5432 regardless.
+      # Delete this block in production and the database is reachable only from
+      # this network, which is the posture you want.
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U marketing -d marketing"]
+      # -U and -d matter: without them pg_isready reports the server is up while
+      # the database this application needs is still being created, and the API
+      # starts into a connection failure.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-marketing} -d ${POSTGRES_DB:-marketing}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -35,7 +47,7 @@ services:
     container_name: marketing-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     command:
       - "redis-server"
       - "--appendonly"
@@ -52,6 +64,127 @@ services:
       timeout: 3s
       retries: 5
 
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: marketing-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-marketing}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
+    ports:
+      # Management UI. Remove in production, or bind it to 127.0.0.1 only.
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: marketing-api:latest
+    container_name: marketing-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        # The API fails to start if it cannot reach a migrated database, by
+        # design - so waiting for health here is what turns a crash loop on a
+        # cold start into an orderly boot.
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_HTTP_PORTS: 8080
+
+      # Double underscore is .NET's separator for nested configuration, so
+      # Database__ConnectionString overrides "Database": { "ConnectionString" }.
+      #
+      # Host is the compose service name, never localhost: inside this container
+      # localhost is the API itself, and the connection would be refused.
+      Database__ConnectionString: >-
+        Host=postgres;Port=5432;Database=${POSTGRES_DB:-marketing};Username=${POSTGRES_USER:-marketing};Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env};Include Error Detail=false;Maximum Pool Size=50
+      Database__ApplyMigrationsOnStartup: ${APPLY_MIGRATIONS_ON_STARTUP:-false}
+      Database__SeedOnStartup: ${SEED_ON_STARTUP:-false}
+
+      Redis__ConnectionString: redis:6379
+      Redis__Enabled: ${REDIS_ENABLED:-true}
+
+      RabbitMQ__Host: rabbitmq
+      RabbitMQ__Port: 5672
+      RabbitMQ__Username: ${RABBITMQ_USER:-marketing}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
+      RabbitMQ__Enabled: ${RABBITMQ_ENABLED:-true}
+
+      Authentication__SigningKey: ${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY in .env}
+      Authentication__Issuer: ${JWT_ISSUER:?set JWT_ISSUER in .env}
+      Authentication__Audience: ${JWT_AUDIENCE:?set JWT_AUDIENCE in .env}
+
+      Bootstrap__AdministratorEmail: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      Bootstrap__AdministratorPassword: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+
+      WhatsApp__AppId: ${WHATSAPP_APP_ID:-}
+      WhatsApp__AppSecret: ${WHATSAPP_APP_SECRET:-}
+      WhatsApp__WebhookVerifyToken: ${WHATSAPP_WEBHOOK_VERIFY_TOKEN:-}
+
+      Places__ApiKey: ${PLACES_API_KEY:-}
+
+      Smtp__Host: ${SMTP_HOST:-}
+      Smtp__Port: ${SMTP_PORT:-587}
+      Smtp__Username: ${SMTP_USERNAME:-}
+      Smtp__Password: ${SMTP_PASSWORD:-}
+      Smtp__FromAddress: ${SMTP_FROM_ADDRESS:-}
+      Smtp__FromName: ${SMTP_FROM_NAME:-}
+
+      Email__ClientBaseUrl: ${CLIENT_BASE_URL:-http://localhost:4200}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health/live"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+
+  # Runs pending migrations, then exits. Not started by `docker compose up`;
+  # it belongs to the "migrate" profile and is invoked deliberately.
+  #
+  #   docker compose --profile migrate run --rm migrate
+  #
+  # Separate from the API because several API replicas starting at once would
+  # otherwise race to migrate the same database.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrations
+    image: marketing-migrate:latest
+    profiles: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      Database__ConnectionString: >-
+        Host=postgres;Port=5432;Database=${POSTGRES_DB:-marketing};Username=${POSTGRES_USER:-marketing};Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # The design-time factory needs these to construct the host, even though a
+      # migration never issues a token or sends a message.
+      Authentication__SigningKey: ${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY in .env}
+      Authentication__Issuer: ${JWT_ISSUER:-migration}
+      Authentication__Audience: ${JWT_AUDIENCE:-migration}
+    # Entrypoint and default command come from the migrations stage, so
+    # `run --rm migrate` applies pending migrations and exits. Override the
+    # command to do something else with the same tooling, for example:
+    #   docker compose --profile migrate run --rm migrate migrations list \
+    #     --project src/Marketing.DataAccess --startup-project src/Marketing.API
+
 volumes:
   postgres-data:
   redis-data:
+  rabbitmq-data:

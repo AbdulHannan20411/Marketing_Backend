@@ -1,0 +1,49 @@
+# Everything the build does not need, and several things it must not have.
+#
+# This file is not housekeeping. Without it, `docker build` sends the whole
+# working tree - including bin/, obj/ and any local secrets - into the build
+# context, which is slow, invalidates the layer cache on every rebuild, and can
+# bake a developer's credentials into an image.
+
+# ── Build output ─────────────────────────────────────────────────────────────
+# Critically: a host bin/ or obj/ copied into the image would collide with the
+# container's own restore and produce errors that look nothing like their cause.
+**/bin/
+**/obj/
+**/out/
+**/publish/
+**/TestResults/
+**/*.user
+**/*.suo
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+**/appsettings.Development.json
+**/appsettings.Local.json
+**/secrets.json
+**/*.pfx
+**/*.key
+**/*.pem
+
+# ── Source control and tooling ───────────────────────────────────────────────
+.git/
+.gitignore
+.gitattributes
+.github/
+.vs/
+.vscode/
+.idea/
+*.sln.DotSettings.user
+
+# ── Tests ────────────────────────────────────────────────────────────────────
+# The published image restores and builds only Marketing.API and its references.
+tests/
+
+# ── Documentation and local files ────────────────────────────────────────────
+*.md
+docs/
+Dockerfile*
+docker-compose*.yml
+.dockerignore
