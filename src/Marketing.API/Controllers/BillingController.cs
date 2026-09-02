@@ -47,6 +47,35 @@ public sealed class SubscriptionController : ApiControllerBase
         return Success(await _billing.GetSubscriptionAsync(cancellationToken));
     }
 
+    /// <summary>Returns what the workspace is allowed to do.</summary>
+    /// <remarks>
+    /// Readable by any authenticated member, deliberately carrying no permission requirement.
+    /// <para>
+    /// The shell fetches this on every page load to decide which navigation and features exist.
+    /// Gating it on <c>settings.subscription</c> - as the sibling endpoint above is, because that
+    /// one carries what the workspace pays - meant every employee got a 403 on each page load and
+    /// ran with entitlements permanently unknown. An employee needs to know their workspace has
+    /// WhatsApp enabled; they do not need to know what it costs.
+    /// </para>
+    /// <para>
+    /// This response carries no amount, currency, renewal date or auto-renew flag. Anything
+    /// billing-specific belongs on the endpoint above, behind the permission.
+    /// </para>
+    /// </remarks>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The workspace's plan, modules, limits and usage.</response>
+    [HttpGet("entitlements")]
+    [ProducesResponseType(typeof(ApiResponse<EntitlementsSnapshot>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetEntitlementsAsync(
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(await _billing.GetEntitlementsAsync(cancellationToken));
+    }
+
     /// <summary>Moves to another plan.</summary>
     /// <remarks>
     /// Upgrades apply immediately, downgrades at period end. A downgrade below current usage is

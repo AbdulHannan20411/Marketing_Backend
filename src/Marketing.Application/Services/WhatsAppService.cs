@@ -58,6 +58,7 @@ public sealed class WhatsAppService : IWhatsAppService
     private readonly IQueryExecutor _queries;
     private readonly IWhatsAppGateway _gateway;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ISecretProtector _protector;
     private readonly ITenantContext _tenantContext;
 
     /// <summary>Initialises a new instance.</summary>
@@ -67,6 +68,7 @@ public sealed class WhatsAppService : IWhatsAppService
         IQueryExecutor queries,
         IWhatsAppGateway gateway,
         IUnitOfWork unitOfWork,
+        ISecretProtector protector,
         ITenantContext tenantContext)
     {
         _connections = connections;
@@ -74,6 +76,7 @@ public sealed class WhatsAppService : IWhatsAppService
         _queries = queries;
         _gateway = gateway;
         _unitOfWork = unitOfWork;
+        _protector = protector;
         _tenantContext = tenantContext;
     }
 
@@ -113,7 +116,15 @@ public sealed class WhatsAppService : IWhatsAppService
             return WhatsAppConnectionResponse.Disconnected();
         }
 
-        var number = await _gateway.GetPhoneNumberAsync(phoneNumberId, cancellationToken);
+        // Passed explicitly, like every other outbound call. A Super Admin refreshing on a
+        // customer's behalf carries the tenant in an explicit scope rather than in their own claims,
+        // and the handler that would otherwise supply the token resolves the tenant in a scope that
+        // cannot see it - so it sends none and Meta refuses the call.
+        var accessToken = connection.EncryptedAccessToken is { Length: > 0 } encrypted
+            ? _protector.Unprotect(encrypted)
+            : null;
+
+        var number = await _gateway.GetPhoneNumberAsync(phoneNumberId, accessToken, cancellationToken);
 
         connection.DisplayPhoneNumber = number.DisplayPhoneNumber;
         connection.VerifiedName = number.VerifiedName ?? connection.VerifiedName;
@@ -304,7 +315,11 @@ public sealed class WhatsAppService : IWhatsAppService
                 "Connect a WhatsApp account before syncing templates.");
         }
 
-        var remote = await _gateway.GetTemplatesAsync(wabaId, cancellationToken);
+        var accessToken = connection.EncryptedAccessToken is { Length: > 0 } encrypted
+            ? _protector.Unprotect(encrypted)
+            : null;
+
+        var remote = await _gateway.GetTemplatesAsync(wabaId, accessToken, cancellationToken);
         var tenantId = _tenantContext.RequireTenantId();
 
         var existing = await _queries.ToListAsync(_templates.Query(asNoTracking: false), cancellationToken);

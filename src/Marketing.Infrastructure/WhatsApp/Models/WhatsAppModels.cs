@@ -121,7 +121,14 @@ public sealed record SendTemplateMessageRequest(
 public sealed record TemplateMessagePayload(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("language")] TemplateLanguage Language,
-    [property: JsonPropertyName("components")] IReadOnlyList<TemplateComponent>? Components);
+
+    // Omitted entirely when there is nothing to substitute, not serialised as null. A template
+    // with no placeholders - hello_world, for instance - is refused with "parameter format does
+    // not match" if the key is present and empty, because Meta reads its presence as a promise
+    // that parameters follow. The default serialiser writes nulls, so this has to say otherwise.
+    [property: JsonPropertyName("components")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<TemplateComponent>? Components);
 
 /// <summary>Template language selector.</summary>
 /// <param name="Code">BCP 47 language tag, for example <c>en_GB</c>.</param>

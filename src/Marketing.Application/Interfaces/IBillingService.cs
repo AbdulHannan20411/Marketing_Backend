@@ -15,6 +15,17 @@ public interface IBillingService
     /// </summary>
     public Task<SubscriptionSnapshot> GetSubscriptionAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Returns what the workspace is allowed to do, without anything about what it pays.
+    /// </summary>
+    /// <remarks>
+    /// Readable by any member. The shell fetches it on every page load to decide which navigation
+    /// and features exist, so gating it on a billing permission left every employee running with
+    /// entitlements permanently unknown and a 403 on each load.
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<EntitlementsSnapshot> GetEntitlementsAsync(CancellationToken cancellationToken = default);
+
     /// <summary>Returns the plans a customer may buy. Excludes inactive and archived.</summary>
     public Task<IReadOnlyList<SubscriptionPlanResponse>> GetPurchasablePlansAsync(
         CancellationToken cancellationToken = default);

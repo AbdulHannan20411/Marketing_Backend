@@ -211,6 +211,23 @@ public static class Permissions
         public const string Plans = "platform.plans";
     }
 
+    /// <summary>
+    /// The floor every member of a workspace holds, whatever anybody grants or revokes.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately one permission, not a starter pack. Without <see cref="Dashboard.View"/> there
+    /// is no landing route, so a new employee signs in and every screen - including the one they
+    /// arrive on - reports a permission error. That is not "an empty application waiting for
+    /// access"; it is an account that appears broken to the person using it.
+    /// <para>
+    /// It is a floor rather than a default: an administrator can add to it but cannot revoke it,
+    /// because doing so produces an account that can authenticate and then do nothing at all. Keep
+    /// this list short - everything added here is granted to people nobody chose to grant it to,
+    /// which is the opposite failure and just as real.
+    /// </para>
+    /// </remarks>
+    public static readonly IReadOnlyList<string> Baseline = [Dashboard.View];
+
     /// <summary>Every permission the platform recognises.</summary>
     public static readonly IReadOnlyList<string> All =
     [

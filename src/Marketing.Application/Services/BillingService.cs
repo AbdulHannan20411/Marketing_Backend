@@ -89,6 +89,26 @@ public sealed class BillingService : IBillingService
     }
 
     /// <inheritdoc />
+    public async Task<EntitlementsSnapshot> GetEntitlementsAsync(CancellationToken cancellationToken = default)
+    {
+        var (subscription, plan) = await LoadSubscriptionAsync(cancellationToken);
+        var mapped = MapPlan(plan);
+
+        // Built from the plan and the subscription's state, never from MapSubscription: that
+        // carries Amount, Currency, BillingCycle, NextRenewalAt and AutoRenew, and the whole point
+        // of this endpoint is that it can be read by somebody with no billing permission.
+        return new EntitlementsSnapshot(
+            mapped.Id,
+            mapped.Name,
+            subscription.Status,
+            subscription.ExpiresAt,
+            subscription.TrialEndsAt,
+            mapped.Modules,
+            mapped.Limits,
+            await BuildUsageAsync(plan, subscription, cancellationToken));
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<SubscriptionPlanResponse>> GetPurchasablePlansAsync(
         CancellationToken cancellationToken = default)
     {

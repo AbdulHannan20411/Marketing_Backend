@@ -104,6 +104,38 @@ public sealed record SubscriptionResponse(
 public sealed record UsageMetric(UsageMetricKey Key, string Label, int Used, int? Limit, string Unit);
 
 /// <summary>
+/// What a workspace is allowed to do, for any member of it.
+/// </summary>
+/// <remarks>
+/// Deliberately separate from <see cref="SubscriptionSnapshot"/>, which is gated on
+/// <c>settings.subscription</c> because it carries what the workspace pays. Every member needs to
+/// know which modules exist and where the limits are - the shell reads it on every page load to
+/// decide what to render - and an employee should not have to hold a billing permission to learn
+/// that their own workspace has WhatsApp enabled.
+/// <para>
+/// It carries no amount, no currency, no renewal date and no auto-renew flag. Plan prices are
+/// public and appear on the pricing page; what <em>this</em> workspace was charged is not.
+/// </para>
+/// </remarks>
+/// <param name="PlanId">Plan identifier.</param>
+/// <param name="PlanName">Plan name, for display.</param>
+/// <param name="Status">Subscription state, so the shell knows whether the workspace is locked.</param>
+/// <param name="ExpiresAt">Instant access lapses without renewal.</param>
+/// <param name="TrialEndsAt">Instant the trial ends, when there is one.</param>
+/// <param name="Modules">Which feature modules the plan includes.</param>
+/// <param name="Limits">The plan's ceilings.</param>
+/// <param name="Usage">Current consumption against those ceilings.</param>
+public sealed record EntitlementsSnapshot(
+    string PlanId,
+    string PlanName,
+    SubscriptionStatus Status,
+    DateTimeOffset ExpiresAt,
+    DateTimeOffset? TrialEndsAt,
+    IReadOnlyDictionary<string, bool> Modules,
+    PlanLimits Limits,
+    IReadOnlyList<UsageMetric> Usage);
+
+/// <summary>
 /// The subscription screen in one payload.
 /// <para>
 /// Usage is computed live rather than from a nightly rollup: the client renders every gauge and

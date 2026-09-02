@@ -24,16 +24,22 @@ public interface IWhatsAppGateway
 
     /// <summary>Reads a phone number's registration details, verifying the connection works.</summary>
     /// <param name="phoneNumberId">Meta phone number identifier.</param>
+    /// <param name="accessToken">
+    /// Bearer token when the caller already holds one, or null to use the stored one.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<MetaPhoneNumber> GetPhoneNumberAsync(
         string phoneNumberId,
+        string? accessToken = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>Lists every template on a WhatsApp Business Account, following pagination.</summary>
     /// <param name="wabaId">WhatsApp Business Account identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="accessToken">Bearer token when the caller holds one, or null for the stored one.</param>
     public Task<IReadOnlyList<MetaTemplate>> GetTemplatesAsync(
         string wabaId,
+        string? accessToken = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -44,6 +50,10 @@ public interface IWhatsAppGateway
     /// <param name="templateName">Template name as registered with Meta.</param>
     /// <param name="languageCode">Template language tag.</param>
     /// <param name="bodyParameters">Ordered values filling the body placeholders.</param>
+    /// <param name="accessToken">
+    /// Bearer token when the caller holds one, or null to use the stored one. Background jobs pass
+    /// it explicitly, having no signed-in user for the handler to resolve a tenant from.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Meta's message identifier, which later delivery receipts are keyed by.</returns>
     public Task<string> SendTemplateAsync(
@@ -52,6 +62,7 @@ public interface IWhatsAppGateway
         string templateName,
         string languageCode,
         IReadOnlyList<string> bodyParameters,
+        string? accessToken = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

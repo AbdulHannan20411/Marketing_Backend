@@ -60,6 +60,48 @@ public static class Countries
     private const int MaxPrefixLength = 3;
 
     /// <summary>
+    /// ISO code to dialling prefix, the reverse of <see cref="PrefixToCode"/>.
+    /// </summary>
+    /// <remarks>
+    /// Needed to turn a nationally-formatted number into an international one. Built by inverting
+    /// the same table so the two can never disagree; where a prefix is shared, the first entry wins,
+    /// which matches the deliberate choice recorded on the dialling table itself.
+    /// </remarks>
+    private static readonly Dictionary<string, string> CodeToPrefix = BuildCodeMap();
+
+    /// <summary>
+    /// Returns the international dialling prefix for a country, without the leading plus.
+    /// </summary>
+    /// <param name="isoCode">ISO 3166-1 alpha-2 code.</param>
+    /// <returns>The prefix, for example <c>92</c>, or null when the country is unknown.</returns>
+    public static string? ToDiallingCode(string? isoCode)
+    {
+        if (string.IsNullOrWhiteSpace(isoCode))
+        {
+            return null;
+        }
+
+        return CodeToPrefix.GetValueOrDefault(isoCode.Trim().ToUpperInvariant());
+    }
+
+    private static Dictionary<string, string> BuildCodeMap()
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var (prefix, code) in PrefixToCode)
+        {
+            // Shortest prefix wins for a shared code, matching how the forward lookup resolves +1
+            // and +7 to the larger member of the plan.
+            if (!map.TryGetValue(code, out var existing) || prefix.Length < existing.Length)
+            {
+                map[code] = prefix;
+            }
+        }
+
+        return map;
+    }
+
+    /// <summary>
     /// Returns the display name for a stored country value.
     /// </summary>
     /// <remarks>

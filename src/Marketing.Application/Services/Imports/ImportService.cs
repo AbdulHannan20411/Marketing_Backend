@@ -89,9 +89,25 @@ public sealed class ImportService : IImportService
     private static readonly string[] TemplateColumns =
         ["Full Name", "Phone Number", "Email", "Country", "Status", "Tags", "Groups"];
 
-    /// <summary>A filled-in example row, so the expected format of each column is unambiguous.</summary>
-    private static readonly string[] TemplateExample =
-        ["Jane Doe", "+14155552671", "jane@example.com", "US", "Subscribed", "vip;newsletter", "Customers"];
+    /// <summary>
+    /// Filled-in example rows, so the expected format of each column is unambiguous.
+    /// </summary>
+    /// <remarks>
+    /// Two rows, from different countries, and both numbers deliberately in full international form
+    /// with the country code.
+    /// <para>
+    /// This is the cheapest fix available for a whole class of failure. A file that opens showing
+    /// only a US number teaches nothing to somebody in a country where people write
+    /// <c>0336 7890092</c>; that number imports without complaint, looks correct on every screen,
+    /// and is then refused by Meta at send time. The second row exists to make the country code
+    /// look like part of the format rather than part of the example.
+    /// </para>
+    /// </remarks>
+    private static readonly string[][] TemplateExamples =
+    [
+        ["Jane Doe", "+14155552671", "jane@example.com", "US", "Subscribed", "vip;newsletter", "Customers"],
+        ["Ayesha Khan", "+923367890092", "ayesha@example.com", "PK", "Subscribed", "vip", "Customers"],
+    ];
 
     private readonly IRepository<ContactImportBatch> _batches;
     private readonly IRepository<ContactImportExport> _exports;
@@ -357,7 +373,11 @@ public sealed class ImportService : IImportService
         var csv = new StringBuilder();
 
         csv.AppendLine(string.Join(',', TemplateColumns));
-        csv.AppendLine(string.Join(',', TemplateExample));
+
+        foreach (var example in TemplateExamples)
+        {
+            csv.AppendLine(string.Join(',', example));
+        }
 
         // A byte-order mark, purely so Excel opens the file as UTF-8. Without it, a name with an
         // accent in it renders as mojibake the first time an operator opens the template.

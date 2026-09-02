@@ -57,9 +57,16 @@ public sealed class MetaWhatsAppGateway : IWhatsAppGateway
     /// <inheritdoc />
     public async Task<MetaPhoneNumber> GetPhoneNumberAsync(
         string phoneNumberId,
+        string? accessToken = null,
         CancellationToken cancellationToken = default)
     {
-        var number = await _client.GetPhoneNumberAsync(phoneNumberId, cancellationToken);
+        // Explicit when the caller has one. During onboarding the token has only just been written
+        // and the handler that normally looks it up runs in its own dependency-injection scope,
+        // which does not see the tenant the request is scoped to.
+        var number = await _client.GetPhoneNumberAsync(
+            phoneNumberId,
+            accessToken is null ? null : Bearer(accessToken),
+            cancellationToken);
 
         return new MetaPhoneNumber(
             number.Id,
@@ -129,6 +136,7 @@ public sealed class MetaWhatsAppGateway : IWhatsAppGateway
     /// <inheritdoc />
     public async Task<IReadOnlyList<MetaTemplate>> GetTemplatesAsync(
         string wabaId,
+        string? accessToken = null,
         CancellationToken cancellationToken = default)
     {
         var templates = new List<MetaTemplate>();
@@ -138,7 +146,12 @@ public sealed class MetaWhatsAppGateway : IWhatsAppGateway
         // templates would otherwise appear to lose the rest on every sync.
         for (var page = 0; page < MaxTemplatePages; page++)
         {
-            var response = await _client.GetTemplatesAsync(wabaId, TemplatePageSize, cursor, cancellationToken);
+            var response = await _client.GetTemplatesAsync(
+                wabaId,
+                TemplatePageSize,
+                cursor,
+                accessToken is null ? null : Bearer(accessToken),
+                cancellationToken);
 
             templates.AddRange(response.Data.Select(template => new MetaTemplate(
                 template.Id,
@@ -165,6 +178,7 @@ public sealed class MetaWhatsAppGateway : IWhatsAppGateway
         string templateName,
         string languageCode,
         IReadOnlyList<string> bodyParameters,
+        string? accessToken = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(bodyParameters);
@@ -183,7 +197,11 @@ public sealed class MetaWhatsAppGateway : IWhatsAppGateway
             to,
             new TemplateMessagePayload(templateName, new TemplateLanguage(languageCode), components));
 
-        var response = await _client.SendMessageAsync(phoneNumberId, request, cancellationToken);
+        var response = await _client.SendMessageAsync(
+            phoneNumberId,
+            request,
+            accessToken is null ? null : Bearer(accessToken),
+            cancellationToken);
 
         // Meta accepts one message and returns one id. An empty array means the request was
         // accepted but nothing was queued, which must not be reported as a successful send.

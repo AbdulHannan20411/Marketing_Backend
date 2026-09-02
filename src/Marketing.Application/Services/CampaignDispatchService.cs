@@ -74,6 +74,7 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IWhatsAppGateway _gateway;
+    private readonly ISecretProtector _protector;
     private readonly IRealtimeNotifier _realtime;
     private readonly ITenantContext _tenantContext;
     private readonly IDateTimeProvider _clock;
@@ -92,6 +93,7 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
         IWhatsAppGateway gateway,
+        ISecretProtector protector,
         IRealtimeNotifier realtime,
         ITenantContext tenantContext,
         IDateTimeProvider clock,
@@ -108,6 +110,7 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
         _queries = queries;
         _unitOfWork = unitOfWork;
         _gateway = gateway;
+        _protector = protector;
         _realtime = realtime;
         _tenantContext = tenantContext;
         _clock = clock;
@@ -170,6 +173,15 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
             return;
         }
 
+        // Decrypted here and passed down to each send, rather than left to the handler that
+        // normally looks it up. That handler resolves the tenant inside its own dependency-injection
+        // scope, and a scheduled job has no signed-in user for it to fall back on - so it finds no
+        // tenant, sends no credential, and Meta refuses every message with "an access token is
+        // required". The connection is already loaded here; using it is both cheaper and honest.
+        var accessToken = connection.EncryptedAccessToken is { Length: > 0 } encrypted
+            ? _protector.Unprotect(encrypted)
+            : null;
+
         var template = await LoadTemplateAsync(campaign, cancellationToken);
 
         if (template is null)
@@ -216,7 +228,7 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            await SendAsync(campaign, message, phoneNumberId, template, cancellationToken);
+            await SendAsync(campaign, message, phoneNumberId, accessToken, template, cancellationToken);
         }
 
         // Written once for the whole batch. Saving per message would triple the round trips to the
@@ -473,7 +485,10 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
                     groupIds.Contains(member.ContactGroupId)
                     && !member.Contact.IsDeleted
                     && member.Contact.Status == ContactStatus.Subscribed)
-                .Select(member => new { member.ContactId, member.Contact.PhoneNumber })
+                // The normalised form, not the display one. This value goes straight to Meta,
+                // which wants a dialable international number - the display column carries a
+                // leading plus and whatever punctuation the contact was saved with.
+                .Select(member => new { member.ContactId, PhoneNumber = member.Contact.NormalizedPhoneNumber })
                 .Distinct(),
             cancellationToken);
 
@@ -513,6 +528,7 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
         Campaign campaign,
         CampaignMessage message,
         string phoneNumberId,
+        string? accessToken,
         MessageTemplate template,
         CancellationToken cancellationToken)
     {
@@ -528,6 +544,7 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
                 // Empty by design: templates carrying placeholders are refused before the batch
                 // starts, so anything reaching here has nothing to substitute.
                 [],
+                accessToken,
                 cancellationToken);
 
             message.MetaMessageId = metaMessageId;

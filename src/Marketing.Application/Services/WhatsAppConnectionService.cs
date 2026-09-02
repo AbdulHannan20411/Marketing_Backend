@@ -178,15 +178,30 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
             // connected-looking account that can never receive anything.
             await _gateway.SubscribeToWebhooksAsync(wabaId, accessToken, cancellationToken);
 
-            // Registration is what makes the number able to send. The PIN is two-factor material
-            // Meta will ask for again if the number is ever re-registered, so it is generated once
-            // and kept rather than regenerated on each attempt.
+            // Registration is what makes a freshly onboarded number able to send. The PIN is
+            // two-factor material Meta will ask for again if the number is ever re-registered, so
+            // it is generated once and kept rather than regenerated on each attempt.
             connection.RegistrationPin ??= NewRegistrationPin();
 
-            await _gateway.RegisterPhoneNumberAsync(
-                phoneNumberId, connection.RegistrationPin, accessToken, cancellationToken);
+            // Not fatal when it fails. A number that is already registered - every Meta test
+            // number, and any number onboarded through Embedded Signup - rejects a second
+            // registration because the PIN it already holds is not the one being offered. That is
+            // not a broken connection; it is a number that needed no registering.
+            //
+            // Whether the number actually works is settled by the profile read below, which is the
+            // honest test. Treating this call as decisive made every test number impossible to
+            // connect.
+            try
+            {
+                await _gateway.RegisterPhoneNumberAsync(
+                    phoneNumberId, connection.RegistrationPin, accessToken, cancellationToken);
+            }
+            catch (ExternalServiceException exception)
+            {
+                LogRegistrationSkipped(exception, phoneNumberId);
+            }
 
-            var number = await _gateway.GetPhoneNumberAsync(phoneNumberId, cancellationToken);
+            var number = await _gateway.GetPhoneNumberAsync(phoneNumberId, accessToken, cancellationToken);
 
             connection.DisplayPhoneNumber = number.DisplayPhoneNumber;
             connection.VerifiedName = number.VerifiedName ?? string.Empty;
@@ -297,6 +312,13 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         Level = LogLevel.Warning,
         Message = "Could not verify WhatsApp number {PhoneNumberId} for tenant {TenantId}.")]
     private partial void LogVerificationFailed(Exception exception, long tenantId, string phoneNumberId);
+
+    [LoggerMessage(
+        EventId = 2604,
+        Level = LogLevel.Information,
+        Message = "Registration skipped for number {PhoneNumberId}: it is already registered. "
+                  + "The profile read decides whether the number is usable.")]
+    private partial void LogRegistrationSkipped(Exception exception, string phoneNumberId);
 
     [LoggerMessage(
         EventId = 2603,

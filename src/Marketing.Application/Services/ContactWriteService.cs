@@ -71,9 +71,12 @@ public sealed class ContactWriteService : IContactWriteService
         await _planGuard.EnsureContactCapacityAsync(1, cancellationToken);
 
         var fullName = ContactRules.NormaliseName(request.FullName);
-        var normalized = ContactRules.NormalisePhone(request.PhoneNumber);
         var email = ContactRules.NormaliseEmail(request.Email);
+
+        // Country first: a number written nationally cannot be expanded to international form
+        // without knowing which country's trunk prefix that leading zero belongs to.
         var country = ContactRules.ResolveCountry(request.Country, request.PhoneNumber);
+        var normalized = ContactRules.NormalisePhone(request.PhoneNumber, country);
 
         if (await _queries.CountAsync(
                 _contacts.Query().Where(contact => contact.NormalizedPhoneNumber == normalized),
@@ -127,7 +130,11 @@ public sealed class ContactWriteService : IContactWriteService
 
         if (request.PhoneNumber is { } phoneNumber)
         {
-            var normalized = ContactRules.NormalisePhone(phoneNumber);
+            // The contact's stored country, unless this request changes it. Either way the number
+            // is expanded against a country rather than saved in whatever form it arrived in.
+            var normalized = ContactRules.NormalisePhone(
+                phoneNumber,
+                request.Country is { } supplied ? Countries.ToStorageCode(supplied) : contact.Country);
 
             if (normalized != contact.NormalizedPhoneNumber
                 && await _queries.CountAsync(

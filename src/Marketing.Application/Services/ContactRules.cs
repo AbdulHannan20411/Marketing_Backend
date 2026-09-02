@@ -62,17 +62,71 @@ internal static class ContactRules
             : throw new ValidationException("email", "Enter a valid email address.");
     }
 
-    /// <summary>Validates a phone number and returns its normalised form.</summary>
+    /// <summary>
+    /// Validates a phone number and returns it in international form, ready to send to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A leading zero is a national trunk prefix and never appears in an international number, so
+    /// it is the reliable signal that a number was typed the way people write it locally. When it
+    /// is present and the country is known, the zero is dropped and the dialling code put in front:
+    /// <c>0336 7890092</c> with Pakistan becomes <c>923367890092</c>.
+    /// </para>
+    /// <para>
+    /// This used to strip punctuation and stop. The number stored looked plausible, passed
+    /// validation, rendered fine in the table, and was rejected by Meta at send time with an opaque
+    /// provider code - which is the worst place to discover it, because the campaign has already
+    /// been built and scheduled by then.
+    /// </para>
+    /// </remarks>
     /// <param name="phoneNumber">Number as supplied.</param>
-    /// <exception cref="ValidationException">Not a parseable number.</exception>
-    public static string NormalisePhone(string? phoneNumber)
+    /// <param name="countryCode">
+    /// ISO alpha-2 code for the number's country, used only to expand a national number. Optional:
+    /// a number already in international form needs no country.
+    /// </param>
+    /// <exception cref="ValidationException">
+    /// Not a parseable number, or written nationally with no country to expand it against.
+    /// </exception>
+    public static string NormalisePhone(string? phoneNumber, string? countryCode = null)
     {
         if (phoneNumber is null || !PhoneNumbers.IsPlausible(phoneNumber))
         {
             throw new ValidationException("phoneNumber", "Enter a valid phone number.");
         }
 
-        return PhoneNumbers.Normalise(phoneNumber);
+        var digits = PhoneNumbers.Normalise(phoneNumber);
+
+        // A leading 00 is the international *exit* prefix, not a trunk prefix: 0092336... is how
+        // somebody dials +92 336... from most of the world. The country code is already there, so
+        // the 00 comes off and nothing goes on. Treating it as a trunk prefix doubles the country
+        // code and produces a number that reaches nobody.
+        if (digits.StartsWith("00", StringComparison.Ordinal))
+        {
+            return digits[2..];
+        }
+
+        if (!digits.StartsWith('0'))
+        {
+            // Already international, or as close as we can tell. Left alone rather than second
+            // guessed: prefixing a country code onto a number that already carries one produces a
+            // number that reaches nobody.
+            return digits;
+        }
+
+        var diallingCode = Countries.ToDiallingCode(countryCode);
+
+        if (diallingCode is null)
+        {
+            // Refused rather than stored. A national number with no country cannot be dialled from
+            // anywhere else, and storing it defers the failure to the moment a campaign runs.
+            throw new ValidationException(
+                "phoneNumber",
+                "That number is written in national format. Include the country code, or choose a country.");
+        }
+
+        // Exactly one zero, which is what a trunk prefix is. Stripping every leading zero would
+        // silently swallow a digit from any number that legitimately begins with one after it.
+        return diallingCode + digits[1..];
     }
 
     /// <summary>

@@ -54,6 +54,12 @@ public static class EffectivePermissions
             effective.Remove(entry.Permission);
         }
 
+        // The floor is restored after the revokes, so it cannot be taken away by one - by an
+        // administrator unticking it, or by a revoke row already sitting in the database from
+        // before this rule existed. Those accounts heal on their next token refresh rather than
+        // needing anybody to notice and re-edit them.
+        effective.UnionWith(Permissions.Baseline);
+
         return Ordered(effective);
     }
 
@@ -85,6 +91,11 @@ public static class EffectivePermissions
         var target = new HashSet<string>(
             desired.Where(Permissions.IsKnown),
             StringComparer.Ordinal);
+
+        // Folded in before the diff, so no revoke is ever written for it. Without this, inviting
+        // somebody with nothing ticked stores a revoke on the one permission that makes a session
+        // usable, and they sign in to a wall of errors.
+        target.UnionWith(Permissions.Baseline);
 
         var deltas = new List<(string, bool)>();
 

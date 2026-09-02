@@ -373,7 +373,11 @@ public static class InfrastructureServiceCollectionExtensions
             .AddRefitClient<IWhatsAppCloudApi>()
             .ConfigureHttpClient(client =>
             {
-                client.BaseAddress = new Uri($"{whatsAppOptions.BaseUrl.TrimEnd('/')}/{whatsAppOptions.ApiVersion}/");
+                // No trailing slash. Refit demands a leading slash on every route and joins the
+                // two by concatenation, so one here would produce https://host/v21.0//{id}. Meta
+                // tolerates the doubled separator, but it reads as a defect in every logged URL.
+                client.BaseAddress = new Uri(
+                    $"{whatsAppOptions.BaseUrl.TrimEnd('/')}/{whatsAppOptions.ApiVersion.Trim('/')}");
                 client.Timeout = TimeSpan.FromSeconds(whatsAppOptions.RequestTimeoutSeconds);
                 client.DefaultRequestHeaders.Add("Accept", "application/json");
             })

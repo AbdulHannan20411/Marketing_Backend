@@ -57,6 +57,18 @@ public sealed class GraphApiErrorHandler : DelegatingHandler
             error?.SubCode,
             error?.TraceId);
 
+        // At Debug, and only there. Graph's message is the one thing that says *why* a call was
+        // refused, and without it a numeric code sends an operator hunting through documentation -
+        // but the body routinely echoes request parameters, which for this platform means recipient
+        // phone numbers. Debug is off in production, which is the trade this makes.
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug(
+                "Meta Graph API error detail for {Path}: {Message}",
+                request.RequestUri?.AbsolutePath,
+                error?.Message);
+        }
+
         // The message goes to the logs, not to the client: Graph error bodies routinely echo back
         // request parameters, which for this platform means recipient phone numbers.
         throw new ExternalServiceException(

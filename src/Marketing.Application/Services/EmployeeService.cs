@@ -182,11 +182,15 @@ public sealed class EmployeeService : IEmployeeService
         // An administrator holds everything by role, so there is nothing to write and any set sent
         // alongside the role is ignored rather than silently reducing them.
         //
-        // An employee, by contrast, starts with exactly what was asked for — including nothing at
-        // all. The role's defaults are not a floor: an invitee with no set named should be able to
-        // sign in and see an empty application until somebody grants them access, which is what the
-        // invite dialog promises. Falling back to the role defaults would hand a new starter twelve
-        // permissions the person inviting them never chose.
+        // An employee, by contrast, starts with exactly what was asked for, plus
+        // Permissions.Baseline and nothing else. The role's defaults are not a floor - falling back
+        // to them would hand a new starter twelve permissions the person inviting them never chose.
+        //
+        // But "exactly what was asked for" cannot mean literally nothing. An invitee with no set
+        // named still needs the landing route, or they sign in and every screen including the one
+        // they arrive on reports a permission error - which reads as a broken account rather than
+        // as one waiting for access. The baseline is folded in inside Diff, so no revoke is ever
+        // written for it here.
         if (!Roles.Normalise(role.Name).Equals(Roles.Normalise(Roles.Admin), StringComparison.Ordinal))
         {
             // Diffed against the role actually granted, not against Employee. Diffing against the

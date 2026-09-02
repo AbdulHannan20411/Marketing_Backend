@@ -12,6 +12,12 @@ namespace Marketing.Infrastructure.WhatsApp.Clients;
 /// either. Controllers never touch this type; only the WhatsApp services do.
 /// </para>
 /// </summary>
+/// <remarks>
+/// Every route starts with a slash because Refit requires it and refuses to build the client
+/// otherwise. The base address therefore must <b>not</b> end with one: Refit joins the two by
+/// concatenation, so a trailing slash there and a leading slash here produce a doubled separator.
+/// The version segment lives on the base address, which is why it cannot simply be trimmed.
+/// </remarks>
 public interface IWhatsAppCloudApi
 {
     /// <summary>Lists the phone numbers registered against a WhatsApp Business Account.</summary>
@@ -25,9 +31,15 @@ public interface IWhatsAppCloudApi
     /// <summary>Reads a single phone number's registration details.</summary>
     /// <param name="phoneNumberId">Phone number identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="authorization">
+    /// Bearer token when the caller has one to hand, or null to let the handler supply the stored
+    /// one. Onboarding passes it explicitly: at that point the token has only just been written and
+    /// the caller already holds it.
+    /// </param>
     [Get("/{phoneNumberId}")]
     public Task<WhatsAppPhoneNumber> GetPhoneNumberAsync(
         string phoneNumberId,
+        [Header("Authorization")] string? authorization = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>Lists the message templates defined on a WhatsApp Business Account.</summary>
@@ -35,11 +47,15 @@ public interface IWhatsAppCloudApi
     /// <param name="limit">Page size.</param>
     /// <param name="after">Cursor returned by a previous page.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="authorization">
+    /// Bearer token when the caller holds one, or null to use the stored one.
+    /// </param>
     [Get("/{wabaId}/message_templates")]
     public Task<GraphPage<WhatsAppTemplate>> GetTemplatesAsync(
         string wabaId,
         [AliasAs("limit")] int limit = 100,
         [AliasAs("after")] string? after = null,
+        [Header("Authorization")] string? authorization = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -157,9 +173,15 @@ public interface IWhatsAppCloudApi
     /// message type; the campaign services build and validate it before it reaches here.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="authorization">
+    /// Bearer token when the caller holds one, or null to use the stored one. Background jobs pass
+    /// it explicitly: they run with no signed-in user, and the handler that looks the token up
+    /// resolves the tenant in its own scope, which a job's scope does not reach.
+    /// </param>
     [Post("/{phoneNumberId}/messages")]
     public Task<SendMessageResponse> SendMessageAsync(
         string phoneNumberId,
         [Body] object payload,
+        [Header("Authorization")] string? authorization = null,
         CancellationToken cancellationToken = default);
 }
