@@ -137,6 +137,19 @@ public sealed class WhatsAppConnectionConfiguration : BaseEntityConfiguration<Wh
         builder.Property(connection => connection.EncryptedAccessToken).HasMaxLength(2048);
         builder.Property(connection => connection.RegistrationPin).HasMaxLength(6).IsFixedLength();
 
+        // Stored as one JSON document rather than a child table. The steps are always read as a
+        // set, never filtered or joined across connections, and adding a step should not cost a
+        // schema change. Enum members are written as names so the column stays readable and a
+        // reordered enum cannot silently change the meaning of existing rows.
+        builder.OwnsMany(connection => connection.OnboardingSteps, steps =>
+        {
+            steps.ToJson();
+            steps.Property(step => step.Step).HasConversion<string>();
+            steps.Property(step => step.Status).HasConversion<string>();
+            steps.Property(step => step.Code).HasMaxLength(64);
+            steps.Property(step => step.Message).HasMaxLength(500);
+        });
+
         builder.HasIndex(connection => connection.TenantId)
             .IsUnique()
             .HasFilter("is_deleted = false");

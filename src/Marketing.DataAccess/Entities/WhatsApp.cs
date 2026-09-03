@@ -82,6 +82,47 @@ public sealed class WhatsAppConnection : BaseEntity, IRequiresTenant
 
     /// <summary>Instant the access token expires.</summary>
     public DateTimeOffset? TokenExpiresAt { get; set; }
+
+    /// <summary>
+    /// Per-step progress of the connection attempt, in the order the steps run.
+    /// </summary>
+    /// <remarks>
+    /// Persisted rather than held in memory because the work outlives the request that started it:
+    /// the browser is polling a different process by the time the later steps run, and a restart
+    /// mid-onboarding must not lose what already succeeded.
+    /// </remarks>
+    public List<WhatsAppOnboardingStep> OnboardingSteps { get; set; } = [];
+}
+
+/// <summary>One stage of connecting a WhatsApp account, and how it went.</summary>
+/// <remarks>
+/// Stored as JSON on the connection rather than as its own table. The list is short, fixed, always
+/// read whole and never queried across connections, which is the shape JSON suits; a table would
+/// add a join and a migration for every new step.
+/// </remarks>
+public sealed class WhatsAppOnboardingStep
+{
+    /// <summary>Which stage this is.</summary>
+    public OnboardingStep Step { get; set; }
+
+    /// <summary>How it went.</summary>
+    public OnboardingStepStatus Status { get; set; }
+
+    /// <summary>
+    /// Stable machine-readable cause when the step failed.
+    /// </summary>
+    /// <remarks>
+    /// A code rather than a sentence, because the remedy is the client's to word and to translate.
+    /// Shipping prose from here would put user-facing copy in the database, where it cannot be
+    /// changed without a deployment.
+    /// </remarks>
+    public string? Code { get; set; }
+
+    /// <summary>What went wrong, for an operator reading a log or a support ticket.</summary>
+    public string? Message { get; set; }
+
+    /// <summary>Instant the step reached its final state.</summary>
+    public DateTimeOffset? CompletedAt { get; set; }
 }
 
 /// <summary>A message template synchronised from Meta.</summary>

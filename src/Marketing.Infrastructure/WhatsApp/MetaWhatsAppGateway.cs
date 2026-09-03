@@ -4,12 +4,13 @@ using Marketing.Common.Helpers;
 using Marketing.Infrastructure.WhatsApp.Clients;
 using Marketing.Infrastructure.WhatsApp.Models;
 using Marketing.Shared.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Marketing.Infrastructure.WhatsApp;
 
 /// <summary>Meta Cloud API implementation of <see cref="IWhatsAppGateway"/>.</summary>
-public sealed class MetaWhatsAppGateway : IWhatsAppGateway
+public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
 {
     /// <summary>Templates fetched per page. Meta's maximum for this edge.</summary>
     private const int TemplatePageSize = 100;
@@ -26,18 +27,21 @@ public sealed class MetaWhatsAppGateway : IWhatsAppGateway
     private readonly IWhatsAppCloudApi _client;
     private readonly IDateTimeProvider _clock;
     private readonly WhatsAppOptions _options;
+    private readonly ILogger<MetaWhatsAppGateway> _logger;
 
     /// <summary>Initialises a new instance.</summary>
     public MetaWhatsAppGateway(
         IWhatsAppCloudApi client,
         IDateTimeProvider clock,
-        IOptions<WhatsAppOptions> options)
+        IOptions<WhatsAppOptions> options,
+        ILogger<MetaWhatsAppGateway> logger)
     {
         ArgumentNullException.ThrowIfNull(options);
 
         _client = client;
         _clock = clock;
         _options = options.Value;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -74,6 +78,39 @@ public sealed class MetaWhatsAppGateway : IWhatsAppGateway
             number.VerifiedName,
             number.QualityRating,
             number.MessagingTier);
+    }
+
+    /// <inheritdoc />
+    public async Task<DateTimeOffset?> GetTokenExpiryAsync(
+        string accessToken,
+        CancellationToken cancellationToken = default)
+    {
+        TokenDebugResponse response;
+
+        try
+        {
+            // The token inspects itself. Meta accepts that, and it avoids needing an app-level
+            // token here just to read a property of the one already in hand.
+            response = await _client.DebugTokenAsync(accessToken, accessToken, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Deliberately swallowed. This call only decides whether a warning date can be shown;
+            // failing the whole connection over it would trade a missing warning for a missing
+            // connection. Whether the credential works is settled by the calls that follow.
+            LogTokenInspectionFailed(exception);
+
+            return null;
+        }
+
+        // Meta sends 0 for a token that never expires - a system user's. Read as "no expiry"
+        // rather than as the epoch, which would report every permanent token as long dead.
+        if (response.Data?.ExpiresAt is not { } expiresAt || expiresAt <= 0)
+        {
+            return null;
+        }
+
+        return DateTimeOffset.FromUnixTimeSeconds(expiresAt);
     }
 
     /// <inheritdoc />
@@ -211,4 +248,10 @@ public sealed class MetaWhatsAppGateway : IWhatsAppGateway
                 "MetaWhatsAppCloudApi",
                 "Meta accepted the send request but returned no message id.");
     }
+
+    [LoggerMessage(
+        EventId = 2610,
+        Level = LogLevel.Warning,
+        Message = "Could not inspect the WhatsApp token's expiry; connecting without a warning date.")]
+    private partial void LogTokenInspectionFailed(Exception exception);
 }

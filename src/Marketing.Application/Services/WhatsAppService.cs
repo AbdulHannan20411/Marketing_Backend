@@ -60,6 +60,7 @@ public sealed class WhatsAppService : IWhatsAppService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ISecretProtector _protector;
     private readonly ITenantContext _tenantContext;
+    private readonly IDateTimeProvider _clock;
 
     /// <summary>Initialises a new instance.</summary>
     public WhatsAppService(
@@ -69,7 +70,8 @@ public sealed class WhatsAppService : IWhatsAppService
         IWhatsAppGateway gateway,
         IUnitOfWork unitOfWork,
         ISecretProtector protector,
-        ITenantContext tenantContext)
+        ITenantContext tenantContext,
+        IDateTimeProvider clock)
     {
         _connections = connections;
         _templates = templates;
@@ -78,30 +80,27 @@ public sealed class WhatsAppService : IWhatsAppService
         _unitOfWork = unitOfWork;
         _protector = protector;
         _tenantContext = tenantContext;
+        _clock = clock;
     }
 
     /// <inheritdoc />
     public async Task<WhatsAppConnectionResponse> GetConnectionAsync(CancellationToken cancellationToken = default)
     {
+        // Loaded as an entity rather than projected in SQL: the onboarding steps are a JSON
+        // document on the row, and the derived "still running" flag the client polls on cannot be
+        // built by the database.
         var connection = await _queries.FirstOrDefaultAsync(
-            _connections.Query().Select(entity => new WhatsAppConnectionResponse(
-                entity.Status,
-                entity.DisplayPhoneNumber,
-                entity.VerifiedName,
-                entity.BusinessProfileAbout,
-                entity.BusinessCategory,
-                entity.QualityRating,
-                entity.MessagingLimit,
-                entity.MessagesLast24h,
-                entity.MessagingTier,
-                entity.ConnectedAt,
-                entity.WebhookHealthy,
-                entity.TemplateNamespaceAlias)),
+            _connections.Query(),
             cancellationToken);
 
         // Never a 404. "No number connected yet" is a normal state the client renders a connect
         // prompt from, whereas a 404 would put the screen into an error state.
-        return connection ?? WhatsAppConnectionResponse.Disconnected();
+        if (connection is null)
+        {
+            return WhatsAppConnectionResponse.Disconnected();
+        }
+
+        return connection.ToResponse().WithExpiryApplied(_clock.UtcNow);
     }
 
     /// <inheritdoc />

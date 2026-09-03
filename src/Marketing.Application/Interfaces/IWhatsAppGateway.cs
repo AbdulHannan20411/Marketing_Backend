@@ -12,6 +12,26 @@ namespace Marketing.Application.Interfaces;
 public interface IWhatsAppGateway
 {
     /// <summary>
+    /// Returns when a token stops working, or <see langword="null"/> when it never does.
+    /// </summary>
+    /// <remarks>
+    /// Asked rather than assumed. Operators paste two very different credentials into the same
+    /// box: a system-user token that never expires, and a test-number token that dies at a fixed
+    /// clock boundary, sometimes hours later. Recording the second as permanent produces exactly
+    /// the silent failure the expiry field exists to prevent.
+    /// <para>
+    /// Never throws. An inspection that fails is reported as an unknown expiry, because refusing
+    /// to connect over an unavailable answer would be worse than connecting without a warning
+    /// date - the credential itself is proven by the calls that follow.
+    /// </para>
+    /// </remarks>
+    /// <param name="accessToken">The token to inspect.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<DateTimeOffset?> GetTokenExpiryAsync(
+        string accessToken,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Exchanges an Embedded Signup code for a business access token.
     /// <para>
     /// Authenticated by the app secret, which is why it lives behind this interface and not in a

@@ -25,6 +25,17 @@ public interface IWhatsAppConnectionService
 
     /// <summary>Disconnects the account and destroys the stored token.</summary>
     public Task<WhatsAppConnectionResponse> DisconnectAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Advances every connection still part-way through onboarding.
+    /// </summary>
+    /// <remarks>
+    /// Driven by the scheduler. Safe to call concurrently and safe to call repeatedly: a step that
+    /// has already succeeded is not run again, so a second caller finds nothing left to do.
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>How many connections were advanced.</returns>
+    public Task<int> RunPendingOnboardingAsync(CancellationToken cancellationToken = default);
 }
 
 /// <inheritdoc cref="IWhatsAppConnectionService" />
@@ -85,13 +96,17 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // Asked, not assumed. Both a system-user token (no expiry) and a test-number token (often
+        // hours) arrive through this same box, and the earlier assumption that a pasted token was
+        // permanent recorded the short-lived kind as never expiring - the precise silent failure
+        // the expiry field exists to prevent. A null answer here still means "no stated expiry".
+        var expiresAt = await _gateway.GetTokenExpiryAsync(request.AccessToken, cancellationToken);
+
         return await StoreAsync(
             request.AccessToken,
             request.WabaId,
             request.PhoneNumberId,
-            // A system-user token has no stated expiry. Recorded as null rather than guessed, so
-            // nothing later treats a fabricated date as a fact.
-            expiresAt: null,
+            expiresAt,
             isManual: true,
             cancellationToken);
     }
@@ -167,93 +182,231 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         connection.TokenExpiresAt = expiresAt;
         connection.Status = ConnectionStatus.Pending;
 
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        try
-        {
-            // Subscribe first. Without it Meta delivers nothing for this account — no inbound
-            // messages, no receipts, no template verdicts — and the failure is silent: the
-            // connection looks healthy and the inbox simply never fills. Doing it before the
-            // profile read means a refusal here stops the connection rather than producing a
-            // connected-looking account that can never receive anything.
-            await _gateway.SubscribeToWebhooksAsync(wabaId, accessToken, cancellationToken);
-
-            // Registration is what makes a freshly onboarded number able to send. The PIN is
-            // two-factor material Meta will ask for again if the number is ever re-registered, so
-            // it is generated once and kept rather than regenerated on each attempt.
-            connection.RegistrationPin ??= NewRegistrationPin();
-
-            // Not fatal when it fails. A number that is already registered - every Meta test
-            // number, and any number onboarded through Embedded Signup - rejects a second
-            // registration because the PIN it already holds is not the one being offered. That is
-            // not a broken connection; it is a number that needed no registering.
-            //
-            // Whether the number actually works is settled by the profile read below, which is the
-            // honest test. Treating this call as decisive made every test number impossible to
-            // connect.
-            try
+        // Seeded up front so the client has the whole list to render immediately, including steps
+        // that have not started. A panel that grows a row at a time reads as instability; one that
+        // shows every step and lights them up reads as progress.
+        connection.OnboardingSteps =
+        [
+            new WhatsAppOnboardingStep
             {
-                await _gateway.RegisterPhoneNumberAsync(
-                    phoneNumberId, connection.RegistrationPin, accessToken, cancellationToken);
-            }
-            catch (ExternalServiceException exception)
-            {
-                LogRegistrationSkipped(exception, phoneNumberId);
-            }
-
-            var number = await _gateway.GetPhoneNumberAsync(phoneNumberId, accessToken, cancellationToken);
-
-            connection.DisplayPhoneNumber = number.DisplayPhoneNumber;
-            connection.VerifiedName = number.VerifiedName ?? string.Empty;
-            connection.QualityRating = ParseQuality(number.QualityRating);
-
-            // Absent means "leave what we had". Meta omits the tier on numbers it has not yet
-            // rated, and defaulting to the lowest would tell the customer their throughput had
-            // dropped when nothing changed.
-            connection.MessagingTier = ParseTier(number.MessagingTier) ?? connection.MessagingTier;
-
-            var account = await _gateway.GetBusinessAccountAsync(wabaId, accessToken, cancellationToken);
-
-            connection.TemplateNamespaceAlias = account.TemplateNamespace ?? connection.TemplateNamespaceAlias;
-
-            connection.Status = ConnectionStatus.Connected;
-            connection.ConnectedAt = _clock.UtcNow;
-        }
-        catch (BusinessRuleException)
-        {
-            // Subscription or registration refused. The credential is kept for the same reason a
-            // failed verification keeps it — the operator can usually fix the cause and retry
-            // without starting signup again — but the connection is not claimed as working.
-            connection.Status = ConnectionStatus.Error;
-
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            throw;
-        }
-        catch (ExternalServiceException exception)
-        {
-            // The credential is kept and the connection is marked errored rather than rolled back.
-            // A token that works for exchange but fails verification is usually a permissions or
-            // number-registration problem the operator can fix, and discarding it would make them
-            // start the whole signup again.
-            connection.Status = ConnectionStatus.Error;
-
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            LogVerificationFailed(exception, tenantId, phoneNumberId);
-
-            throw new BusinessRuleException(
-                "whatsapp_verification_failed",
-                "The account was linked but the phone number could not be verified with Meta. "
-                + "Check that the number is registered and the app has the whatsapp_business_messaging permission.");
-        }
+                // Already done by the time anything is stored: the code was exchanged, or the
+                // pasted token inspected, before this method was reached.
+                Step = OnboardingStep.Token,
+                Status = OnboardingStepStatus.Succeeded,
+                CompletedAt = _clock.UtcNow,
+            },
+            new WhatsAppOnboardingStep { Step = OnboardingStep.Subscribe },
+            new WhatsAppOnboardingStep { Step = OnboardingStep.Register },
+            new WhatsAppOnboardingStep { Step = OnboardingStep.Profile },
+        ];
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         LogConnected(tenantId, phoneNumberId, isManual);
 
+        // Returns here rather than running the remaining steps inline. Subscribing, registering and
+        // reading the profile are three round trips to Meta that regularly take seconds and can
+        // each fail for their own reason; holding the request open gave the caller one opaque
+        // answer at the end, and a browser that gave up first got no answer at all. The poller
+        // picks the connection up within seconds and the client watches the steps.
         return Map(connection);
     }
+
+    /// <inheritdoc />
+    public async Task<int> RunPendingOnboardingAsync(CancellationToken cancellationToken = default)
+    {
+        var tenants = await _connections.FindTenantsAwaitingOnboardingAsync(
+            TenantsPerPoll, cancellationToken);
+
+        var advanced = 0;
+
+        foreach (var tenantId in tenants)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Entered per tenant, so every query below - and the Graph handler's own token lookup -
+            // is confined to this tenant and no other.
+            using (_tenantContext.BeginScope(tenantId))
+            {
+                try
+                {
+                    await ContinueOnboardingAsync(tenantId, cancellationToken);
+                    advanced++;
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    // One tenant's failed onboarding must not stop the rest. The connection keeps
+                    // the step state it reached and is picked up again on the next poll.
+                    LogOnboardingFailed(exception, tenantId);
+                }
+            }
+        }
+
+        return advanced;
+    }
+
+    /// <summary>Runs whatever steps remain for one tenant's pending connection.</summary>
+    private async Task ContinueOnboardingAsync(long tenantId, CancellationToken cancellationToken)
+    {
+        var connection = await _connections.FindForTenantAsync(tenantId, cancellationToken);
+
+        if (connection is not { Status: ConnectionStatus.Pending, PhoneNumberId: { Length: > 0 } phoneNumberId }
+            || connection.WabaId is not { Length: > 0 } wabaId
+            || connection.EncryptedAccessToken is not { Length: > 0 } encrypted)
+        {
+            return;
+        }
+
+        // Decrypted once and passed to each call. The handler that normally supplies it resolves
+        // the tenant in its own scope, which a poller's scope does not reach - so it would find no
+        // tenant, send no credential, and Meta would refuse every call as unauthenticated.
+        var accessToken = _protector.Unprotect(encrypted);
+
+        if (!await TryStepAsync(
+                connection,
+                OnboardingStep.Subscribe,
+                () => _gateway.SubscribeToWebhooksAsync(wabaId, accessToken, cancellationToken),
+                cancellationToken))
+        {
+            return;
+        }
+
+        // Registration is the one step whose failure is not a failure. Every Meta test number, and
+        // every number onboarded through Embedded Signup, is already registered and rejects a
+        // second attempt because the PIN it holds is not the one being offered. Recorded as skipped
+        // so the panel says so plainly instead of showing a red step on a working connection.
+        connection.RegistrationPin ??= NewRegistrationPin();
+
+        await TryStepAsync(
+            connection,
+            OnboardingStep.Register,
+            () => _gateway.RegisterPhoneNumberAsync(
+                phoneNumberId, connection.RegistrationPin!, accessToken, cancellationToken),
+            cancellationToken,
+            failureIsSkip: true);
+
+        if (!await TryStepAsync(
+                connection,
+                OnboardingStep.Profile,
+                async () =>
+                {
+                    var number = await _gateway.GetPhoneNumberAsync(
+                        phoneNumberId, accessToken, cancellationToken);
+
+                    connection.DisplayPhoneNumber = number.DisplayPhoneNumber;
+                    connection.VerifiedName = number.VerifiedName ?? string.Empty;
+                    connection.QualityRating = ParseQuality(number.QualityRating);
+
+                    // Absent means "leave what we had". Meta omits the tier on numbers it has not
+                    // rated, and defaulting to the lowest would tell the customer their throughput
+                    // had dropped when nothing had changed.
+                    connection.MessagingTier = ParseTier(number.MessagingTier) ?? connection.MessagingTier;
+
+                    var account = await _gateway.GetBusinessAccountAsync(
+                        wabaId, accessToken, cancellationToken);
+
+                    connection.TemplateNamespaceAlias =
+                        account.TemplateNamespace ?? connection.TemplateNamespaceAlias;
+                },
+                cancellationToken))
+        {
+            return;
+        }
+
+        connection.Status = ConnectionStatus.Connected;
+        connection.ConnectedAt = _clock.UtcNow;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs one step, recording what happened to it either way.
+    /// </summary>
+    /// <returns><see langword="true"/> when onboarding may continue.</returns>
+    private async Task<bool> TryStepAsync(
+        WhatsAppConnection connection,
+        OnboardingStep step,
+        Func<Task> work,
+        CancellationToken cancellationToken,
+        bool failureIsSkip = false)
+    {
+        var record = connection.OnboardingSteps.FirstOrDefault(entry => entry.Step == step);
+
+        if (record is null)
+        {
+            // A connection stored before this feature existed has no step list. Adding the row
+            // rather than refusing lets those connections finish onboarding normally.
+            record = new WhatsAppOnboardingStep { Step = step };
+            connection.OnboardingSteps.Add(record);
+        }
+
+        if (record.Status is OnboardingStepStatus.Succeeded or OnboardingStepStatus.Skipped)
+        {
+            // Already settled on an earlier poll. Re-running subscribe or register is not free and,
+            // for register, actively harmful.
+            return true;
+        }
+
+        record.Status = OnboardingStepStatus.Running;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await work();
+
+            record.Status = OnboardingStepStatus.Succeeded;
+            record.Code = null;
+            record.Message = null;
+        }
+        catch (Exception exception) when (exception is BusinessRuleException or ExternalServiceException)
+        {
+            record.Status = failureIsSkip ? OnboardingStepStatus.Skipped : OnboardingStepStatus.Failed;
+            record.Code = failureIsSkip ? null : CodeFor(step, exception);
+            record.Message = Truncate(exception.Message);
+
+            if (!failureIsSkip)
+            {
+                connection.Status = ConnectionStatus.Error;
+            }
+        }
+
+        record.CompletedAt = _clock.UtcNow;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return record.Status is not OnboardingStepStatus.Failed;
+    }
+
+    /// <summary>Maps a step failure to the stable code the client turns into a remedy.</summary>
+    /// <remarks>
+    /// Deliberately coarse. A code per step, plus the one distinction that changes the advice -
+    /// whether the credential itself is the problem - is enough for the client to say something
+    /// useful, and a finer taxonomy would break the moment Meta reworded an error.
+    /// </remarks>
+    private static string CodeFor(OnboardingStep step, Exception exception)
+    {
+        // The credential, not the step. Any step can report it and the remedy is always the same:
+        // reconnect. Checked first because it would otherwise be blamed on whichever call happened
+        // to be running when the token lapsed.
+        if (exception.Message.Contains("401", StringComparison.Ordinal)
+            || exception.Message.Contains("Code 190", StringComparison.Ordinal))
+        {
+            return "token_rejected";
+        }
+
+        return step switch
+        {
+            OnboardingStep.Subscribe => "subscribe_refused",
+            OnboardingStep.Register => "register_refused",
+            OnboardingStep.Profile => "profile_unreadable",
+            _ => "onboarding_failed",
+        };
+    }
+
+    /// <summary>Keeps an operator message inside the column that stores it.</summary>
+    private static string Truncate(string message) =>
+        message.Length <= 500 ? message : message[..500];
 
     /// <summary>
     /// Reads Meta's tier string, or null when it says nothing.
@@ -286,20 +439,17 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
     private static QualityRating ParseQuality(string? rating) =>
         Enum.TryParse<QualityRating>(rating, ignoreCase: true, out var parsed) ? parsed : QualityRating.Green;
 
+    /// <summary>
+    /// Tenants advanced per poll.
+    /// <para>
+    /// Bounded so one poll cannot hold the scheduler while it walks every stalled connection on the
+    /// platform. Onboarding is rare and short-lived, so a small number clears the queue quickly.
+    /// </para>
+    /// </summary>
+    private const int TenantsPerPoll = 20;
+
     private static WhatsAppConnectionResponse Map(WhatsAppConnection connection) =>
-        new(
-            connection.Status,
-            connection.DisplayPhoneNumber,
-            connection.VerifiedName,
-            connection.BusinessProfileAbout,
-            connection.BusinessCategory,
-            connection.QualityRating,
-            connection.MessagingLimit,
-            connection.MessagesLast24h,
-            connection.MessagingTier,
-            connection.ConnectedAt,
-            connection.WebhookHealthy,
-            connection.TemplateNamespaceAlias);
+        connection.ToResponse();
 
     [LoggerMessage(
         EventId = 2601,
@@ -325,4 +475,10 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         Level = LogLevel.Warning,
         Message = "Tenant {TenantId} disconnected WhatsApp; the stored token was destroyed.")]
     private partial void LogDisconnected(long tenantId);
+
+    [LoggerMessage(
+        EventId = 2604,
+        Level = LogLevel.Error,
+        Message = "Onboarding could not be advanced for tenant {TenantId}.")]
+    private partial void LogOnboardingFailed(Exception exception, long tenantId);
 }

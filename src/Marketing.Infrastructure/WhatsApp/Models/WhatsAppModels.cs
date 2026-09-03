@@ -98,6 +98,23 @@ public sealed record TokenExchangeResponse(
     [property: JsonPropertyName("token_type")] string? TokenType,
     [property: JsonPropertyName("expires_in")] long? ExpiresIn);
 
+/// <summary>Meta's verdict on a token, from <c>/debug_token</c>.</summary>
+/// <param name="Data">The inspection result.</param>
+public sealed record TokenDebugResponse(
+    [property: JsonPropertyName("data")] TokenDebugData? Data);
+
+/// <summary>What Meta knows about a token.</summary>
+/// <param name="IsValid">Whether Meta will currently accept it.</param>
+/// <param name="Type">Token kind - <c>USER</c>, <c>SYSTEM_USER</c>, <c>PAGE</c>.</param>
+/// <param name="ExpiresAt">
+/// Unix seconds at which the token stops working. Meta sends <c>0</c> for a token that never
+/// expires, which is why this is read as "0 means none" rather than as the epoch.
+/// </param>
+public sealed record TokenDebugData(
+    [property: JsonPropertyName("is_valid")] bool IsValid,
+    [property: JsonPropertyName("type")] string? Type,
+    [property: JsonPropertyName("expires_at")] long? ExpiresAt);
+
 /// <summary>A template message to send, in the shape the Cloud API expects.</summary>
 /// <param name="To">Recipient in E.164 without the leading plus.</param>
 /// <param name="Template">Template name, language and components.</param>

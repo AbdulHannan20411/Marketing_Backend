@@ -26,4 +26,18 @@ public interface IWhatsAppConnectionRepository : IRepository<WhatsAppConnection>
     public Task<WhatsAppConnection?> FindForTenantAsync(
         long tenantId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns tenant ids whose connection is still part-way through onboarding.
+    /// </summary>
+    /// <remarks>
+    /// Spans tenants because the poller runs with no signed-in user; only the identifiers are
+    /// returned, and the caller enters each tenant's scope before touching anything else, so no
+    /// row crosses a tenant boundary.
+    /// </remarks>
+    /// <param name="limit">Most tenants to return in one poll.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<IReadOnlyList<long>> FindTenantsAwaitingOnboardingAsync(
+        int limit,
+        CancellationToken cancellationToken = default);
 }

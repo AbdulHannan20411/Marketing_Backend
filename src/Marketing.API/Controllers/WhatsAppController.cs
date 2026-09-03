@@ -7,8 +7,10 @@ using Marketing.Application.Services;
 using Marketing.Common.Constants;
 using Marketing.Common.Requests;
 using Marketing.Common.Responses;
+using Marketing.Infrastructure.WhatsApp;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace Marketing.API.Controllers;
 
@@ -21,17 +23,33 @@ public sealed class WhatsAppController : ApiControllerBase
     private readonly IWhatsAppService _whatsApp;
     private readonly IWhatsAppConnectionService _connections;
     private readonly ITenantScopeResolver _scope;
+    private readonly WhatsAppOptions _options;
 
     /// <summary>Initialises a new instance.</summary>
     public WhatsAppController(
         IWhatsAppService whatsApp,
         IWhatsAppConnectionService connections,
-        ITenantScopeResolver scope)
+        ITenantScopeResolver scope,
+        IOptions<WhatsAppOptions> options)
     {
         _whatsApp = whatsApp;
         _connections = connections;
         _scope = scope;
+        _options = options.Value;
     }
+
+    /// <summary>Returns the identifiers needed to open the Embedded Signup dialog.</summary>
+    /// <remarks>
+    /// Read-only and free of tenant data, so it takes no <c>adminId</c>. It is still behind the
+    /// connect permission: a user who cannot connect an account has no reason to be handed the
+    /// means of opening the dialog.
+    /// </remarks>
+    /// <response code="200">The signup parameters.</response>
+    [HttpGet("signup-config")]
+    [RequirePermission(Permissions.WhatsApp.Connect)]
+    [ProducesResponseType(typeof(ApiResponse<SignupConfigResponse>), StatusCodes.Status200OK)]
+    public IActionResult GetSignupConfig() =>
+        Success(new SignupConfigResponse(_options.AppId, _options.ConfigId, _options.ApiVersion));
 
     /// <summary>Returns the connection.</summary>
     /// <remarks>

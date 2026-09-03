@@ -42,4 +42,21 @@ public sealed class WhatsAppConnectionRepository : Repository<WhatsAppConnection
             .IgnoreQueryFilters()
             .Where(connection => !connection.IsDeleted && connection.TenantId == tenantId)
             .FirstOrDefaultAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<long>> FindTenantsAwaitingOnboardingAsync(
+        int limit,
+        CancellationToken cancellationToken = default) =>
+        await Set
+            .IgnoreQueryFilters()
+            // The null check is not decoration: TenantId is nullable on the base entity, and a
+            // connection without one cannot be scoped to a tenant to be worked on.
+            .Where(connection => !connection.IsDeleted
+                                 && connection.Status == ConnectionStatus.Pending
+                                 && connection.TenantId != null)
+            // Oldest first, so a connection that has been waiting is not starved by newer ones.
+            .OrderBy(connection => connection.ModifiedOn ?? connection.CreatedOn)
+            .Select(connection => connection.TenantId!.Value)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
 }

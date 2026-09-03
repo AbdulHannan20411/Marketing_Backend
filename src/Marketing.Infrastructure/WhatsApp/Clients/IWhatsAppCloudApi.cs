@@ -77,6 +77,24 @@ public interface IWhatsAppCloudApi
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Asks Meta what a token is and when it stops working.
+    /// </summary>
+    /// <remarks>
+    /// Used so a manually connected token's expiry is a fact from Meta rather than an assumption.
+    /// The tokens an operator pastes are not all alike: a system-user token never expires, while
+    /// one copied from the test-number panel is a user token that dies at a fixed clock boundary,
+    /// often the same day. Assuming the former silently mislabels the latter as permanent.
+    /// </remarks>
+    /// <param name="inputToken">The token being inspected.</param>
+    /// <param name="accessToken">The token authorising the inspection.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [Get("/debug_token")]
+    public Task<TokenDebugResponse> DebugTokenAsync(
+        [AliasAs("input_token")] string inputToken,
+        [AliasAs("access_token")] string accessToken,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Subscribes this app to a business account's webhooks.
     /// </summary>
     /// <remarks>

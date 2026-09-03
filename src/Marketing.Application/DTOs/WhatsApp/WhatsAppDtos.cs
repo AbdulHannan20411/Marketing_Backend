@@ -3,6 +3,46 @@ using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Application.DTOs.WhatsApp;
 
+/// <summary>How far a connection attempt has got, and what failed if anything did.</summary>
+/// <remarks>
+/// Exists because "could not connect" is not an actionable message. Subscribing to webhooks,
+/// registering the number and reading the profile fail for unrelated reasons with unrelated
+/// remedies, and an administrator who is told only that something went wrong has nowhere to go.
+/// </remarks>
+/// <param name="Running">
+/// Whether work is still in progress. The client polls while this is true and stops when it is not,
+/// rather than inferring completion from the step list.
+/// </param>
+/// <param name="CurrentStep">
+/// The step being attempted, or the one that failed. Null once every step has finished.
+/// </param>
+/// <param name="Steps">Every step in the order it runs, including ones not yet started.</param>
+public sealed record ConnectionOnboardingResponse(
+    bool Running,
+    OnboardingStep? CurrentStep,
+    IReadOnlyList<OnboardingStepResponse> Steps)
+{
+    /// <summary>The shape reported when no connection attempt has been made.</summary>
+    public static ConnectionOnboardingResponse Idle() => new(false, null, []);
+}
+
+/// <summary>One onboarding step and its outcome.</summary>
+/// <param name="Step">Which stage.</param>
+/// <param name="Status">How it went.</param>
+/// <param name="Code">
+/// Stable identifier for the cause when the step failed, for the client to map to a remedy. Codes
+/// are added over time, so an unrecognised one must fall back to a generic message rather than
+/// render nothing.
+/// </param>
+/// <param name="Message">Operator-facing detail. Not intended as end-user copy.</param>
+/// <param name="CompletedAt">When the step reached its final state.</param>
+public sealed record OnboardingStepResponse(
+    OnboardingStep Step,
+    OnboardingStepStatus Status,
+    string? Code,
+    string? Message,
+    DateTimeOffset? CompletedAt);
+
 /// <summary>
 /// The tenant's Meta connection.
 /// <para>
@@ -24,6 +64,20 @@ namespace Marketing.Application.DTOs.WhatsApp;
 /// fact rather than a setting.
 /// </param>
 /// <param name="ConnectedAt">Instant the connection was established.</param>
+/// <param name="TokenExpiresAt">
+/// When the stored credential stops working, or <see langword="null"/> when it does not expire.
+/// <para>
+/// Embedded Signup issues a token with a finite life; a system-user token pasted by an operator has
+/// none, and is reported as null rather than as a fabricated far-future date. Exposed so the client
+/// can warn while there is still time to reconnect - the alternative is a customer discovering the
+/// expiry as a failed campaign, because an expired credential is indistinguishable from a revoked
+/// one at the moment of sending.
+/// </para>
+/// </param>
+/// <param name="Onboarding">
+/// Progress of the connection attempt, step by step. Never null: a connection that has never been
+/// attempted reports an idle set, so the client renders one shape rather than branching on absence.
+/// </param>
 /// <param name="WebhookHealthy">Whether Meta's webhook is delivering.</param>
 /// <param name="TemplateNamespaceAlias">Template namespace alias.</param>
 public sealed record WhatsAppConnectionResponse(
@@ -37,9 +91,42 @@ public sealed record WhatsAppConnectionResponse(
     int MessagesLast24h,
     MessagingTier MessagingTier,
     DateTimeOffset? ConnectedAt,
+    DateTimeOffset? TokenExpiresAt,
+    ConnectionOnboardingResponse Onboarding,
     bool WebhookHealthy,
     string TemplateNamespaceAlias)
 {
+    /// <summary>
+    /// Returns this connection with an already-lapsed credential reported as errored.
+    /// </summary>
+    /// <remarks>
+    /// Derived at read time rather than persisted. Expiry is a function of the clock, so a stored
+    /// flag would be wrong from the moment it was written until something corrected it - and the
+    /// thing that would correct it is a send, which is the failure being avoided.
+    /// <para>
+    /// Only a token that has <em>already</em> lapsed changes the status. One expiring next week
+    /// still sends, and calling it errored would take a working screen from a customer who can
+    /// still use it; the date travels on the response so the client can warn without claiming the
+    /// connection is broken.
+    /// </para>
+    /// <para>
+    /// A null expiry is left alone - it means a credential with no stated end, such as a system-user
+    /// token, not one that expired at the epoch. A status other than
+    /// <see cref="ConnectionStatus.Connected"/> is also left alone, because it is already the more
+    /// specific answer and overwriting it would lose why.
+    /// </para>
+    /// </remarks>
+    /// <param name="now">The current instant, supplied so the rule is testable.</param>
+    public WhatsAppConnectionResponse WithExpiryApplied(DateTimeOffset now)
+    {
+        if (TokenExpiresAt is not { } expiresAt || expiresAt > now)
+        {
+            return this;
+        }
+
+        return Status == ConnectionStatus.Connected ? this with { Status = ConnectionStatus.Error } : this;
+    }
+
     /// <summary>The shape returned when a tenant has never connected a number.</summary>
     public static WhatsAppConnectionResponse Disconnected() => new(
         ConnectionStatus.Disconnected,
@@ -52,6 +139,8 @@ public sealed record WhatsAppConnectionResponse(
         MessagesLast24h: 0,
         MessagingTier.Tier250,
         ConnectedAt: null,
+        TokenExpiresAt: null,
+        ConnectionOnboardingResponse.Idle(),
         WebhookHealthy: false,
         TemplateNamespaceAlias: string.Empty);
 }

@@ -29,6 +29,22 @@ public sealed class WhatsAppOptions
     public string AppId { get; init; } = string.Empty;
 
     /// <summary>
+    /// Embedded Signup configuration identifier, from the app's Facebook Login for Business setup.
+    /// </summary>
+    /// <remarks>
+    /// It names which signup flow the browser opens - which permissions are requested and which
+    /// screens the customer sees. Not a secret: it is sent to the browser, which passes it to Meta.
+    /// <para>
+    /// Optional at startup, deliberately. A signup launched without one falls back to a generic
+    /// login that returns no WhatsApp account - but the client already reads this value, finds it
+    /// empty and disables the connect button with the reason shown, which is a better failure than
+    /// an API that will not boot. Embedded Signup is also gated on Meta business verification, so
+    /// an environment legitimately runs for weeks with no configuration to point at.
+    /// </para>
+    /// </remarks>
+    public string ConfigId { get; init; } = string.Empty;
+
+    /// <summary>
     /// Meta app secret. Used to exchange Embedded Signup codes and to verify webhook signatures.
     /// Supplied from the secret store, never committed.
     /// </summary>

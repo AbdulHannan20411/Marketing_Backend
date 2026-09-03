@@ -207,6 +207,55 @@ public static class ContractEnums
     }
 
     /// <summary>
+    /// The stages a WhatsApp account passes through while being connected.
+    /// </summary>
+    /// <remarks>
+    /// Reported individually because they fail for unrelated reasons with unrelated remedies. A
+    /// single "could not connect" leaves an administrator with nowhere to go, while "the number is
+    /// registered to another account" tells them exactly what to do next.
+    /// </remarks>
+    public enum OnboardingStep
+    {
+        /// <summary>Obtaining and validating the access token.</summary>
+        Token,
+
+        /// <summary>Subscribing the app to the account's webhooks.</summary>
+        Subscribe,
+
+        /// <summary>Registering the phone number for sending.</summary>
+        Register,
+
+        /// <summary>Reading the number and business profile back from Meta.</summary>
+        Profile,
+    }
+
+    /// <summary>Outcome of a single <see cref="OnboardingStep"/>.</summary>
+    public enum OnboardingStepStatus
+    {
+        /// <summary>Not started.</summary>
+        Pending,
+
+        /// <summary>In progress.</summary>
+        Running,
+
+        /// <summary>Completed successfully.</summary>
+        Succeeded,
+
+        /// <summary>Failed. Carries a code the client turns into a remedy.</summary>
+        Failed,
+
+        /// <summary>
+        /// Deliberately not performed, and not a failure.
+        /// <para>
+        /// Registration is the case this exists for: a number onboarded through Embedded Signup or
+        /// any Meta test number is already registered and rejects a second attempt. Reporting that
+        /// as a failure made every test number look broken.
+        /// </para>
+        /// </summary>
+        Skipped,
+    }
+
+    /// <summary>
     /// Meta's daily ceiling on how many <em>unique customers</em> a number may start conversations
     /// with.
     /// </summary>
