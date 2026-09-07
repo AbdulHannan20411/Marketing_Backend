@@ -152,6 +152,9 @@ public class ApplicationDbContext : DbContext
     /// <summary>The import outbox. Queued work, claimed by the import workers.</summary>
     public DbSet<ImportJob> ImportJobs => Set<ImportJob>();
 
+    /// <summary>Transactional email waiting to be delivered.</summary>
+    public DbSet<OutboxEmail> OutboxEmails => Set<OutboxEmail>();
+
     /// <summary>
     /// Tenant applied by the global query filter.
     /// <para>

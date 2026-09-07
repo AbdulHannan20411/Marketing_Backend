@@ -67,15 +67,22 @@ public static class InfrastructureServiceCollectionExtensions
 
         if (smtp?.IsConfigured == true)
         {
-            services.AddSingleton<IEmailSender, Email.SmtpEmailSender>();
+            services.AddSingleton<IEmailDispatcher, Email.SmtpEmailSender>();
         }
         else
         {
             // No relay host configured. The logging sender records the message and its link so
             // invitations and resets can be completed end to end; it is deliberately the fallback
             // rather than something anyone has to switch off.
-            services.AddSingleton<IEmailSender, Email.LoggingEmailSender>();
+            services.AddSingleton<IEmailDispatcher, Email.LoggingEmailSender>();
         }
+
+        // Everything in the application queues; only the outbox poller resolves the dispatcher
+        // above and waits on a relay. Registered scoped because it writes through the caller's own
+        // unit of work, so the queued message commits with whatever caused it.
+        services.AddScoped<IEmailSender, Application.Services.Email.OutboxEmailSender>();
+        services.AddScoped<Application.Services.Email.IEmailOutboxProcessor,
+            Application.Services.Email.EmailOutboxProcessor>();
 
         return services;
     }

@@ -20,7 +20,7 @@ namespace Marketing.Infrastructure.Email;
 /// send for reasons nobody can reproduce.
 /// </para>
 /// </summary>
-public sealed partial class SmtpEmailSender : IEmailSender
+public sealed partial class SmtpEmailSender : IEmailDispatcher
 {
     private readonly SmtpOptions _smtp;
     private readonly EmailOptions _email;

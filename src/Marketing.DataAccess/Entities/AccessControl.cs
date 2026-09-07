@@ -50,7 +50,13 @@ public sealed class UserPermissionOverride : BaseEntity, IRequiresTenant
 }
 
 /// <summary>A message shown in the notification centre.</summary>
-public sealed class Notification : BaseEntity, IRequiresTenant
+/// <remarks>
+/// Tenant-scoped rather than tenant-<em>required</em>: a notification addressed to platform staff
+/// has no workspace, because platform administrators sit outside every workspace. Marking it
+/// required made that row impossible to write - the interceptor refuses a null tenant - so
+/// reviewer notifications were silently stamped with whichever customer happened to trigger them.
+/// </remarks>
+public sealed class Notification : BaseEntity, ITenantScoped
 {
     /// <summary>
     /// Recipient. Null means every member of the tenant sees it, which is how platform-wide

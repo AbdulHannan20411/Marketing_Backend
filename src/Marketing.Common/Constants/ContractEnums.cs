@@ -206,6 +206,25 @@ public static class ContractEnums
         Error,
     }
 
+    /// <summary>Delivery state of a queued email.</summary>
+    public enum OutboxEmailStatus
+    {
+        /// <summary>Waiting to be delivered, or waiting out a backoff after a failed attempt.</summary>
+        Pending,
+
+        /// <summary>Accepted by the relay.</summary>
+        Sent,
+
+        /// <summary>
+        /// Given up on after exhausting its attempts.
+        /// <para>
+        /// Kept rather than deleted. A invitation nobody received is a support question, and the
+        /// row plus its last error is the only record of what was attempted.
+        /// </para>
+        /// </summary>
+        Failed,
+    }
+
     /// <summary>
     /// The stages a WhatsApp account passes through while being connected.
     /// </summary>

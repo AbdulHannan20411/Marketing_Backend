@@ -12,7 +12,7 @@ namespace Marketing.Infrastructure.Email;
 /// having actually sent mail.
 /// </para>
 /// </summary>
-public sealed partial class LoggingEmailSender : IEmailSender
+public sealed partial class LoggingEmailSender : IEmailDispatcher
 {
     private readonly ILogger<LoggingEmailSender> _logger;
 

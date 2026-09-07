@@ -806,3 +806,29 @@ public sealed class BillingProfileConfiguration : BaseEntityConfiguration<Billin
             .HasFilter("is_deleted = false");
     }
 }
+
+/// <summary>Fluent configuration for <see cref="OutboxEmail"/>.</summary>
+public sealed class OutboxEmailConfiguration : BaseEntityConfiguration<OutboxEmail>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<OutboxEmail> builder)
+    {
+        builder.ToTable("outbox_emails");
+
+        builder.Property(email => email.ToAddress).IsRequired().HasMaxLength(320);
+        builder.Property(email => email.ToName).HasMaxLength(200);
+        builder.Property(email => email.Subject).IsRequired().HasMaxLength(500);
+        builder.Property(email => email.HtmlBody).IsRequired();
+        builder.Property(email => email.TextBody).IsRequired();
+        builder.Property(email => email.ReplyToAddress).HasMaxLength(320);
+        builder.Property(email => email.ReplyToName).HasMaxLength(200);
+        builder.Property(email => email.LastError).HasMaxLength(500);
+        builder.Property(email => email.Status).IsRequired().HasMaxLength(16).HasConversion<string>();
+
+        // The poller's only query: pending rows that are due, oldest first. Filtered so the index
+        // stays the size of the backlog rather than the size of every message ever sent - which,
+        // since delivered rows are kept as history, is the difference that matters over time.
+        builder.HasIndex(email => email.NextAttemptOn)
+            .HasFilter("is_deleted = false AND status = 'Pending'");
+    }
+}

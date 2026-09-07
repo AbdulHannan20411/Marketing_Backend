@@ -1,6 +1,7 @@
 using System.Net;
 using Marketing.Application.Configurations;
 using Marketing.Application.DTOs.Payments;
+using Marketing.Application.DTOs.Workspace;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.DataAccess.Entities;
@@ -8,6 +9,7 @@ using Marketing.Shared.Abstractions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Marketing.Common.Constants;
+using Marketing.Common.Helpers;
 using static Marketing.Common.Constants.AppConstants;
 using static Marketing.Common.Constants.ContractEnums;
 
@@ -108,12 +110,18 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
         {
             var reviewers = await LoadReviewersAsync(cancellationToken);
 
+            var created = new List<Notification>(reviewers.Count);
+
             foreach (var reviewer in reviewers)
             {
                 // Addressed to the individual reviewer. A tenant-wide notification is not an option
                 // here: platform staff sit outside every tenant.
-                _notifications.Add(new Notification
+                var notification = new Notification
                 {
+                    // Explicitly platform-level. The interceptor only fills a tenant in when one is
+                    // absent, so this row keeps no workspace of its own - which is what makes it a
+                    // reviewer's notification rather than a row filed inside the customer that
+                    // happened to trigger it.
                     TenantId = null,
                     UserId = reviewer.Id,
                     Kind = NotificationKind.PaymentSubmitted,
@@ -125,10 +133,20 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
                     ActionLabel = "Review",
                     ActionRoute = "/superadmin/payments",
                     OccurredOn = _clock.UtcNow,
-                });
+                };
+
+                _notifications.Add(notification);
+                created.Add(notification);
             }
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            // Pushed after the save, so the identifier the client receives is one it can mark read.
+            foreach (var notification in created.Where(entry => entry.UserId is not null))
+            {
+                await _realtime.NotifyUserAsync(
+                    notification.UserId!.Value, ToAppNotification(notification), cancellationToken);
+            }
 
             foreach (var reviewer in reviewers)
             {
@@ -235,7 +253,7 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
         string icon,
         CancellationToken cancellationToken)
     {
-        _notifications.Add(new Notification
+        var notification = new Notification
         {
             TenantId = request.TenantId,
 
@@ -250,10 +268,34 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
             ActionLabel = "View subscription",
             ActionRoute = "/subscription",
             OccurredOn = _clock.UtcNow,
-        });
+        };
+
+        _notifications.Add(notification);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Pushed as well as stored. Without this the row exists and the bell does not move until
+        // something else causes a refresh, which is indistinguishable from no notification at all.
+        if (request.TenantId is { } tenantId)
+        {
+            await _realtime.NotifyTenantAsync(
+                tenantId, ToAppNotification(notification), cancellationToken);
+        }
     }
+
+    /// <summary>Projects a stored notification onto the shape the client renders.</summary>
+    private static AppNotification ToAppNotification(Notification notification) =>
+        new(
+            PublicId.From(PublicId.Notification, notification.Id),
+            notification.Kind,
+            notification.Title,
+            notification.Body,
+            notification.Priority,
+            notification.Icon,
+            notification.Read,
+            notification.ActionLabel,
+            notification.ActionRoute,
+            notification.OccurredOn);
 
     /// <summary>
     /// Platform administrators, who review payments.

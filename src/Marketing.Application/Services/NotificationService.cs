@@ -24,18 +24,21 @@ public sealed class NotificationService : INotificationService
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUser _currentUser;
+    private readonly ITenantContext _tenantContext;
 
     /// <summary>Initialises a new instance.</summary>
     public NotificationService(
         IRepository<Notification> notifications,
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
-        ICurrentUser currentUser)
+        ICurrentUser currentUser,
+        ITenantContext tenantContext)
     {
         _notifications = notifications;
         _queries = queries;
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
+        _tenantContext = tenantContext;
     }
 
     /// <inheritdoc />
@@ -106,9 +109,30 @@ public sealed class NotificationService : INotificationService
     /// delivered without writing one row per user.
     /// </para>
     /// </summary>
-    private IQueryable<Notification> Scoped(long? userId, bool tracked = false) =>
-        _notifications.Query(asNoTracking: !tracked)
-            .Where(notification => notification.UserId == null || notification.UserId == userId);
+    private IQueryable<Notification> Scoped(long? userId, bool tracked = false)
+    {
+        // Tenancy is applied here rather than left to the global filter, because a platform
+        // administrator bypasses that filter entirely. Relying on it meant "UserId is null" - which
+        // means "everyone in the workspace" - matched every workspace on the platform at once, so a
+        // Super Admin's bell filled with other companies' plan changes and campaign results.
+        // The global filter still runs. For a tenant user it already confines rows to their
+        // workspace, so only the recipient test is added here. For a platform administrator it is
+        // bypassed by design, which is exactly why the constraint below has to be explicit.
+        var query = _notifications.Query(asNoTracking: !tracked);
+
+        if (_tenantContext.TenantId is { } tenantId)
+        {
+            return query.Where(notification =>
+                notification.TenantId == tenantId
+                && (notification.UserId == null || notification.UserId == userId));
+        }
+
+        // No ambient tenant: platform staff. They get what is addressed to them personally, plus
+        // genuine platform-wide announcements - and nothing belonging to a customer's workspace.
+        return query.Where(notification =>
+            notification.UserId == userId
+            || (notification.TenantId == null && notification.UserId == null));
+    }
 
     private static AppNotification Map(Notification notification) =>
         new(
