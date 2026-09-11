@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Responses;
 using Microsoft.EntityFrameworkCore;
@@ -51,5 +52,16 @@ public sealed class QueryExecutor : IQueryExecutor
             .ToListAsync(cancellationToken);
 
         return new PagedResult<TResult>(items, totalItems, page, pageSize);
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<TResult> StreamAsync<TResult>(
+        IQueryable<TResult> query,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var row in query.AsAsyncEnumerable().WithCancellation(cancellationToken))
+        {
+            yield return row;
+        }
     }
 }

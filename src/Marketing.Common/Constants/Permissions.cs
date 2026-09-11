@@ -79,6 +79,20 @@ public static class Permissions
         /// <summary>Disconnect the WhatsApp Business Account.</summary>
         public const string Disconnect = "whatsapp.disconnect";
 
+        /// <summary>Read the shared inbox and its conversation history.</summary>
+        public const string InboxView = "whatsapp.inbox.view";
+
+        /// <summary>
+        /// Reply to a customer in the inbox.
+        /// </summary>
+        /// <remarks>
+        /// Separate from <see cref="InboxView"/> on purpose. Reading a conversation to answer a
+        /// question about an order is routine; sending a message that reaches a customer's handset
+        /// under the workspace's own verified name is not, and the two are commonly granted to
+        /// different people.
+        /// </remarks>
+        public const string InboxReply = "whatsapp.inbox.reply";
+
         /// <summary>View message templates.</summary>
         public const string TemplatesView = "whatsapp.templates.view";
 
@@ -237,7 +251,8 @@ public static class Permissions
         Contacts.Import, Contacts.BusinessImport, Contacts.Export, Contacts.GroupsManage,
         Contacts.TagsManage,
 
-        WhatsApp.Connect, WhatsApp.Disconnect, WhatsApp.TemplatesView, WhatsApp.TemplatesSync,
+        WhatsApp.Connect, WhatsApp.Disconnect, WhatsApp.InboxView, WhatsApp.InboxReply,
+        WhatsApp.TemplatesView, WhatsApp.TemplatesSync,
         WhatsApp.CampaignsCreate, WhatsApp.CampaignsEdit, WhatsApp.CampaignsDelete,
         WhatsApp.CampaignsSchedule, WhatsApp.CampaignsSend, WhatsApp.CampaignsPause,
         WhatsApp.CampaignsCancel, WhatsApp.CampaignsReports,

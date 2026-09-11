@@ -1,3 +1,6 @@
+using System.Text;
+using Marketing.API.Export;
+using Marketing.Common.Helpers;
 using Marketing.Common.Constants;
 using Marketing.Common.Responses;
 using Marketing.Shared.Abstractions;
@@ -106,5 +109,93 @@ public abstract class ApiControllerBase : ControllerBase
         ArgumentNullException.ThrowIfNull(currentUser);
 
         return currentUser.IsSuperAdmin ? adminId : null;
+    }
+
+    /// <summary>
+    /// Streams rows to the caller as a CSV download.
+    /// </summary>
+    /// <remarks>
+    /// The shared half of every export. Each endpoint keeps its own route, permission, query and
+    /// column list; what is identical everywhere - the quoting, the byte order mark, the headers,
+    /// writing as rows arrive - lives here and is written once.
+    /// <para>
+    /// Nothing about the file is taken from the request. The columns are supplied by the endpoint,
+    /// so a caller cannot ask for a field the endpoint did not choose to publish.
+    /// </para>
+    /// <para>
+    /// Rows are written straight to the response body as they arrive from the database. Buffering
+    /// would size the request by how much data the workspace happens to hold, which for an export
+    /// is exactly the number nobody controls.
+    /// </para>
+    /// </remarks>
+    /// <typeparam name="TRow">Row type.</typeparam>
+    /// <param name="fileName">Suggested file name, including the extension.</param>
+    /// <param name="rows">Rows to write, streamed.</param>
+    /// <param name="columns">Column headings and accessors, in output order.</param>
+    protected async Task StreamCsvAsync<TRow>(
+        string fileName,
+        IAsyncEnumerable<TRow> rows,
+        IReadOnlyList<CsvColumn<TRow>> columns)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentNullException.ThrowIfNull(columns);
+
+        if (columns.Count == 0)
+        {
+            throw new ArgumentException("An export needs at least one column.", nameof(columns));
+        }
+
+        Response.ContentType = "text/csv; charset=utf-8";
+
+        // Quoted, because a name is allowed to contain a space and an unquoted one would be
+        // truncated at it by the browser.
+        Response.Headers.ContentDisposition = $"attachment; filename=\"{SanitiseFileName(fileName)}\"";
+
+        // Written by hand rather than by an encoding preamble: UTF8Encoding(false) is deliberate so
+        // the mark appears exactly once, at the front, and not again on any later flush.
+        await using var writer = new StreamWriter(Response.Body, new UTF8Encoding(false));
+
+        await writer.WriteAsync(Csv.ByteOrderMark);
+        await writer.WriteAsync(Csv.Row([.. columns.Select(column => column.Heading)]));
+
+        var cells = new string?[columns.Count];
+
+        await foreach (var row in rows)
+        {
+            for (var index = 0; index < columns.Count; index++)
+            {
+                cells[index] = columns[index].Value(row);
+            }
+
+            await writer.WriteAsync(Csv.Row(cells));
+        }
+    }
+
+    /// <summary>Characters a download file name may not contain.</summary>
+    /// <remarks>
+    /// The quote is the one that matters: the name is interpolated into a quoted header
+    /// value, so a quote inside it would close that value early and let whatever follows be
+    /// read as further header content.
+    /// </remarks>
+    private static readonly System.Collections.Generic.HashSet<char> InvalidFileNameCharacters =
+        ['"', '\\', '/', ':', '*', '?', '<', '>', '|'];
+
+    /// <summary>
+    /// Strips anything from a file name that would let it escape the download.
+    /// </summary>
+    /// <remarks>
+    /// Names are literals in our own code today, not user input. Sanitised anyway because the day
+    /// one is built from a campaign name is the day a quote or a newline in it rewrites the
+    /// response headers, and that is not a change anybody would think to review for this.
+    /// </remarks>
+    private static string SanitiseFileName(string fileName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+
+        var cleaned = new string([.. fileName.Where(character =>
+            !char.IsControl(character)
+            && !InvalidFileNameCharacters.Contains(character))]);
+
+        return cleaned.Length > 0 ? cleaned : "export.csv";
     }
 }

@@ -86,6 +86,26 @@ public sealed class AnalyticsService : IAnalyticsService
     }
 
     /// <inheritdoc />
+    public IAsyncEnumerable<DeliveryFailureResponse> StreamFailuresAsync(
+        CancellationToken cancellationToken = default)
+    {
+        // The same ordering and the same tenant filter as the paged read, so a file and the screen
+        // that offered it cannot disagree about what happened or in what order.
+        var projected = _failures.Query()
+            .OrderByDescending(failure => failure.OccurredOn)
+            .Select(failure => new DeliveryFailureResponse(
+                PublicId.From(PublicId.DeliveryFailure, failure.Id),
+                failure.CampaignName,
+                failure.ContactName,
+                failure.PhoneNumber,
+                failure.Reason,
+                failure.ErrorCode,
+                failure.OccurredOn));
+
+        return _queries.StreamAsync(projected, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task<PagedResult<DeliveryFailureResponse>> GetFailuresAsync(
         PageRequest request,
         CancellationToken cancellationToken = default)

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Linq.Expressions;
 using Marketing.Application.DTOs.Contacts;
 using Marketing.Application.Interfaces;

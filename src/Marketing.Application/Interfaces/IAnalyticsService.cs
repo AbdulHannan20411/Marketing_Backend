@@ -18,6 +18,18 @@ public interface IAnalyticsService
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<DashboardSnapshot> GetDashboardAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Streams every delivery failure, newest first, for export.
+    /// </summary>
+    /// <remarks>
+    /// Unpaged and streamed. An export that returns a page is not an export, and materialising a
+    /// workspace's whole failure history to write it straight back out would size the request by
+    /// how badly a campaign went rather than by anything the caller chose.
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public IAsyncEnumerable<DeliveryFailureResponse> StreamFailuresAsync(
+        CancellationToken cancellationToken = default);
+
     /// <summary>Returns a page of delivery failures, newest first.</summary>
     /// <param name="request">Paging parameters.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

@@ -673,6 +673,7 @@ public sealed class EmployeeService : IEmployeeService
         }
 
         EmployeeRules.EnsureKnown(permissions);
+        EmployeeRules.EnsureCoherent(permissions);
         EmployeeRules.EnsureCallerHolds(permissions, _currentUser);
         EmployeeRules.EnsureWithinPlan(permissions, await _planGuard.EnabledModulesAsync(cancellationToken));
     }

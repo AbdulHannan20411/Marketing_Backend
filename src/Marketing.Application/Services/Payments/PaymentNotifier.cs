@@ -129,7 +129,7 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
                     Body = $"{request.Organisation} submitted "
                            + $"{Money(request)} for the {request.PlanName} plan.",
                     Priority = NotificationPriority.Warning,
-                    Icon = "credit-card",
+                    Icon = "creditCard",
                     ActionLabel = "Review",
                     ActionRoute = "/superadmin/payments",
                     OccurredOn = _clock.UtcNow,

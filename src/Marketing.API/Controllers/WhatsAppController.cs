@@ -141,6 +141,40 @@ public sealed class WhatsAppController : ApiControllerBase
             "WhatsApp Business Account connected.");
     }
 
+    /// <summary>Retries a connection whose onboarding stopped part-way.</summary>
+    /// <remarks>
+    /// Uses the credential already stored, so it needs no new authorisation code. A failure at
+    /// subscribe, register or profile is not a credential problem - the token was exchanged before
+    /// any of them ran - and the code from signup is single use, so without this the only recovery
+    /// is the whole Meta popup again.
+    /// <para>
+    /// Returns immediately with <c>pending</c>; the poller does the work and the client watches the
+    /// steps, exactly as it does after a first connection.
+    /// </para>
+    /// </remarks>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">Onboarding restarted; poll the connection for progress.</response>
+    /// <response code="404">Nothing is connected.</response>
+    /// <response code="409">
+    /// The stored credential was itself refused, so a retry cannot help. Connect again instead.
+    /// </response>
+    [HttpPost("connect/resume")]
+    [RequirePermission(Permissions.WhatsApp.Connect)]
+    [ProducesResponseType(typeof(ApiResponse<WhatsAppConnectionResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> ResumeAsync(
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(
+            await _connections.ResumeOnboardingAsync(cancellationToken),
+            "Retrying the connection.");
+    }
+
     /// <summary>Disconnects the account and destroys the stored token.</summary>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

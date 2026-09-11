@@ -36,6 +36,28 @@ public interface IWhatsAppConnectionService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>How many connections were advanced.</returns>
     public Task<int> RunPendingOnboardingAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retries a connection whose onboarding stopped part-way, using the credential already stored.
+    /// </summary>
+    /// <remarks>
+    /// Exists because a failure at subscribe, register or profile is not a credential problem: the
+    /// token was exchanged and stored before any of them ran. Without this the only recovery is the
+    /// whole Meta popup again, and the authorisation code is single use - so the customer repeats
+    /// every step to fix one Graph call that failed.
+    /// <para>
+    /// Steps that already succeeded are not repeated. Only the ones that failed or never ran are
+    /// attempted, which matters most for registration: re-registering a number is not free.
+    /// </para>
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="NotFoundException">No connection to resume.</exception>
+    /// <exception cref="BusinessRuleException">
+    /// The stored credential was itself rejected, so retrying cannot help - the customer has to
+    /// connect again with a new one.
+    /// </exception>
+    public Task<WhatsAppConnectionResponse> ResumeOnboardingAsync(
+        CancellationToken cancellationToken = default);
 }
 
 /// <inheritdoc cref="IWhatsAppConnectionService" />
@@ -78,7 +100,25 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         // Redeemed server-side. The app secret needed to exchange the code must never reach the
         // browser, which is the entire reason this endpoint exists rather than the client calling
         // Meta directly.
-        var exchange = await _gateway.ExchangeCodeAsync(request.Code, cancellationToken);
+        MetaAccessToken exchange;
+
+        try
+        {
+            exchange = await _gateway.ExchangeCodeAsync(request.Code, cancellationToken);
+        }
+        catch (ExternalServiceException exception) when (!exception.IsTransient)
+        {
+            // A code is single use and short lived, so a non-transient refusal means this one
+            // cannot be redeemed at all - most often a double-clicked button replaying a code the
+            // first click already spent. Reported as a conflict rather than a bad gateway: nothing
+            // is wrong with Meta, and 502 would tell the client to retry something that can only
+            // fail again. A transient fault is rethrown untouched, because that one is worth
+            // retrying.
+            throw new BusinessRuleException(
+                "whatsapp_code_not_redeemable",
+                "That sign-up could not be completed - the authorisation has already been used or "
+                + "has expired. Start the connection again.");
+        }
 
         return await StoreAsync(
             exchange.Value,
@@ -209,6 +249,59 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         // each fail for their own reason; holding the request open gave the caller one opaque
         // answer at the end, and a browser that gave up first got no answer at all. The poller
         // picks the connection up within seconds and the client watches the steps.
+        return Map(connection);
+    }
+
+    /// <inheritdoc />
+    public async Task<WhatsAppConnectionResponse> ResumeOnboardingAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = _tenantContext.RequireTenantId();
+
+        var connection = await _connections.FindForTenantAsync(tenantId, cancellationToken)
+                         ?? throw new NotFoundException("No WhatsApp account is connected.");
+
+        if (connection.EncryptedAccessToken is not { Length: > 0 })
+        {
+            // Disconnected, or never got as far as storing a credential. There is nothing to resume
+            // with, and saying so is better than starting a run that fails at the first call.
+            throw new BusinessRuleException(
+                "whatsapp_nothing_to_resume",
+                "There is no stored credential to retry with. Connect the account again.");
+        }
+
+        // A rejected credential is the one failure retrying cannot fix: every attempt will use the
+        // same token and be refused the same way. Refused here so the client can send the customer
+        // back to signup instead of offering a retry that is guaranteed to fail.
+        var rejected = connection.OnboardingSteps.FirstOrDefault(step =>
+            step.Status == OnboardingStepStatus.Failed && step.Code == "token_rejected");
+
+        if (rejected is not null)
+        {
+            throw new BusinessRuleException(
+                "whatsapp_token_rejected",
+                "Meta refused the stored credential, so retrying will not help. Connect the account again.");
+        }
+
+        // Failed steps are returned to pending; succeeded and skipped ones are left alone, so the
+        // run picks up where it stopped rather than starting over.
+        foreach (var step in connection.OnboardingSteps.Where(step =>
+                     step.Status is OnboardingStepStatus.Failed or OnboardingStepStatus.Running))
+        {
+            step.Status = OnboardingStepStatus.Pending;
+            step.Code = null;
+            step.Message = null;
+            step.CompletedAt = null;
+        }
+
+        // Back to pending, which is what the poller looks for. The work itself is not done inline:
+        // it is the same three Graph calls that were moved out of the request in the first place.
+        connection.Status = ConnectionStatus.Pending;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        LogOnboardingResumed(tenantId);
+
         return Map(connection);
     }
 
@@ -481,4 +574,10 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         Level = LogLevel.Error,
         Message = "Onboarding could not be advanced for tenant {TenantId}.")]
     private partial void LogOnboardingFailed(Exception exception, long tenantId);
+
+    [LoggerMessage(
+        EventId = 2605,
+        Level = LogLevel.Information,
+        Message = "Tenant {TenantId} resumed WhatsApp onboarding from a failed step.")]
+    private partial void LogOnboardingResumed(long tenantId);
 }

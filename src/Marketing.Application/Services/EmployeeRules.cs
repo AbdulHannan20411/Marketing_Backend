@@ -33,6 +33,68 @@ internal static class EmployeeRules
     }
 
     /// <summary>
+    /// Refuses a grant that omits the read permission its own entries depend on.
+    /// </summary>
+    /// <remarks>
+    /// Derived rather than hand-listed: for <c>x.y.z</c> the dependency is <c>x.y.view</c>, and
+    /// only when that key actually exists. A hand-written table would be one more list to keep in
+    /// step with the permissions themselves, and the day it fell behind it would either block a
+    /// legitimate grant or wave through a broken one.
+    /// <para>
+    /// The rule correctly yields nothing for campaigns, which have no single view permission and
+    /// are reached through several - so it does not invent a dependency where none exists.
+    /// </para>
+    /// <para>
+    /// Refused rather than quietly completed. Adding the missing permission would hand somebody
+    /// access the person granting it never chose, which is the same objection that keeps role
+    /// defaults from acting as a floor.
+    /// </para>
+    /// </remarks>
+    /// <param name="permissions">The permissions being granted.</param>
+    /// <exception cref="ValidationException">A required read permission is missing.</exception>
+    public static void EnsureCoherent(IReadOnlyList<string> permissions)
+    {
+        ArgumentNullException.ThrowIfNull(permissions);
+
+        var granted = new HashSet<string>(permissions, StringComparer.Ordinal);
+
+        var missing = permissions
+            .Select(permission => (Permission: permission, Requires: ViewDependencyOf(permission)))
+            .Where(pair => pair.Requires is not null && !granted.Contains(pair.Requires))
+            .Select(pair => $"{pair.Permission} requires {pair.Requires}")
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (missing.Count > 0)
+        {
+            throw new ValidationException(
+                "permissions",
+                $"Incomplete grant: {string.Join("; ", missing)}.");
+        }
+    }
+
+    /// <summary>
+    /// Returns the read permission a permission depends on, or null when it has none.
+    /// </summary>
+    private static string? ViewDependencyOf(string permission)
+    {
+        var lastDot = permission.LastIndexOf('.');
+
+        if (lastDot <= 0)
+        {
+            return null;
+        }
+
+        var dependency = string.Concat(permission.AsSpan(0, lastDot), ".view");
+
+        // A view permission does not depend on itself, and a derived name that is not a real
+        // permission is not a dependency - it is a group that simply has no read of its own.
+        return dependency.Equals(permission, StringComparison.Ordinal) || !Permissions.IsKnown(dependency)
+            ? null
+            : dependency;
+    }
+
+    /// <summary>
     /// Refuses permissions the caller does not hold.
     /// <para>
     /// The guard that matters most in this file. Without it an Admin can grant a subordinate
