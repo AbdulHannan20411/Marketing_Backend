@@ -6,12 +6,18 @@ namespace Marketing.Application.Interfaces;
 /// <param name="Latitude">Degrees north.</param>
 /// <param name="Longitude">Degrees east.</param>
 /// <param name="Country">Display name of the country, or null if the provider did not say.</param>
+/// <param name="CountryCode">
+/// ISO 3166-1 alpha-2 code for the same country, as the provider reports it. Carried beside the name
+/// because the name is for people and the code is for code: expanding a national phone number needs
+/// the code, and mapping a display name back to one fails for any country a lookup list omits.
+/// </param>
 public sealed record PlaceSuggestion(
     string Id,
     string Label,
     double Latitude,
     double Longitude,
-    string? Country);
+    string? Country,
+    string? CountryCode);
 
 /// <summary>A business returned by the provider.</summary>
 /// <remarks>

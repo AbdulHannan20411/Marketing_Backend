@@ -352,7 +352,18 @@ public sealed partial class BusinessDiscoveryService : IBusinessDiscoveryService
             return null;
         }
 
-        return ContactRules.NormalisePhone(phone);
+        try
+        {
+            return ContactRules.NormalisePhone(phone);
+        }
+        catch (ValidationException)
+        {
+            // A national-format number with no country: the provider only had the local form, and
+            // there is nothing here to expand it with. Every caller already reads null as "cannot be
+            // dialled". Letting the exception escape instead failed an entire search page, and
+            // aborted an entire import, over a single listing.
+            return null;
+        }
     }
 
     /// <summary>Refuses clearly when no provider key is configured.</summary>
@@ -590,7 +601,16 @@ public sealed partial class BusinessDiscoveryService : IBusinessDiscoveryService
     }
 
     private static PlaceSuggestionResponse ToResponse(PlaceSuggestion suggestion) =>
-        new(suggestion.Id, suggestion.Label, suggestion.Latitude, suggestion.Longitude, suggestion.Country);
+        new(
+            suggestion.Id,
+            suggestion.Label,
+            suggestion.Latitude,
+            suggestion.Longitude,
+            suggestion.Country,
+
+            // Filtered through the platform's own list, so the client is only ever handed a code the
+            // rest of the platform will accept as a stored country.
+            Countries.ToStorageCode(suggestion.CountryCode));
 
     private static DiscoveredBusinessResponse ToResponse(ProviderBusiness business, HashSet<string> existing)
     {
@@ -600,6 +620,10 @@ public sealed partial class BusinessDiscoveryService : IBusinessDiscoveryService
             business.Id,
             business.Name,
             normalised ?? business.Phone,
+
+            // Plus-prefixed so the value is E.164 as named. Stored contact numbers omit the plus and
+            // the importer strips it, so the two forms still meet as the same key.
+            normalised is null ? null : "+" + normalised,
             business.Address,
             business.Latitude,
             business.Longitude,

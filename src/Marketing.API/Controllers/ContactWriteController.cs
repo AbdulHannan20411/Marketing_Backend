@@ -289,12 +289,17 @@ public sealed class ContactWriteController : ApiControllerBase
     {
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
+        // Obtained before any header is set. An unusable selection is refused while the export is being
+        // built, and refusing it after the CSV headers had gone on would hand the browser a JSON error
+        // to save as a .csv file.
+        var lines = _contacts.ExportAsync(query, cancellationToken);
+
         Response.ContentType = "text/csv; charset=utf-8";
         Response.Headers.ContentDisposition = $"attachment; filename=\"contacts-{DateTime.UtcNow:yyyyMMdd}.csv\"";
 
         await using var writer = new StreamWriter(Response.Body, Encoding.UTF8);
 
-        await foreach (var line in _contacts.ExportAsync(query, cancellationToken))
+        await foreach (var line in lines)
         {
             await writer.WriteAsync(line);
         }

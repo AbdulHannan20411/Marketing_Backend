@@ -398,20 +398,33 @@ public sealed class ContactWriteService : IContactWriteService
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<string> ExportAsync(
+    public IAsyncEnumerable<string> ExportAsync(
         ContactExportQuery query,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        yield return "fullName,phoneNumber,email,country,status,tags,groups,optedInAt,lastMessagedAt,createdAt\n";
+        // Resolved before the iterator exists, not inside it. An iterator body does not run until the
+        // first row is asked for, by which point the caller has already committed to sending a CSV -
+        // so a selection that cannot be used has to be refused here, while an error can still be one.
+        var selected = ResolveExportSelection(query.Ids);
+
+        return ExportRowsAsync(query, selected, cancellationToken);
+    }
+
+    private async IAsyncEnumerable<string> ExportRowsAsync(
+        ContactExportQuery query,
+        List<long>? selected,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        // CRLF, as RFC 4180 specifies. Parsers accept a bare LF, but Excel on Windows is the reader
+        // most of these files meet.
+        yield return "fullName,phoneNumber,email,country,status,tags,groups,optedInAt,lastMessagedAt,createdAt\r\n";
 
         var source = _contacts.Query();
 
-        if (query.Ids is { Count: > 0 } ids)
+        if (selected is not null)
         {
-            var selected = ParseIds(PublicId.Contact, ids);
-
             source = source.Where(contact => selected.Contains(contact.Id));
         }
         else
@@ -449,8 +462,38 @@ public sealed class ContactWriteService : IContactWriteService
                 Escape(string.Join(ImportDelimiters.List, row.Groups)),
                 Escape(row.OptedInAt?.ToString("O")),
                 Escape(row.LastMessagedAt?.ToString("O")),
-                Escape(row.CreatedOn.ToString("O"))) + "\n";
+                Escape(row.CreatedOn.ToString("O"))) + "\r\n";
         }
+    }
+
+    /// <summary>
+    /// Turns an export's explicit selection into contact keys, or null when there is none.
+    /// </summary>
+    /// <remarks>
+    /// Identifiers that do not parse are dropped rather than refused, because a selection can go stale
+    /// between being ticked and being exported, and one missing contact should not cost the operator
+    /// the rest. A selection where <em>nothing</em> parses is refused outright: exporting it produced a
+    /// file with a header and no rows, which reads as "these contacts are empty" rather than "your
+    /// selection was not understood".
+    /// </remarks>
+    /// <exception cref="ValidationException">A selection was sent and none of it identifies a contact.</exception>
+    private static List<long>? ResolveExportSelection(IReadOnlyList<string>? ids)
+    {
+        if (ids is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        var selected = ParseIds(PublicId.Contact, ids);
+
+        if (selected.Count == 0)
+        {
+            throw new ValidationException(
+                "ids",
+                "None of the selected contacts could be identified. Refresh the list and select them again.");
+        }
+
+        return selected;
     }
 
     /// <summary>Moves every tag and group membership from the merged contacts onto the survivor.</summary>
@@ -674,7 +717,11 @@ public sealed class ContactWriteService : IContactWriteService
 
         if (!value.Contains(',', StringComparison.Ordinal)
             && !value.Contains('"', StringComparison.Ordinal)
-            && !value.Contains('\n', StringComparison.Ordinal))
+            && !value.Contains('\n', StringComparison.Ordinal)
+
+            // A bare carriage return is a row break to some parsers. Left unquoted it shifts every
+            // following cell on that row one column across - silently, and only for that contact.
+            && !value.Contains('\r', StringComparison.Ordinal))
         {
             return value;
         }

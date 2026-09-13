@@ -182,15 +182,22 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
             "The business directory could not be reached. Please try again.");
     }
 
-    private static PlaceSuggestion ToSuggestion(GeocodeResult result) =>
-        new(
+    private static PlaceSuggestion ToSuggestion(GeocodeResult result)
+    {
+        // Read once, so the name and the code are always taken from the same component.
+        var country = result.AddressComponents
+            ?.FirstOrDefault(component => component.Types?.Contains("country") == true);
+
+        return new PlaceSuggestion(
             result.PlaceId ?? result.FormattedAddress ?? Guid.NewGuid().ToString("N"),
             result.FormattedAddress ?? "Unknown location",
             result.Geometry?.Location?.Lat ?? 0,
             result.Geometry?.Location?.Lng ?? 0,
-            result.AddressComponents
-                ?.FirstOrDefault(component => component.Types?.Contains("country") == true)
-                ?.LongName);
+            country?.LongName,
+
+            // Google's short name for a country component is its ISO 3166-1 alpha-2 code.
+            country?.ShortName);
+    }
 
     private static ProviderBusiness ToBusiness(Place place) =>
         new(
@@ -267,5 +274,6 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
 
     private sealed record AddressComponent(
         [property: JsonPropertyName("long_name")] string? LongName,
+        [property: JsonPropertyName("short_name")] string? ShortName,
         List<string>? Types);
 }

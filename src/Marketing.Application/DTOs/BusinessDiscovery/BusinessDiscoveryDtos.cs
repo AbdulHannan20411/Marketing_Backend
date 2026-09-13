@@ -12,12 +12,18 @@ public sealed record BusinessCategoryResponse(string Id, string Label, string? G
 /// <param name="Latitude">Degrees north.</param>
 /// <param name="Longitude">Degrees east.</param>
 /// <param name="Country">Display name of the country, or null.</param>
+/// <param name="CountryCode">
+/// ISO 3166-1 alpha-2 code, or null when the provider gave none or it is not a country the platform
+/// recognises. Use this rather than the name to expand national phone numbers: the name is for
+/// display, and matching it against a list fails for any country that list leaves out.
+/// </param>
 public sealed record PlaceSuggestionResponse(
     string Id,
     string Label,
     double Latitude,
     double Longitude,
-    string? Country);
+    string? Country,
+    string? CountryCode);
 
 /// <summary>Request for one page of businesses near a point.</summary>
 /// <param name="Latitude">-90 to 90.</param>
@@ -43,6 +49,12 @@ public sealed record BusinessSearchRequest(
 /// <param name="Id">Provider identifier, stable across pages of one search.</param>
 /// <param name="Name">Business name.</param>
 /// <param name="Phone">Contact number, E.164 where available.</param>
+/// <param name="PhoneE164">
+/// The number in E.164 form with its leading plus, or null when it cannot be dialled as it stands:
+/// no number, an implausible one, or a national-format number with nothing to expand it with. This
+/// is the server answer to whether the business can be imported, so the review screen and the
+/// import cannot disagree. The display phone is unchanged and remains the one to show.
+/// </param>
 /// <param name="Address">Formatted address.</param>
 /// <param name="Latitude">Degrees north.</param>
 /// <param name="Longitude">Degrees east.</param>
@@ -57,6 +69,7 @@ public sealed record DiscoveredBusinessResponse(
     string Id,
     string Name,
     string? Phone,
+    string? PhoneE164,
     string? Address,
     double Latitude,
     double Longitude,
