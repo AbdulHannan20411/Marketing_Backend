@@ -1,5 +1,5 @@
+using Marketing.Application.Services.Email;
 using System.Net.Mail;
-using System.Net;
 using Marketing.Application.Configurations;
 using Marketing.Application.DTOs.Auth;
 using Marketing.Application.Interfaces;
@@ -32,6 +32,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
     private readonly IAccountActivationService _activation;
     private readonly IPasswordPolicy _passwordPolicy;
     private readonly IEmailSender _emailSender;
+    private readonly IEmailTemplateRenderer _templates;
     private readonly AuthenticationPolicyOptions _policy;
     private readonly ILogger<AuthenticationService> _logger;
 
@@ -60,6 +61,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
         IAccountActivationService activation,
         IPasswordPolicy passwordPolicy,
         IEmailSender emailSender,
+        IEmailTemplateRenderer templates,
         IOptions<AuthenticationPolicyOptions> policy,
         ILogger<AuthenticationService> logger)
     {
@@ -77,6 +79,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
         _activation = activation;
         _passwordPolicy = passwordPolicy;
         _emailSender = emailSender;
+        _templates = templates;
         _policy = policy.Value;
         _logger = logger;
 
@@ -323,9 +326,12 @@ public sealed partial class AuthenticationService : IAuthenticationService
         //
         // Only from Pending. A tenant that was suspended or cancelled stays that way — an
         // outstanding invitation link must never resurrect an organisation somebody switched off.
+        var activatedWorkspace = false;
+
         if (user.Tenant is { Status: TenantStatus.Pending } pending)
         {
             pending.Status = TenantStatus.Active;
+            activatedWorkspace = true;
         }
 
         EnsureAccountUsable(user);
@@ -333,6 +339,13 @@ public sealed partial class AuthenticationService : IAuthenticationService
         var tokens = IssueSession(user, Guid.NewGuid());
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Only the acceptance that activates a workspace - its first administrator. An employee joins a
+        // workspace that is already active, and was welcomed by their invitation.
+        if (activatedWorkspace)
+        {
+            await SendWelcomeAsync(user, cancellationToken);
+        }
 
         LogInvitationAccepted(user.Id, _requestContext.CorrelationId);
 
@@ -523,6 +536,23 @@ public sealed partial class AuthenticationService : IAuthenticationService
     }
 
     /// <summary>Warns the address that was replaced, so a takeover cannot happen quietly.</summary>
+    /// <summary>Welcomes a workspace's first administrator, never failing the acceptance over it.</summary>
+    /// <remarks>
+    /// The account is already active when this runs. A mail problem surfacing as an error would tell the
+    /// new owner their sign-up failed when it has, in fact, succeeded.
+    /// </remarks>
+    private async Task SendWelcomeAsync(User user, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _activation.SendWelcomeAsync(user, user.Tenant?.Name ?? string.Empty, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LogWelcomeFailed(exception, user.Id);
+        }
+    }
+
     private async Task NotifyAddressChangedAsync(
         User user,
         string previousEmail,
@@ -530,22 +560,20 @@ public sealed partial class AuthenticationService : IAuthenticationService
     {
         try
         {
-            await _emailSender.SendAsync(
-                new EmailMessage(
-                    previousEmail,
-                    user.DisplayName,
-                    "The email address on your account was changed",
-                    $"<p>Hello {WebUtility.HtmlEncode(user.DisplayName)},</p>"
-                    + "<p>The email address on your account was changed to "
-                    + $"<strong>{WebUtility.HtmlEncode(user.Email)}</strong>.</p>"
-                    + "<p>If this was you, no action is needed. <strong>If it was not, contact "
-                    + "support immediately</strong> - someone else may have access to your "
-                    + "account.</p>",
-                    $"Hello {user.DisplayName},\n\n"
-                    + $"The email address on your account was changed to {user.Email}.\n\n"
-                    + "If this was you, no action is needed. If it was not, contact support "
-                    + "immediately - someone else may have access to your account."),
+            // Sent to the previous address, which is the whole point: if somebody else changed it, the
+            // new address is theirs, and warning it would warn only the attacker.
+            var message = await _templates.RenderAsync(
+                "auth.email_changed",
+                previousEmail,
+                user.DisplayName,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["name"] = user.DisplayName,
+                    ["newEmail"] = user.Email,
+                },
                 cancellationToken);
+
+            await _emailSender.SendAsync(message, cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -910,4 +938,10 @@ public sealed partial class AuthenticationService : IAuthenticationService
         Level = LogLevel.Information,
         Message = "User {UserId} changed their password. CorrelationId: {CorrelationId}")]
     private partial void LogPasswordChanged(long userId, string correlationId);
+
+    [LoggerMessage(
+        EventId = 2014,
+        Level = LogLevel.Warning,
+        Message = "The welcome email for user {UserId} could not be queued; the account is active regardless.")]
+    private partial void LogWelcomeFailed(Exception exception, long userId);
 }

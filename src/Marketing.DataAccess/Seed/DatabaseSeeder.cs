@@ -55,6 +55,7 @@ public sealed partial class DatabaseSeeder
         await SeedRolesAsync(cancellationToken);
         await SeedSuperAdministratorAsync(bootstrapAdminEmail, bootstrapAdminPassword, cancellationToken);
         await SeedPaymentChannelsAsync(cancellationToken);
+        await SeedEmailTemplatesAsync(cancellationToken);
     }
 
     /// <summary>
@@ -192,6 +193,78 @@ public sealed partial class DatabaseSeeder
         LogPaymentChannelsSeeded();
     }
 
+    /// <summary>
+    /// Brings the email templates in line with the shipped defaults, without losing anyone's edits.
+    /// </summary>
+    /// <remarks>
+    /// Missing templates are inserted. Existing ones always take the latest name, description,
+    /// category and variables, which follow the code. Their wording is only replaced when nobody has
+    /// edited it - when it still hashes to the default it was last reconciled against - so a release
+    /// can improve a default without overwriting a Super Admin's changes. Nothing is ever deleted.
+    /// </remarks>
+    private async Task SeedEmailTemplatesAsync(CancellationToken cancellationToken)
+    {
+        var existing = await _context.EmailTemplates
+            .IgnoreQueryFilters()
+            .Where(template => !template.IsDeleted)
+            .ToDictionaryAsync(template => template.Key, StringComparer.Ordinal, cancellationToken);
+
+        var inserted = 0;
+        var refreshed = 0;
+
+        foreach (var shipped in EmailTemplateDefaults.All)
+        {
+            var hash = EmailTemplateDefaults.Hash(shipped.Subject, shipped.HtmlBody, shipped.TextBody);
+            var variables = EmailTemplateDefaults.SerialiseVariables(shipped.Variables);
+
+            if (!existing.TryGetValue(shipped.Key, out var row))
+            {
+                _context.EmailTemplates.Add(new EmailTemplate
+                {
+                    Key = shipped.Key,
+                    Name = shipped.Name,
+                    Description = shipped.Description,
+                    Category = shipped.Category,
+                    Subject = shipped.Subject,
+                    HtmlBody = shipped.HtmlBody,
+                    TextBody = shipped.TextBody,
+                    VariablesJson = variables,
+                    DefaultHash = hash,
+                });
+
+                inserted++;
+                continue;
+            }
+
+            row.Name = shipped.Name;
+            row.Description = shipped.Description;
+            row.Category = shipped.Category;
+            row.VariablesJson = variables;
+
+            var unedited = string.Equals(
+                EmailTemplateDefaults.Hash(row.Subject, row.HtmlBody, row.TextBody),
+                row.DefaultHash,
+                StringComparison.Ordinal);
+
+            if (unedited && !string.Equals(row.DefaultHash, hash, StringComparison.Ordinal))
+            {
+                row.Subject = shipped.Subject;
+                row.HtmlBody = shipped.HtmlBody;
+                row.TextBody = shipped.TextBody;
+                refreshed++;
+            }
+
+            row.DefaultHash = hash;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        if (inserted > 0 || refreshed > 0)
+        {
+            LogEmailTemplatesSeeded(inserted, refreshed);
+        }
+    }
+
     private async Task SeedSuperAdministratorAsync(
         string email,
         string password,
@@ -276,4 +349,10 @@ public sealed partial class DatabaseSeeder
         Level = LogLevel.Information,
         Message = "Seeded the manual payment channels, inactive until an administrator configures them.")]
     private partial void LogPaymentChannelsSeeded();
+
+    [LoggerMessage(
+        EventId = 1197,
+        Level = LogLevel.Information,
+        Message = "Email templates seeded: {Inserted} inserted, {Refreshed} unedited defaults refreshed.")]
+    private partial void LogEmailTemplatesSeeded(int inserted, int refreshed);
 }

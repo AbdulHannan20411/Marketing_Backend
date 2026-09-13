@@ -45,6 +45,12 @@ public sealed class AuditTrailInterceptor : SaveChangesInterceptor
         // two-factor material for a phone number the customer owns.
         nameof(WhatsAppConnection.EncryptedAccessToken),
         nameof(WhatsAppConnection.RegistrationPin),
+
+        // Email bodies, redacted by name so this covers queued messages as well as templates. An edit
+        // is recorded - who, when, and what the subject became - but a body is kilobytes of HTML per
+        // row, and a queued message's body carries live, single-use links.
+        nameof(EmailTemplate.HtmlBody),
+        nameof(EmailTemplate.TextBody),
     };
 
     /// <summary>Entity types that are not themselves audited.</summary>

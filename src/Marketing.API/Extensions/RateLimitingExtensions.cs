@@ -146,6 +146,18 @@ public static class RateLimitingExtensions
                         QueueLimit = 0,
                     }));
 
+            // Every test puts a real message through the outbox and on to the relay, so the ceiling is
+            // what a person iterating on wording needs, not what the relay would tolerate.
+            limiter.AddPolicy(AppConstants.RateLimits.EmailTests, context =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    ResolveUserKey(context),
+                    _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    }));
+
             limiter.AddPolicy(AppConstants.RateLimits.Default, context =>
                 RateLimitPartition.GetTokenBucketLimiter(
                     ResolvePartitionKey(context),

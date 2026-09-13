@@ -1,3 +1,5 @@
+using Marketing.Application.Services.Email;
+using System.Globalization;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Helpers;
 using Marketing.DataAccess.Entities;
@@ -53,6 +55,18 @@ public interface IAccountActivationService
     /// <param name="user">The user resetting their password.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task SendPasswordResetAsync(User user, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Welcomes the owner of a workspace that has just become active.
+    /// </summary>
+    /// <remarks>
+    /// Sent once, when a workspace's first administrator accepts their invitation. Employees joining
+    /// an active workspace are not welcomed again; their invitation already did that.
+    /// </remarks>
+    /// <param name="user">The administrator who activated the workspace.</param>
+    /// <param name="workspaceName">The workspace's name.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task SendWelcomeAsync(User user, string workspaceName, CancellationToken cancellationToken = default);
 }
 
 /// <inheritdoc cref="IAccountActivationService" />
@@ -62,6 +76,7 @@ public sealed class AccountActivationService : IAccountActivationService
     private readonly IQueryExecutor _queries;
     private readonly ITokenService _tokenService;
     private readonly IEmailSender _email;
+    private readonly IEmailTemplateRenderer _templates;
     private readonly IRequestContext _requestContext;
     private readonly EmailOptions _options;
 
@@ -71,6 +86,7 @@ public sealed class AccountActivationService : IAccountActivationService
         IQueryExecutor queries,
         ITokenService tokenService,
         IEmailSender email,
+        IEmailTemplateRenderer templates,
         IRequestContext requestContext,
         IOptions<EmailOptions> options)
     {
@@ -80,6 +96,7 @@ public sealed class AccountActivationService : IAccountActivationService
         _queries = queries;
         _tokenService = tokenService;
         _email = email;
+        _templates = templates;
         _requestContext = requestContext;
         _options = options.Value;
     }
@@ -100,59 +117,27 @@ public sealed class AccountActivationService : IAccountActivationService
             cancellationToken);
 
         var link = BuildLink("accept-invitation", token.Value);
-        var workspace = string.IsNullOrWhiteSpace(organisationName) ? "the platform" : organisationName;
-        var sender = attribution?.SenderName;
 
-        // Named in the subject, because the recipient is deciding whether to trust a message that
-        // arrives from an address they have never seen. "Amara Chen invited you…" is recognisable;
-        // "You have been invited" from a no-reply address reads as spam and gets reported.
-        // Header-sanitised, not HTML-escaped. A subject line is text, not markup: escaping it would
-        // put a literal "&amp;" in the recipient's inbox for a workspace called "Smith & Co". What a
-        // header genuinely cannot contain is a line break, which would let a tenant-supplied name
-        // split the subject and inject headers of its own.
-        var subject = string.IsNullOrWhiteSpace(sender)
-            ? Header($"You have been invited to join {workspace} on {_options.FromName}")
-            : Header($"{sender} invited you to join {workspace} on {_options.FromName}");
-
-        var attributionHtml = attribution is { } who
-            ? $"<p style=\"color:#6b7280;font-size:12px\">This invitation was sent by "
-              + $"{Escape(who.SenderName)} ({Escape(who.SenderEmail)}) through {Escape(_options.FromName)}. "
-              + "If you weren't expecting it, you can ignore this email.</p>"
-            : string.Empty;
-
-        var attributionText = attribution is { } signer
-            ? $"{Environment.NewLine}{Environment.NewLine}This invitation was sent by "
-              + $"{signer.SenderName} ({signer.SenderEmail}) through "
-              + $"{_options.FromName}. If you weren't expecting it, you can ignore this email."
-            : string.Empty;
-
-        var opening = string.IsNullOrWhiteSpace(sender)
-            ? $"You have been invited to work in <strong>{Escape(workspace)}</strong>."
-            : $"<strong>{Escape(sender)}</strong> has invited you to work in "
-              + $"<strong>{Escape(workspace)}</strong> on {Escape(_options.FromName)}.";
-
-        // Built as HTML directly rather than going through the plain-text wrapper, because every
-        // interpolated value here — the sender's name, their address, the workspace name — is
-        // supplied by a tenant. An organisation renamed to a script tag must not be able to inject
-        // anything into a message delivered to somebody else's inbox.
-        var html = $"<p>Hello {Escape(user.DisplayName)},</p>"
-                   + $"<p>{opening} Set your password to get started.</p>"
-                   + $"<p><a href=\"{Escape(link)}\">Set your password</a></p>"
-                   + $"<p>This link can be used once and expires in "
-                   + $"{_options.InvitationLifetimeHours} hours.</p>"
-                   + attributionHtml;
-
-        var text = $"""
-             Hello {user.DisplayName},
-
-             {(string.IsNullOrWhiteSpace(sender) ? $"You have been invited to work in {workspace}." : $"{sender} has invited you to work in {workspace} on {_options.FromName}.")} Set your password to get started:
-             {link}
-
-             This link can be used once and expires in {_options.InvitationLifetimeHours} hours.
-             """ + attributionText;
+        // Values only. The wording, including the subject that names the inviter, now lives in the
+        // auth.invitation template; the renderer encodes every value for the HTML body and strips
+        // control characters from the subject, which is what the hand-built version did by hand.
+        var message = await _templates.RenderAsync(
+            "auth.invitation",
+            user.Email,
+            user.DisplayName,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["name"] = user.DisplayName,
+                ["inviterName"] = attribution?.SenderName ?? string.Empty,
+                ["inviterEmail"] = attribution?.SenderEmail ?? string.Empty,
+                ["workspaceName"] = string.IsNullOrWhiteSpace(organisationName) ? "the platform" : organisationName,
+                ["actionUrl"] = link,
+                ["expiresInHours"] = _options.InvitationLifetimeHours.ToString(CultureInfo.InvariantCulture),
+            },
+            cancellationToken);
 
         await _email.SendAsync(
-            new EmailMessage(user.Email, user.DisplayName, subject, html, text)
+            message with
             {
                 // Replies reach the person who caused the message, not a mailbox nobody reads.
                 ReplyToAddress = attribution?.SenderEmail,
@@ -160,20 +145,6 @@ public sealed class AccountActivationService : IAccountActivationService
             },
             cancellationToken);
     }
-
-    /// <summary>Escapes a tenant-supplied value before it enters an HTML body.</summary>
-    private static string Escape(string? value) => System.Net.WebUtility.HtmlEncode(value ?? string.Empty);
-
-    /// <summary>
-    /// Makes a tenant-supplied value safe to put in a header.
-    /// </summary>
-    /// <remarks>
-    /// Strips the control characters that terminate a header line. Without this, a workspace named
-    /// with an embedded newline could append headers of its own to a message the platform sends on
-    /// somebody else's behalf.
-    /// </remarks>
-    private static string Header(string value) =>
-        new([.. value.Where(character => !char.IsControl(character))]);
 
     /// <inheritdoc />
     public async Task SendPasswordResetAsync(User user, CancellationToken cancellationToken = default)
@@ -188,21 +159,39 @@ public sealed class AccountActivationService : IAccountActivationService
 
         var link = BuildLink("reset-password", token.Value);
 
-        await SendAsync(
-            user,
-            "Reset your password",
-            $"""
-             Hello {user.DisplayName},
-
-             Someone asked to reset the password for this account.
-
-             Choose a new password:
-             {link}
-
-             This link can be used once and expires in {_options.PasswordResetLifetimeHours} hour(s).
-             If this was not you, no action is needed - your password has not changed.
-             """,
+        var message = await _templates.RenderAsync(
+            "auth.password_reset",
+            user.Email,
+            user.DisplayName,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["name"] = user.DisplayName,
+                ["actionUrl"] = link,
+                ["expiresInHours"] = _options.PasswordResetLifetimeHours.ToString(CultureInfo.InvariantCulture),
+            },
             cancellationToken);
+
+        await _email.SendAsync(message, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task SendWelcomeAsync(User user, string workspaceName, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+
+        var message = await _templates.RenderAsync(
+            "auth.welcome",
+            user.Email,
+            user.DisplayName,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["name"] = user.DisplayName,
+                ["workspaceName"] = workspaceName,
+                ["actionUrl"] = $"{_options.ClientBaseUrl.TrimEnd('/')}/dashboard",
+            },
+            cancellationToken);
+
+        await _email.SendAsync(message, cancellationToken);
     }
 
     /// <summary>
@@ -253,15 +242,6 @@ public sealed class AccountActivationService : IAccountActivationService
 
     private string BuildLink(string path, string token) =>
         $"{_options.ClientBaseUrl.TrimEnd('/')}/auth/{path}?token={Uri.EscapeDataString(token)}";
-
-    private async Task SendAsync(User user, string subject, string body, CancellationToken cancellationToken)
-    {
-        var html = $"<p>{body.Replace("\n", "<br />", StringComparison.Ordinal)}</p>";
-
-        await _email.SendAsync(
-            new EmailMessage(user.Email, user.DisplayName, subject, html, body),
-            cancellationToken);
-    }
 
     /// <summary>The plaintext token, which exists only long enough to go into a link.</summary>
     private sealed record SecureTokenResult(string Value);

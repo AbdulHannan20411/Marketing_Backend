@@ -16,6 +16,16 @@ public sealed class EmailOptions
     public string FromName { get; init; } = "Marketing Platform";
 
     /// <summary>
+    /// Where customers are told to write for help, shown in every email's footer.
+    /// </summary>
+    /// <remarks>
+    /// Optional. When unset the footer falls back to <see cref="FromAddress"/>, which is usually a
+    /// no-reply mailbox - a poor answer to "Need help?", so set this before going live.
+    /// </remarks>
+    [EmailAddress]
+    public string? SupportAddress { get; init; }
+
+    /// <summary>
     /// Base URL of the Angular client, used to build invitation and reset links.
     /// <para>
     /// Configured rather than derived from the request, because a link built from an inbound

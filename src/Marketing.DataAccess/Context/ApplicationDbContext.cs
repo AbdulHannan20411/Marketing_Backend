@@ -155,6 +155,9 @@ public class ApplicationDbContext : DbContext
     /// <summary>Transactional email waiting to be delivered.</summary>
     public DbSet<OutboxEmail> OutboxEmails => Set<OutboxEmail>();
 
+    /// <summary>Transactional email templates, edited by platform staff.</summary>
+    public DbSet<EmailTemplate> EmailTemplates => Set<EmailTemplate>();
+
     /// <summary>
     /// Tenant applied by the global query filter.
     /// <para>

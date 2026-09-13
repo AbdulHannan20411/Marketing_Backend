@@ -1,3 +1,4 @@
+using Marketing.Application.Services.Email;
 using AwesomeAssertions;
 using Marketing.Application.Configurations;
 using Marketing.Application.DTOs.Auth;
@@ -30,6 +31,7 @@ public sealed class AuthenticationServiceTests
     private readonly IUserTokenRepository _userTokens = Substitute.For<IUserTokenRepository>();
     private readonly IAccountActivationService _activation = Substitute.For<IAccountActivationService>();
     private readonly IEmailSender _emailSender = Substitute.For<IEmailSender>();
+    private readonly IEmailTemplateRenderer _templates = Substitute.For<IEmailTemplateRenderer>();
     private readonly IPasswordPolicy _passwordPolicy =
         new PasswordPolicy(Options.Create(new AuthenticationPolicyOptions()));
     private readonly FixedDateTimeProvider _clock = new(Now);
@@ -67,6 +69,17 @@ public sealed class AuthenticationServiceTests
 
     private AuthenticationService CreateService()
     {
+        // The renderer is covered by its own tests. Here it only has to address the message where it was
+        // asked to, so the assertions about who was warned keep meaning what they say.
+        _templates
+            .RenderAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<IReadOnlyDictionary<string, string>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call => new EmailMessage(call.ArgAt<string>(1), call.ArgAt<string>(2), "subject", "<p>body</p>", "body"));
+
         return new AuthenticationService(
             _users,
             _refreshTokens,
@@ -80,6 +93,7 @@ public sealed class AuthenticationServiceTests
             _activation,
             _passwordPolicy,
             _emailSender,
+            _templates,
             Options.Create(_policy),
             NullLogger<AuthenticationService>.Instance);
     }

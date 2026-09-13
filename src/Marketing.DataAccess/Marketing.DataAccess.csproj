@@ -27,4 +27,11 @@
     </PackageReference>
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Shipped email template defaults, exported from the web client. Seeded into the database, and
+         the fallback when a stored template is missing or cannot be parsed. -->
+    <EmbeddedResource Include="Seed\EmailTemplates\email-templates.seed.json"
+                      LogicalName="Marketing.DataAccess.Seed.EmailTemplates.email-templates.seed.json" />
+  </ItemGroup>
+
 </Project>

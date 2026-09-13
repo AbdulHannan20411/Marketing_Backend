@@ -1,3 +1,5 @@
+using Marketing.Application.Services.Email;
+using System.Globalization;
 using Marketing.Application.Configurations;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Repositories.Interfaces;
@@ -6,7 +8,6 @@ using Marketing.Shared.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Net;
 using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Application.Services.Billing;
@@ -39,6 +40,7 @@ public sealed partial class SubscriptionExpiryReminderService : ISubscriptionExp
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IEmailSender _email;
+    private readonly IEmailTemplateRenderer _templates;
     private readonly ITenantContext _tenantContext;
     private readonly IDateTimeProvider _clock;
     private readonly EmailOptions _options;
@@ -52,6 +54,7 @@ public sealed partial class SubscriptionExpiryReminderService : ISubscriptionExp
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
         IEmailSender email,
+        IEmailTemplateRenderer templates,
         ITenantContext tenantContext,
         IDateTimeProvider clock,
         IOptions<EmailOptions> options,
@@ -65,6 +68,7 @@ public sealed partial class SubscriptionExpiryReminderService : ISubscriptionExp
         _queries = queries;
         _unitOfWork = unitOfWork;
         _email = email;
+        _templates = templates;
         _tenantContext = tenantContext;
         _clock = clock;
         _options = options.Value;
@@ -190,7 +194,7 @@ public sealed partial class SubscriptionExpiryReminderService : ISubscriptionExp
 
         foreach (var administrator in administrators)
         {
-            await SendEmailAsync(administrator, planName, expiresOn, daysRemaining, wording, cancellationToken);
+            await SendEmailAsync(administrator, planName, expiresOn, wording, cancellationToken);
         }
 
         LogReminderSent(subscription.Id, daysRemaining, administrators.Count);
@@ -200,33 +204,25 @@ public sealed partial class SubscriptionExpiryReminderService : ISubscriptionExp
         User administrator,
         string planName,
         DateTimeOffset expiresOn,
-        int daysRemaining,
         string wording,
         CancellationToken cancellationToken)
     {
-        var link = $"{_options.ClientBaseUrl.TrimEnd('/')}/subscription";
-        var name = Escape(administrator.DisplayName);
-        var plan = Escape(planName);
-
-        await _email.SendAsync(
-            new EmailMessage(
-                administrator.Email,
-                administrator.DisplayName,
-                $"Your {planName} plan expires {wording}",
-                $"<p>Hello {name},</p>"
-                + $"<p>Your <strong>{plan}</strong> plan expires {wording}, on "
-                + $"{expiresOn:d MMMM yyyy}.</p>"
-                + "<p>After that, campaigns stop sending until the plan is renewed.</p>"
-                + $"<p><a href=\"{link}\">Renew your plan</a></p>",
-                $"Hello {administrator.DisplayName},\n\n"
-                + $"Your {planName} plan expires {wording}, on {expiresOn:d MMMM yyyy}. "
-                + "After that, campaigns stop sending until the plan is renewed.\n\n"
-                + $"Renew at {link}"),
+        var message = await _templates.RenderAsync(
+            "billing.subscription_expiring",
+            administrator.Email,
+            administrator.DisplayName,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["name"] = administrator.DisplayName,
+                ["planName"] = planName,
+                ["expiresIn"] = wording,
+                ["expiresOn"] = expiresOn.ToString("d MMMM yyyy", CultureInfo.InvariantCulture),
+                ["actionUrl"] = $"{_options.ClientBaseUrl.TrimEnd('/')}/subscription",
+            },
             cancellationToken);
-    }
 
-    /// <summary>Escapes a value that reaches the reader as HTML.</summary>
-    private static string Escape(string value) => WebUtility.HtmlEncode(value);
+        await _email.SendAsync(message, cancellationToken);
+    }
 
     [LoggerMessage(
         EventId = 3401,

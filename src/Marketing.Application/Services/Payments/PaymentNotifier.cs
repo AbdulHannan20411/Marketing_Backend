@@ -1,4 +1,5 @@
-using System.Net;
+using Marketing.Application.Services.Email;
+using System.Globalization;
 using Marketing.Application.Configurations;
 using Marketing.Application.DTOs.Payments;
 using Marketing.Application.DTOs.Workspace;
@@ -67,6 +68,7 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IEmailSender _email;
+    private readonly IEmailTemplateRenderer _templates;
     private readonly IRealtimeNotifier _realtime;
     private readonly IDateTimeProvider _clock;
     private readonly EmailOptions _options;
@@ -79,6 +81,7 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
         IEmailSender email,
+        IEmailTemplateRenderer templates,
         IRealtimeNotifier realtime,
         IDateTimeProvider clock,
         IOptions<EmailOptions> options,
@@ -91,6 +94,7 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
         _queries = queries;
         _unitOfWork = unitOfWork;
         _email = email;
+        _templates = templates;
         _realtime = realtime;
         _clock = clock;
         _options = options.Value;
@@ -150,15 +154,16 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
 
             foreach (var reviewer in reviewers)
             {
-                await SendAsync(
+                await SendTemplateAsync(
+                    "payments.submitted",
                     reviewer.Email,
                     reviewer.DisplayName,
-                    "Payment awaiting review",
-                    $"<p><strong>{Escape(request.Organisation)}</strong> submitted "
-                    + $"{Escape(Money(request))} for the {Escape(request.PlanName)} plan.</p>"
-                    + $"<p><a href=\"{Link("/superadmin/payments")}\">Review it</a></p>",
-                    $"{request.Organisation} submitted {Money(request)} for the {request.PlanName} plan. "
-                    + $"Review it at {Link("/superadmin/payments")}",
+                    Values(
+                        ("name", reviewer.DisplayName),
+                        ("organisation", request.Organisation),
+                        ("planName", request.PlanName),
+                        ("amount", Money(request)),
+                        ("actionUrl", Link("/superadmin/payments"))),
                     cancellationToken);
             }
 
@@ -187,16 +192,16 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
                 "check-circle",
                 cancellationToken);
 
-            await SendAsync(
+            await SendTemplateAsync(
+                "payments.approved",
                 request.SubmittedByEmail,
                 request.SubmittedByName,
-                $"Your {request.PlanName} plan is active",
-                $"<p>We have confirmed your payment of {Escape(Money(request))}.</p>"
-                + $"<p>The <strong>{Escape(request.PlanName)}</strong> plan is active until "
-                + $"{periodEnd:d MMMM yyyy}.</p>"
-                + $"<p><a href=\"{Link("/subscription")}\">View your subscription</a></p>",
-                $"We have confirmed your payment of {Money(request)}. The {request.PlanName} plan is "
-                + $"active until {periodEnd:d MMMM yyyy}. See {Link("/subscription")}",
+                Values(
+                    ("name", request.SubmittedByName),
+                    ("amount", Money(request)),
+                    ("planName", request.PlanName),
+                    ("activeUntil", periodEnd.ToString("d MMMM yyyy", CultureInfo.InvariantCulture)),
+                    ("actionUrl", Link("/subscription"))),
                 cancellationToken);
 
             await _realtime.PublishPaymentRequestAsync(request.TenantId, ToEvent(response), cancellationToken);
@@ -227,16 +232,15 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
 
             // The reason travels verbatim. It is the only thing telling the customer what to fix,
             // so it is never summarised, truncated or replaced with a generic sentence.
-            await SendAsync(
+            await SendTemplateAsync(
+                "payments.rejected",
                 request.SubmittedByEmail,
                 request.SubmittedByName,
-                "We could not confirm your payment",
-                $"<p>We could not confirm your payment for the "
-                + $"<strong>{Escape(request.PlanName)}</strong> plan.</p>"
-                + $"<blockquote>{Escape(reason)}</blockquote>"
-                + $"<p><a href=\"{Link("/pricing")}\">Try again</a></p>",
-                $"We could not confirm your payment for the {request.PlanName} plan.\n\n{reason}\n\n"
-                + $"Try again at {Link("/pricing")}",
+                Values(
+                    ("name", request.SubmittedByName),
+                    ("planName", request.PlanName),
+                    ("reason", reason),
+                    ("actionUrl", Link("/pricing"))),
                 cancellationToken);
 
             await _realtime.PublishPaymentRequestAsync(request.TenantId, ToEvent(response), cancellationToken);
@@ -320,12 +324,11 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
             response.Organisation,
             response.RejectionReason);
 
-    private async Task SendAsync(
+    private async Task SendTemplateAsync(
+        string key,
         string address,
         string name,
-        string subject,
-        string html,
-        string text,
+        IReadOnlyDictionary<string, string> values,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(address))
@@ -333,8 +336,13 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
             return;
         }
 
-        await _email.SendAsync(new EmailMessage(address, name, subject, html, text), cancellationToken);
+        var message = await _templates.RenderAsync(key, address, name, values, cancellationToken);
+
+        await _email.SendAsync(message, cancellationToken);
     }
+
+    private static Dictionary<string, string> Values(params (string Name, string Value)[] pairs) =>
+        pairs.ToDictionary(pair => pair.Name, pair => pair.Value ?? string.Empty, StringComparer.Ordinal);
 
     /// <summary>
     /// Runs the notification work, absorbing whatever it throws.
@@ -361,11 +369,11 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
     /// <summary>Builds a client link from configuration, never from a request header.</summary>
     private string Link(string path) => $"{_options.ClientBaseUrl.TrimEnd('/')}{path}";
 
+    // Invariant, so the same amount reads the same in every email and notification whatever culture the
+    // host runs under. A comma as the decimal separator in one message and a point in the next is the
+    // sort of thing a customer screenshots.
     private static string Money(PaymentRequest request) =>
-        $"{request.Currency} {request.Amount:N0}";
-
-    /// <summary>Escapes text supplied by a customer before it enters an HTML email.</summary>
-    private static string Escape(string value) => WebUtility.HtmlEncode(value);
+        string.Create(CultureInfo.InvariantCulture, $"{request.Currency} {request.Amount:N0}");
 
     [LoggerMessage(
         EventId = 2960,

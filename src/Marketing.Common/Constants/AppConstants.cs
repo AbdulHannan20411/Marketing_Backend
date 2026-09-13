@@ -178,6 +178,9 @@ public static class AppConstants
 
         /// <summary>Default budget applied to everything else.</summary>
         public const string Default = "rl:default";
+
+        /// <summary>Email template test sends, partitioned by user.</summary>
+        public const string EmailTests = "rl:email-tests";
     }
 
     /// <summary>

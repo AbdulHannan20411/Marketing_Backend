@@ -832,3 +832,29 @@ public sealed class OutboxEmailConfiguration : BaseEntityConfiguration<OutboxEma
             .HasFilter("is_deleted = false AND status = 'Pending'");
     }
 }
+
+/// <summary>Fluent configuration for <see cref="EmailTemplate"/>.</summary>
+public sealed class EmailTemplateConfiguration : BaseEntityConfiguration<EmailTemplate>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<EmailTemplate> builder)
+    {
+        builder.ToTable("email_templates");
+
+        builder.Property(template => template.Key).IsRequired().HasMaxLength(100);
+        builder.Property(template => template.Name).IsRequired().HasMaxLength(100);
+        builder.Property(template => template.Description).IsRequired().HasMaxLength(300);
+        builder.Property(template => template.Category).IsRequired().HasMaxLength(24);
+        builder.Property(template => template.Subject).IsRequired().HasMaxLength(200);
+        builder.Property(template => template.HtmlBody).IsRequired();
+        builder.Property(template => template.TextBody).IsRequired();
+        builder.Property(template => template.VariablesJson).IsRequired().HasColumnType("jsonb");
+        builder.Property(template => template.DefaultHash).IsRequired().HasMaxLength(64);
+
+        // The sending code looks a template up by key on every email. Partial, matching the
+        // soft-delete convention.
+        builder.HasIndex(template => template.Key)
+            .IsUnique()
+            .HasFilter("is_deleted = false");
+    }
+}

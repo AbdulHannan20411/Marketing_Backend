@@ -48,6 +48,9 @@ public static class ApplicationServiceCollectionExtensions
 
         services.AddSingleton<IPasswordPolicy, PasswordPolicy>();
         services.AddScoped<IAccountActivationService, AccountActivationService>();
+        services.AddSingleton<Services.Email.EmailTemplateCache>();
+        services.AddScoped<Services.Email.IEmailTemplateRenderer, Services.Email.EmailTemplateRenderer>();
+        services.AddScoped<Services.Email.IEmailTemplateAdminService, Services.Email.EmailTemplateAdminService>();
         services.AddScoped<IAuthenticationService, AuthenticationService>();
         services.AddScoped<ISessionMaintenanceService, SessionMaintenanceService>();
         services.AddScoped<ITenantScopeResolver, TenantScopeResolver>();
