@@ -120,6 +120,29 @@ public sealed partial class SubscriptionExpiryReminderService : ISubscriptionExp
         return sent;
     }
 
+    /// <summary>Subscriptions close enough to expiry that a reminder may be due.</summary>
+    /// <remarks>
+    /// Auto-renew is deliberately not a reason to skip one. Nothing renews a subscription yet - there
+    /// is no payment provider and no renewal job, payments are approved by hand - and every
+    /// subscription starts with auto-renew on. Excluding those meant almost no workspace was ever
+    /// warned before it lapsed. Revisit only once a renewal genuinely happens without the customer.
+    /// </remarks>
+    /// <param name="now">Current instant.</param>
+    internal static Expression<Func<TenantSubscription, bool>> InReminderWindow(DateTimeOffset now)
+    {
+        var horizon = now.AddDays(FirstReminderDay + 1);
+
+        return subscription =>
+            !subscription.IsDeleted
+            && subscription.TenantId != null
+            && subscription.ExpiresAt > now
+            && subscription.ExpiresAt <= horizon
+
+            // A lapsed or cancelled subscription has nothing left to warn about.
+            && (subscription.Status == SubscriptionStatus.Active
+                || subscription.Status == SubscriptionStatus.Trial);
+    }
+
     /// <summary>
     /// Whole days between today and the expiry date, counted as calendar days.
     /// </summary>
@@ -151,27 +174,38 @@ public sealed partial class SubscriptionExpiryReminderService : ISubscriptionExp
         var expiresOn = subscription.ExpiresAt;
         var wording = daysRemaining == 1 ? "tomorrow" : $"in {daysRemaining} days";
 
+        var administrators = await _users.GetTenantAdministratorsAsync(tenantId, cancellationToken);
+
         // Entered so the notification is written against the right tenant: the auditing interceptor
         // stamps TenantId from this context, not from the entity handed to it.
         using (_tenantContext.BeginScope(tenantId))
         {
-            _notifications.Add(new Notification
+            foreach (var administrator in administrators)
             {
-                TenantId = tenantId,
+                _notifications.Add(new Notification
+                {
+                    TenantId = tenantId,
 
-                // Null recipient: everyone in the workspace sees it. Billing lapsing affects the
-                // whole team, and addressing only one person means it is missed while they are away.
-                UserId = null,
-                Kind = NotificationKind.SubscriptionExpiring,
-                Title = $"Your {planName} plan expires {wording}",
-                Body = $"Renew before {expiresOn:d MMMM yyyy} to keep sending campaigns.",
+                    // One per administrator, the same people the email goes to. A null recipient
+                    // would put it in every employee's bell too, and only an administrator can renew.
+                    // Every administrator gets their own, so one being away does not hide it.
+                    UserId = administrator.Id,
+                    Kind = NotificationKind.SubscriptionExpiring,
+                    Title = $"Your {planName} plan expires {wording}",
+                    Body = $"Renew before {expiresOn.ToString("d MMMM yyyy", CultureInfo.InvariantCulture)} "
+                           + "to keep sending campaigns.",
 
-                // Escalating: a week out is information, the last two days are not.
-                Priority = daysRemaining <= 2 ? NotificationPriority.Critical : NotificationPriority.Warning,
-                Icon = "clock",
-                ActionLabel = "Renew",
-                ActionRoute = "/subscription",
-            });
+                    // Escalating: a week out is information, the last two days are not.
+                    Priority = daysRemaining <= 2 ? NotificationPriority.Critical : NotificationPriority.Warning,
+                    Icon = "clock",
+                    ActionLabel = "Renew",
+                    ActionRoute = "/subscription",
+
+                    // Nothing fills this in on save. Left unset it is year 1, which sorts the reminder
+                    // to the very bottom of a newest-first bell.
+                    OccurredOn = _clock.UtcNow,
+                });
+            }
 
             // Recorded before the emails go out, and committed with them in the same unit of work.
             // Advancing it afterwards would re-send the whole batch if the process died in between.
@@ -179,8 +213,6 @@ public sealed partial class SubscriptionExpiryReminderService : ISubscriptionExp
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
-
-        var administrators = await _users.GetTenantAdministratorsAsync(tenantId, cancellationToken);
 
         foreach (var administrator in administrators)
         {
