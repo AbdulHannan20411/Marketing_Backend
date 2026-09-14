@@ -158,6 +158,18 @@ public static class RateLimitingExtensions
                         QueueLimit = 0,
                     }));
 
+            // Per user and deliberately below the AI provider's free-tier per-minute ceiling, so one
+            // enthusiastic user cannot spend the whole platform's allowance for everyone else.
+            limiter.AddPolicy(AppConstants.RateLimits.AiGenerate, context =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    ResolveUserKey(context),
+                    _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    }));
+
             limiter.AddPolicy(AppConstants.RateLimits.Default, context =>
                 RateLimitPartition.GetTokenBucketLimiter(
                     ResolvePartitionKey(context),

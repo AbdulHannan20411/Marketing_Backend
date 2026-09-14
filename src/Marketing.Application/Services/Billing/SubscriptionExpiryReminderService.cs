@@ -1,5 +1,6 @@
 using Marketing.Application.Services.Email;
 using System.Globalization;
+using System.Linq.Expressions;
 using Marketing.Application.Configurations;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Repositories.Interfaces;
@@ -79,7 +80,6 @@ public sealed partial class SubscriptionExpiryReminderService : ISubscriptionExp
     public async Task<int> SendDueRemindersAsync(CancellationToken cancellationToken = default)
     {
         var now = _clock.UtcNow;
-        var horizon = now.AddDays(FirstReminderDay + 1);
 
         var due = await _queries.ToListAsync(
             _subscriptions.Query(asNoTracking: false)
@@ -87,17 +87,7 @@ public sealed partial class SubscriptionExpiryReminderService : ISubscriptionExp
                 // would match nothing. Each subscription carries its own tenant, which is entered
                 // explicitly before anything is written.
                 .IgnoreQueryFilters()
-                .Where(subscription =>
-                    !subscription.IsDeleted
-                    && subscription.TenantId != null
-                    && subscription.ExpiresAt > now
-                    && subscription.ExpiresAt <= horizon
-
-                    // A lapsed or cancelled subscription has nothing to warn about, and a plan set
-                    // to renew itself is not about to lapse.
-                    && !subscription.AutoRenew
-                    && (subscription.Status == SubscriptionStatus.Active
-                        || subscription.Status == SubscriptionStatus.Trial))
+                .Where(InReminderWindow(now))
                 .Include(subscription => subscription.SubscriptionPlan),
             cancellationToken);
 

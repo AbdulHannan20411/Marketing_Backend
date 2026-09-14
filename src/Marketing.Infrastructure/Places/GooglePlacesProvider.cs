@@ -17,8 +17,8 @@ namespace Marketing.Infrastructure.Places;
 /// <para>
 /// Uses <c>places:searchText</c> rather than <c>places:searchNearby</c>. Nearby Search returns at
 /// most 20 results and offers no continuation at all, which would make the review screen's "load
-/// more" a button that never does anything. Text Search takes the same circular restriction and
-/// pages, at the cost of expressing the category as text.
+/// more" a button that never does anything. Text Search pages, at the cost of expressing the category
+/// as text - and of restricting only to a rectangle, never a circle. See <see cref="SearchArea"/>.
 /// </para>
 /// <para>
 /// <b>Google still caps a text search at 60 results across three pages.</b> That ceiling is the
@@ -33,6 +33,9 @@ namespace Marketing.Infrastructure.Places;
 public sealed partial class GooglePlacesProvider : IPlaceProvider
 {
     private const string SearchTextUrl = "https://places.googleapis.com/v1/places:searchText";
+
+    /// <summary>Widest radius sent to the provider, matching Google's own 50 km ceiling.</summary>
+    private const double MaximumRadiusKm = 50;
     private const string GeocodeUrl = "https://maps.googleapis.com/maps/api/geocode/json";
 
     /// <summary>Fields requested from a text search. Every addition here has a price.</summary>
@@ -78,6 +81,11 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
             new HttpRequestMessage(HttpMethod.Get, url),
             cancellationToken);
 
+        if (!GeocodeSucceeded(payload))
+        {
+            return [];
+        }
+
         return [.. (payload?.Results ?? []).Select(ToSuggestion)];
     }
 
@@ -93,6 +101,11 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
         var payload = await SendAsync<GeocodeResponse>(
             new HttpRequestMessage(HttpMethod.Get, url),
             cancellationToken);
+
+        if (!GeocodeSucceeded(payload))
+        {
+            return null;
+        }
 
         var first = payload?.Results?.FirstOrDefault();
 
@@ -110,16 +123,22 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
         string? pageToken,
         CancellationToken cancellationToken = default)
     {
+        var radius = Math.Min(radiusKm, MaximumRadiusKm);
+        var bounds = SearchArea.Bounds(latitude, longitude, radius);
+
         var request = new HttpRequestMessage(HttpMethod.Post, SearchTextUrl)
         {
             Content = JsonContent.Create(
                 new SearchTextRequest(
                     providerCategory.Replace('_', ' '),
-                    // Restriction rather than bias: a bias is a hint Google may ignore, and a user
-                    // who asked for businesses within 5 km does not want one from the next city.
-                    new LocationRestriction(new Circle(
-                        new LatLng(latitude, longitude),
-                        Math.Min(radiusKm * 1000, 50_000))),
+
+                    // Restriction rather than bias: a bias is a hint Google may ignore, and a user who
+                    // asked for businesses within 5 km does not want one from the next city. It has to
+                    // be a rectangle - Text Search rejects a circle here as an unknown field, which is
+                    // what made every search fail with a 400 - so the corners are trimmed off below.
+                    new LocationRestriction(new Rectangle(
+                        new LatLng(bounds.LowLatitude, bounds.LowLongitude),
+                        new LatLng(bounds.HighLatitude, bounds.HighLongitude))),
                     Math.Clamp(pageSize, 1, 20),
                     pageToken),
                 options: Json),
@@ -129,14 +148,19 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
         request.Headers.Add("X-Goog-FieldMask", SearchFieldMask);
 
         var payload = await SendAsync<SearchTextResponse>(request, cancellationToken);
-        var places = payload?.Places ?? [];
+
+        // Trimmed back to the circle the user asked for. The rectangle reaches past it at the corners,
+        // and a missing location reads as (0, 0), which is outside any real search too - a business
+        // that cannot be placed cannot be shown to be within range.
+        var businesses = (payload?.Places ?? [])
+            .Select(ToBusiness)
+            .Where(business => SearchArea.Contains(latitude, longitude, radius, business.Latitude, business.Longitude))
+            .ToList();
 
         // Google reports no total. The count in hand is the only honest number, and inflating it
-        // would have the client promise results that do not exist.
-        return new ProviderSearchResult(
-            [.. places.Select(ToBusiness)],
-            places.Count,
-            payload?.NextPageToken);
+        // would have the client promise results that do not exist. Paging continues from Google's
+        // token, not from this count, so a page trimmed short still offers the next one.
+        return new ProviderSearchResult(businesses, businesses.Count, payload?.NextPageToken);
     }
 
     /// <summary>Sends a request, translating provider failures into platform ones.</summary>
@@ -158,7 +182,13 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
 
         var status = response.StatusCode;
 
-        LogProviderFailed((int)status, request.RequestUri?.AbsolutePath ?? string.Empty);
+        // Logged for whoever reads the logs, and never returned to the caller. Without Google's own
+        // reason, a rejected request is indistinguishable from an outage, which is how a malformed
+        // search survived until the first real key was configured.
+        LogProviderFailed(
+            (int)status,
+            request.RequestUri?.AbsolutePath ?? string.Empty,
+            await ReadProviderErrorAsync(response, cancellationToken));
 
         // 429 from Google is the platform's own quota, not this user's - they have their own
         // allowance and it is counted separately. Reported as a billing state so the distinction
@@ -180,6 +210,33 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
         throw new ExternalServiceException(
             "Places",
             "The business directory could not be reached. Please try again.");
+    }
+
+    /// <summary>
+    /// Whether a geocoding call actually succeeded, logging Google's reason when it did not.
+    /// </summary>
+    /// <remarks>
+    /// The Geocoding API answers a denied key, an unbilled project or an exhausted quota with an HTTP
+    /// 200 and a status in the body. Read only by HTTP status, every one of those looked like "no
+    /// places found", with nothing in the logs.
+    /// <para>
+    /// A failure still degrades to no suggestions rather than an error. Naming a pin is a nicety, and
+    /// the business search itself works from coordinates alone - so a broken geocoder must not stop
+    /// someone searching from a pin they dropped by hand.
+    /// </para>
+    /// </remarks>
+    private bool GeocodeSucceeded(GeocodeResponse? payload)
+    {
+        var status = payload?.Status;
+
+        if (status is null || status is "OK" or "ZERO_RESULTS")
+        {
+            return true;
+        }
+
+        LogGeocodeFailed(status, payload?.ErrorMessage ?? string.Empty);
+
+        return false;
     }
 
     private static PlaceSuggestion ToSuggestion(GeocodeResult result)
@@ -217,24 +274,56 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
                 ? string.Join("; ", hours)
                 : null);
 
+    /// <summary>Google's own explanation of a failed call, or empty when it gave none.</summary>
+    private static async Task<string> ReadProviderErrorAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var body = await response.Content.ReadFromJsonAsync<ProviderErrorEnvelope>(Json, cancellationToken);
+            var message = body?.Error?.Message;
+
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return string.Empty;
+            }
+
+            return message.Length <= 300 ? message : message[..300];
+        }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException or HttpRequestException)
+        {
+            // Diagnostic only. A body that cannot be read must not turn a provider failure into a
+            // different, more confusing one.
+            return string.Empty;
+        }
+    }
+
     [LoggerMessage(
         EventId = 3601,
         Level = LogLevel.Warning,
-        Message = "Places provider returned {StatusCode} for {Path}.")]
-    private partial void LogProviderFailed(int statusCode, string path);
+        Message = "Places provider returned {StatusCode} for {Path}: {Detail}")]
+    private partial void LogProviderFailed(int statusCode, string path, string detail);
 
     private sealed record SearchTextRequest(
         [property: JsonPropertyName("textQuery")] string TextQuery,
         [property: JsonPropertyName("locationRestriction")] LocationRestriction LocationRestriction,
         [property: JsonPropertyName("pageSize")] int PageSize,
-        [property: JsonPropertyName("pageToken")] string? PageToken);
+
+        // Omitted on the first page rather than sent as null.
+        [property: JsonPropertyName("pageToken"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? PageToken);
 
     private sealed record LocationRestriction(
-        [property: JsonPropertyName("circle")] Circle Circle);
+        [property: JsonPropertyName("rectangle")] Rectangle Rectangle);
 
-    private sealed record Circle(
-        [property: JsonPropertyName("center")] LatLng Center,
-        [property: JsonPropertyName("radius")] double Radius);
+    private sealed record Rectangle(
+        [property: JsonPropertyName("low")] LatLng Low,
+        [property: JsonPropertyName("high")] LatLng High);
+
+    private sealed record ProviderErrorEnvelope(ProviderError? Error);
+
+    private sealed record ProviderError(string? Message);
 
     private sealed record LatLng(
         [property: JsonPropertyName("latitude")] double Latitude,
@@ -260,7 +349,10 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
 
     private sealed record OpeningHours(List<string>? WeekdayDescriptions);
 
-    private sealed record GeocodeResponse(List<GeocodeResult>? Results);
+    private sealed record GeocodeResponse(
+        List<GeocodeResult>? Results,
+        [property: JsonPropertyName("status")] string? Status,
+        [property: JsonPropertyName("error_message")] string? ErrorMessage);
 
     private sealed record GeocodeResult(
         [property: JsonPropertyName("place_id")] string? PlaceId,
@@ -276,4 +368,10 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
         [property: JsonPropertyName("long_name")] string? LongName,
         [property: JsonPropertyName("short_name")] string? ShortName,
         List<string>? Types);
+
+    [LoggerMessage(
+        EventId = 3602,
+        Level = LogLevel.Warning,
+        Message = "Geocoding returned {Status}: {Detail}")]
+    private partial void LogGeocodeFailed(string status, string detail);
 }

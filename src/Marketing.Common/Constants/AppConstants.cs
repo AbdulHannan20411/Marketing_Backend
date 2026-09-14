@@ -181,6 +181,9 @@ public static class AppConstants
 
         /// <summary>Email template test sends, partitioned by user.</summary>
         public const string EmailTests = "rl:email-tests";
+
+        /// <summary>AI generation, partitioned by user. Every call spends provider quota.</summary>
+        public const string AiGenerate = "rl:ai-generate";
     }
 
     /// <summary>

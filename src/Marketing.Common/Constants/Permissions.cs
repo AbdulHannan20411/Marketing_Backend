@@ -187,6 +187,19 @@ public static class Permissions
         public const string DownloadPdf = "reports.download.pdf";
     }
 
+    /// <summary>AI assistance.</summary>
+    public static class Ai
+    {
+        /// <summary>
+        /// Use the AI marketing assistant.
+        /// </summary>
+        /// <remarks>
+        /// Its own permission, and not in the Employee default: every generation spends the
+        /// platform's AI provider quota, so it is granted deliberately rather than by default.
+        /// </remarks>
+        public const string AssistantUse = "ai.assistant.use";
+    }
+
     /// <summary>Organisation settings.</summary>
     public static class Settings
     {
@@ -264,6 +277,8 @@ public static class Permissions
         Social.PostsDelete, Social.AnalyticsView,
 
         Reports.View, Reports.Export, Reports.DownloadCsv, Reports.DownloadExcel, Reports.DownloadPdf,
+
+        Ai.AssistantUse,
 
         Settings.Company, Settings.Employees, Settings.Billing, Settings.Subscription,
         Settings.Integrations, Settings.ApiKeys,

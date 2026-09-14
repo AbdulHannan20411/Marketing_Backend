@@ -362,6 +362,27 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHttpClient<Application.Interfaces.IPlaceProvider, Places.GooglePlacesProvider>(
             client => client.Timeout = TimeSpan.FromSeconds(15));
 
+        // AI provider. Like Places, an unset key is a supported state ("no AI assistant here") and is
+        // reported by the endpoint, not at startup. GEMINI_API_KEY is honoured as a fallback so the
+        // provider's own conventional variable works without the section prefix.
+        services.AddOptions<Ai.GeminiOptions>()
+            .Bind(configuration.GetSection(Ai.GeminiOptions.SectionName))
+            .PostConfigure<IConfiguration>((options, config) =>
+            {
+                if (string.IsNullOrWhiteSpace(options.ApiKey))
+                {
+                    options.ApiKey = config[Ai.GeminiOptions.ApiKeyEnvironmentVariable] ?? string.Empty;
+                }
+            })
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // No client timeout: the service applies Gemini:TimeoutSeconds itself, linked to the caller's
+        // token, so a timeout and a cancelled request can be told apart. No retry either - a retried
+        // generation spends quota twice.
+        services.AddHttpClient<Application.Interfaces.IAiService, Ai.GeminiAiService>(
+            client => client.Timeout = Timeout.InfiniteTimeSpan);
+
         services.AddTransient<GraphApiErrorHandler>();
         services.AddTransient<TenantAccessTokenHandler>();
 
