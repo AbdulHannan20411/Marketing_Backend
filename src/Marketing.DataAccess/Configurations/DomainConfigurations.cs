@@ -174,6 +174,7 @@ public sealed class MessageTemplateConfiguration : BaseEntityConfiguration<Messa
 
         builder.Property(template => template.Name).IsRequired().HasMaxLength(120);
         builder.Property(template => template.MetaTemplateId).HasMaxLength(64);
+        builder.Property(template => template.WabaId).HasMaxLength(64);
         builder.Property(template => template.Language).IsRequired().HasMaxLength(16);
         builder.Property(template => template.Category).IsRequired().HasMaxLength(24).HasConversion<string>();
         builder.Property(template => template.Status).IsRequired().HasMaxLength(16).HasConversion<string>();

@@ -14,7 +14,7 @@ namespace Marketing.Infrastructure.WhatsApp.Clients;
 /// retrying, an invalid-parameter code never is.
 /// </para>
 /// </summary>
-public sealed class GraphApiErrorHandler : DelegatingHandler
+public sealed partial class GraphApiErrorHandler : DelegatingHandler
 {
     private const string ServiceName = "MetaWhatsAppCloudApi";
 
@@ -50,23 +50,17 @@ public sealed class GraphApiErrorHandler : DelegatingHandler
             || (int)response.StatusCode >= 500
             || (error?.Code is { } code && ThrottlingCodes.Contains(code));
 
-        _logger.LogError(
-            "Meta Graph API call failed. Status: {StatusCode}. Code: {ErrorCode}/{ErrorSubCode}. Trace: {TraceId}.",
-            (int)response.StatusCode,
-            error?.Code,
-            error?.SubCode,
-            error?.TraceId);
+        LogCallFailed((int)response.StatusCode, error?.Code, error?.SubCode, error?.TraceId);
 
-        // At Debug, and only there. Graph's message is the one thing that says *why* a call was
-        // refused, and without it a numeric code sends an operator hunting through documentation -
-        // but the body routinely echoes request parameters, which for this platform means recipient
-        // phone numbers. Debug is off in production, which is the trade this makes.
-        if (_logger.IsEnabled(LogLevel.Debug))
+        // Meta's own words, logged where they will be seen. Graph's message is the one thing that
+        // says *why* a call was refused - held back to Debug, a bare "code 100" or "code 131058" sent
+        // people into a debugger to learn a template was test-only. The body echoes request
+        // parameters, so phone numbers and tokens are masked before it is written.
+        var detail = GraphErrorText.Mask(error?.Message);
+
+        if (detail.Length > 0)
         {
-            _logger.LogDebug(
-                "Meta Graph API error detail for {Path}: {Message}",
-                request.RequestUri?.AbsolutePath,
-                error?.Message);
+            LogErrorDetail(request.RequestUri?.AbsolutePath ?? string.Empty, detail);
         }
 
         // The message goes to the logs, not to the client: Graph error bodies routinely echo back
@@ -75,7 +69,17 @@ public sealed class GraphApiErrorHandler : DelegatingHandler
             ServiceName,
             $"Graph API returned {(int)response.StatusCode}. Code {error?.Code}, trace {error?.TraceId}.",
             innerException: null,
-            isTransient: isTransient);
+            isTransient: isTransient)
+        {
+            // Carried as a number so a caller can explain the failure without parsing the message.
+            ProviderErrorCode = error?.Code,
+
+            // Meta's wording for the person who made the request - "content in this language already
+            // exists" - masked like the log line. Null when Meta gave none.
+            ProviderUserMessage = GraphErrorText.Mask(error?.UserMessage) is { Length: > 0 } userMessage
+                ? userMessage
+                : null,
+        };
     }
 
     private static GraphError? TryParse(string body)
@@ -95,4 +99,16 @@ public sealed class GraphApiErrorHandler : DelegatingHandler
             return null;
         }
     }
+
+    [LoggerMessage(
+        EventId = 2420,
+        Level = LogLevel.Error,
+        Message = "Meta Graph API call failed. Status: {StatusCode}. Code: {ErrorCode}/{ErrorSubCode}. Trace: {TraceId}.")]
+    private partial void LogCallFailed(int statusCode, int? errorCode, int? errorSubCode, string? traceId);
+
+    [LoggerMessage(
+        EventId = 2421,
+        Level = LogLevel.Warning,
+        Message = "Meta Graph API error detail for {Path}: {Detail}")]
+    private partial void LogErrorDetail(string path, string detail);
 }

@@ -131,6 +131,17 @@ public sealed class MessageTemplate : BaseEntity, IRequiresTenant
     /// <summary>Meta's template identifier.</summary>
     public string? MetaTemplateId { get; set; }
 
+    /// <summary>
+    /// WhatsApp Business Account the template was last synced from. Null for a draft that has not
+    /// reached Meta, and for a template Meta stopped listing for the connected account.
+    /// </summary>
+    /// <remarks>
+    /// Meta approves a template for one account only. Without this, templates synced while a tenant
+    /// was on Meta's test number stayed "approved" after they connected their own number, and failed
+    /// only when a campaign sent them.
+    /// </remarks>
+    public string? WabaId { get; set; }
+
     /// <summary>Template name.</summary>
     public required string Name { get; set; }
 

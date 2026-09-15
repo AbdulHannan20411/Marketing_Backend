@@ -194,6 +194,19 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
             return;
         }
 
+        if (!TemplateAccount.IsOn(template.WabaId, template.MetaTemplateId, connection.WabaId))
+        {
+            // Stopped before the first message rather than letting every recipient fail one by one:
+            // Meta refuses a template that belongs to another account for all of them alike.
+            await AbandonAsync(
+                campaign,
+                $"\"{template.Name}\" belongs to a previously connected WhatsApp account. Sync templates, "
+                + "choose one of this account's approved templates, and start the campaign again.",
+                cancellationToken);
+
+            return;
+        }
+
         // Refused rather than sent with empty placeholders. The campaign wizard does not yet
         // collect variable bindings, and a message reading "Hi , your order  is ready" is worse
         // than one that never left - it is unrecoverable and it is what the recipient remembers.
@@ -365,21 +378,29 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
             return "The campaign has no template.";
         }
 
-        var status = await _queries.FirstOrDefaultAsync(
+        var template = await _queries.FirstOrDefaultAsync(
             _templates.Query()
                 .Where(template => template.Id == templateId)
-                .Select(template => (TemplateStatus?)template.Status),
+                .Select(template => new { template.Status, template.WabaId, template.MetaTemplateId }),
             cancellationToken);
+
+        if (template is null)
+        {
+            return "The template this campaign uses no longer exists.";
+        }
+
+        if (!TemplateAccount.IsOn(template.WabaId, template.MetaTemplateId, connection.WabaId))
+        {
+            return $"\"{campaign.TemplateName}\" belongs to a previously connected WhatsApp account. "
+                   + "Sync templates and choose one of this account's approved templates.";
+        }
 
         // Meta pauses and disables templates on poor recipient feedback, without warning and long
         // after approval.
-        return status switch
-        {
-            null => "The template this campaign uses no longer exists.",
-            TemplateStatus.Approved => null,
-            _ => $"\"{campaign.TemplateName}\" is {status.ToString()!.ToLowerInvariant()} at Meta "
-                 + "and cannot be sent. Fix the template, then resume the campaign.",
-        };
+        return template.Status == TemplateStatus.Approved
+            ? null
+            : $"\"{campaign.TemplateName}\" is {template.Status.ToString().ToLowerInvariant()} at Meta "
+              + "and cannot be sent. Fix the template, then resume the campaign.";
     }
 
     /// <summary>Claims one occurrence, which is what stops it being dispatched twice.</summary>
@@ -555,21 +576,30 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
         }
         catch (ExternalServiceException exception)
         {
+            // Meta's code, in words. "Graph API returned 400. Code 131058" told nobody the template
+            // itself was the problem.
+            var known = MetaSendErrors.Describe(exception.ProviderErrorCode);
+
+            message.ErrorCode = exception.ProviderErrorCode ?? message.ErrorCode;
+
             // Left pending when attempts remain, so a Meta blip costs a retry rather than a
-            // recipient. Only a message that has exhausted them is written off.
-            if (message.AttemptCount < MaximumAttempts)
+            // recipient. A failure Meta will repeat word for word - a test-only template, a number not
+            // on WhatsApp - is written off at once: retrying it only delays the report.
+            if (message.AttemptCount < MaximumAttempts && known is not { Permanent: true })
             {
                 LogSendRetryable(exception, message.Id, message.AttemptCount);
 
                 return;
             }
 
+            var reason = known?.Reason ?? exception.Message;
+
             message.Status = CampaignMessageStatus.Failed;
-            message.ErrorReason = exception.Message;
+            message.ErrorReason = reason;
 
             campaign.FailedCount++;
 
-            RecordFailure(campaign, message, exception.Message);
+            RecordFailure(campaign, message, reason);
         }
     }
 

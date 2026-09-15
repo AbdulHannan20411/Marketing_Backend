@@ -147,7 +147,8 @@ public sealed class WhatsAppService : IWhatsAppService
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        var filtered = _templates.Query();
+        var filtered = _templates.Query()
+            .Where(TemplateAccount.BelongsTo(await ConnectedWabaIdAsync(cancellationToken)));
 
         if (Enum.TryParse<TemplateStatus>(query.Status, ignoreCase: true, out var status)
             && !string.Equals(query.Status, TemplateQuery.All, StringComparison.OrdinalIgnoreCase))
@@ -227,6 +228,7 @@ public sealed class WhatsAppService : IWhatsAppService
         // counts the caller's templates and nobody else's.
         var counts = await _queries.ToListAsync(
             _templates.Query()
+                .Where(TemplateAccount.BelongsTo(await ConnectedWabaIdAsync(cancellationToken)))
                 .GroupBy(template => template.Status)
                 .Select(group => new { Status = group.Key, Count = group.Count() }),
             cancellationToken);
@@ -261,6 +263,7 @@ public sealed class WhatsAppService : IWhatsAppService
     {
         var rows = await _queries.ToListAsync(
             _templates.Query()
+                .Where(TemplateAccount.BelongsTo(await ConnectedWabaIdAsync(cancellationToken)))
                 .OrderBy(template => template.Name)
                 .Select(template => new
                 {
@@ -325,6 +328,8 @@ public sealed class WhatsAppService : IWhatsAppService
 
         // Matched on name and language, which is what Meta treats as unique. Matching on Meta's id
         // alone would duplicate every template created locally before its first sync.
+        var returned = new HashSet<MessageTemplate>(ReferenceEqualityComparer.Instance);
+
         foreach (var template in remote)
         {
             var local = existing.FirstOrDefault(entry =>
@@ -345,6 +350,12 @@ public sealed class WhatsAppService : IWhatsAppService
             }
 
             local.MetaTemplateId = template.Id;
+
+            // Claimed by the account it was just read from. A template carried over from another
+            // account - Meta's test number, most often - moves here only if this account has it too.
+            local.WabaId = wabaId;
+            returned.Add(local);
+
             local.Status = Enum.TryParse<TemplateStatus>(template.Status, true, out var status)
                 ? status
                 : TemplateStatus.Pending;
@@ -353,11 +364,24 @@ public sealed class WhatsAppService : IWhatsAppService
                 : local.Category;
         }
 
-        // Local templates Meta no longer knows about are left alone rather than deleted. A sync
-        // that silently removes a customer's work because of a transient paging problem is far
-        // worse than a stale row.
+        // Templates Meta no longer lists for this account are not deleted - a sync that removed a
+        // customer's work over a paging hiccup would be far worse than a stale row - but they stop
+        // counting as this account's. Their account is cleared, so they drop out of the lists and the
+        // campaign picker, and the next sync that sees them again claims them back.
+        foreach (var stale in existing.Where(entry =>
+                     string.Equals(entry.WabaId, wabaId, StringComparison.Ordinal) && !returned.Contains(entry)))
+        {
+            stale.WabaId = null;
+        }
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return await GetTemplatesAsync(cancellationToken);
     }
+
+    /// <summary>The WhatsApp Business Account connected now, or null when there is none.</summary>
+    private async Task<string?> ConnectedWabaIdAsync(CancellationToken cancellationToken) =>
+        await _queries.FirstOrDefaultAsync(
+            _connections.Query().Select(connection => connection.WabaId),
+            cancellationToken);
 }

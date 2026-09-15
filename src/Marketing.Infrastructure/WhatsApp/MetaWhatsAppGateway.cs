@@ -171,6 +171,69 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
     private static string Bearer(string accessToken) => $"Bearer {accessToken}";
 
     /// <inheritdoc />
+    public async Task<MetaTemplateSubmission> CreateTemplateAsync(
+        string wabaId,
+        MetaTemplateDefinition definition,
+        string accessToken,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await _client.CreateTemplateAsync(
+            wabaId,
+            TemplateDefinitionRequest.ForCreate(definition),
+            Bearer(accessToken),
+            cancellationToken);
+
+        // Without an id the template can never be edited, deleted or matched to a review verdict, so
+        // an acknowledgement that lacks one is treated as a failure rather than stored half-made.
+        return response.Id is { Length: > 0 } id
+            ? new MetaTemplateSubmission(id, response.Status, response.Category)
+            : throw new ExternalServiceException(
+                "MetaWhatsAppCloudApi",
+                "Meta accepted the template but returned no template id.");
+    }
+
+    /// <inheritdoc />
+    public async Task UpdateTemplateAsync(
+        string metaTemplateId,
+        MetaTemplateDefinition definition,
+        bool includeCategory,
+        string accessToken,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _client.UpdateTemplateAsync(
+            metaTemplateId,
+            TemplateDefinitionRequest.ForEdit(definition, includeCategory),
+            Bearer(accessToken),
+            cancellationToken);
+
+        if (!result.Success)
+        {
+            throw new ExternalServiceException("MetaWhatsAppCloudApi", "Meta did not accept the template edit.");
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task DeleteTemplateAsync(
+        string wabaId,
+        string name,
+        string metaTemplateId,
+        string accessToken,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _client.DeleteTemplateAsync(
+            wabaId,
+            name,
+            metaTemplateId,
+            Bearer(accessToken),
+            cancellationToken);
+
+        if (!result.Success)
+        {
+            throw new ExternalServiceException("MetaWhatsAppCloudApi", "Meta did not delete the template.");
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<MetaTemplate>> GetTemplatesAsync(
         string wabaId,
         string? accessToken = null,
@@ -178,11 +241,14 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
     {
         var templates = new List<MetaTemplate>();
         string? cursor = null;
+        var pages = 0;
 
         // Followed to the end rather than taking the first page. A tenant with more than a hundred
         // templates would otherwise appear to lose the rest on every sync.
         for (var page = 0; page < MaxTemplatePages; page++)
         {
+            pages++;
+
             var response = await _client.GetTemplatesAsync(
                 wabaId,
                 TemplatePageSize,
@@ -204,6 +270,22 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
                 break;
             }
         }
+
+        // What Meta actually answered. A sync that shows nothing is otherwise indistinguishable from
+        // one that read nothing: the call succeeds either way, and only this says whether the account
+        // is empty or the templates were lost on the way in. Counts and statuses only - no names.
+        LogTemplatesFetched(
+            templates.Count,
+            wabaId,
+            pages,
+            templates.Count == 0
+                ? "none"
+                : string.Join(
+                    ", ",
+                    templates
+                        .GroupBy(template => template.Status, StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                        .Select(group => $"{group.Key}={group.Count().ToString(System.Globalization.CultureInfo.InvariantCulture)}")));
 
         return templates;
     }
@@ -254,4 +336,10 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
         Level = LogLevel.Warning,
         Message = "Could not inspect the WhatsApp token's expiry; connecting without a warning date.")]
     private partial void LogTokenInspectionFailed(Exception exception);
+
+    [LoggerMessage(
+        EventId = 2611,
+        Level = LogLevel.Information,
+        Message = "Meta returned {TemplateCount} templates for WhatsApp Business Account {WabaId} over {PageCount} page(s). By status: {StatusSummary}.")]
+    private partial void LogTemplatesFetched(int templateCount, string wabaId, int pageCount, string statusSummary);
 }

@@ -73,6 +73,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
     private readonly IRepository<CampaignRun> _runs;
     private readonly IRecurrenceCalculator _recurrence;
     private readonly IRepository<MessageTemplate> _templates;
+    private readonly IWhatsAppConnectionRepository _connections;
     private readonly IRepository<ContactGroupMember> _groupMembers;
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
@@ -87,6 +88,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
         IRepository<CampaignRun> runs,
         IRecurrenceCalculator recurrence,
         IRepository<MessageTemplate> templates,
+        IWhatsAppConnectionRepository connections,
         IRepository<ContactGroupMember> groupMembers,
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
@@ -99,6 +101,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
         _runs = runs;
         _recurrence = recurrence;
         _templates = templates;
+        _connections = connections;
         _groupMembers = groupMembers;
         _queries = queries;
         _unitOfWork = unitOfWork;
@@ -540,6 +543,18 @@ public sealed class CampaignWriteService : ICampaignWriteService
             _templates.Query().Where(existing => existing.Id == id),
             cancellationToken)
             ?? throw new NotFoundException("Template", templateId);
+
+        var connection = await _connections.FindForTenantAsync(_tenantContext.RequireTenantId(), cancellationToken);
+
+        // Approved somewhere is not approved here. Meta approves a template for one WhatsApp account,
+        // and one left over from a previous connection is refused at send, after the campaign starts.
+        if (!TemplateAccount.IsOn(template.WabaId, template.MetaTemplateId, connection?.WabaId))
+        {
+            throw new BusinessRuleException(
+                "template_not_on_connected_account",
+                $"\"{template.Name}\" belongs to a previously connected WhatsApp account. "
+                + "Sync templates and choose one of this account's approved templates.");
+        }
 
         if (template.Status != TemplateStatus.Approved)
         {

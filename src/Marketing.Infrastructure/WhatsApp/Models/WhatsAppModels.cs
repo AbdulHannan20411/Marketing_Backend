@@ -79,12 +79,19 @@ public sealed record GraphErrorResponse([property: JsonPropertyName("error")] Gr
 /// <param name="Code">Numeric error code.</param>
 /// <param name="SubCode">Numeric sub-code, when present.</param>
 /// <param name="TraceId">Meta's trace identifier - quote it when raising a support case.</param>
+/// <param name="UserTitle">Short heading Meta wrote for an end user, when it gave one.</param>
+/// <param name="UserMessage">
+/// Explanation Meta wrote for an end user - "content in this language already exists" - rather than
+/// for a developer. Given on most template refusals.
+/// </param>
 public sealed record GraphError(
     [property: JsonPropertyName("message")] string? Message,
     [property: JsonPropertyName("type")] string? Type,
     [property: JsonPropertyName("code")] int Code,
     [property: JsonPropertyName("error_subcode")] int? SubCode,
-    [property: JsonPropertyName("fbtrace_id")] string? TraceId);
+    [property: JsonPropertyName("fbtrace_id")] string? TraceId,
+    [property: JsonPropertyName("error_user_title")] string? UserTitle = null,
+    [property: JsonPropertyName("error_user_msg")] string? UserMessage = null);
 
 /// <summary>Result of exchanging an Embedded Signup code.</summary>
 /// <param name="AccessToken">

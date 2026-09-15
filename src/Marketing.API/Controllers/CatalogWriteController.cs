@@ -171,11 +171,21 @@ public sealed class TemplateWriteController : ApiControllerBase
         _scope = scope;
     }
 
-    /// <summary>Creates a template. It starts pending, because only Meta can approve one.</summary>
-    /// <response code="200">The created template.</response>
+    /// <summary>
+    /// Creates a template on the connected WhatsApp account and submits it to Meta for review. It
+    /// starts pending, because only Meta can approve one.
+    /// </summary>
+    /// <response code="200">Submitted to Meta and stored.</response>
+    /// <response code="409">
+    /// No WhatsApp account is connected (<c>whatsapp_not_connected</c>), the name is taken
+    /// (<c>template_name_taken</c>), or Meta refused it (<c>template_rejected_by_meta</c>, with Meta's reason).
+    /// </response>
+    /// <response code="422">The draft breaks one of Meta's rules; each problem is listed under its field.</response>
     [HttpPost]
     [RequirePermission(Permissions.WhatsApp.TemplatesSync)]
     [ProducesResponseType(typeof(ApiResponse<MessageTemplateResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> CreateAsync(
         [FromBody] MessageTemplateDraft draft,
         [FromQuery] string? adminId,
@@ -188,11 +198,19 @@ public sealed class TemplateWriteController : ApiControllerBase
         return Success(template, $"Template \"{template.Name}\" created and awaiting Meta review.");
     }
 
-    /// <summary>Replaces a template. Editing returns it to the pending state.</summary>
-    /// <response code="200">The updated template.</response>
+    /// <summary>
+    /// Replaces a template's content and resubmits it to Meta. Editing returns it to the pending state.
+    /// </summary>
+    /// <response code="200">Resubmitted to Meta and stored.</response>
+    /// <response code="409">Not connected, name taken, or refused by Meta - as for create.</response>
+    /// <response code="422">
+    /// The draft breaks one of Meta's rules, or tries to rename a submitted template or change its language.
+    /// </response>
     [HttpPut("{id}")]
     [RequirePermission(Permissions.WhatsApp.TemplatesSync)]
     [ProducesResponseType(typeof(ApiResponse<MessageTemplateResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> UpdateAsync(
         string id,
         [FromBody] MessageTemplateDraft draft,
@@ -206,9 +224,9 @@ public sealed class TemplateWriteController : ApiControllerBase
         return Success(template, $"Template \"{template.Name}\" saved and awaiting Meta review.");
     }
 
-    /// <summary>Deletes a template.</summary>
+    /// <summary>Deletes a template, from Meta as well when it lives on the connected account.</summary>
     /// <response code="200">The template was deleted.</response>
-    /// <response code="409">A scheduled or running campaign uses it.</response>
+    /// <response code="409">A scheduled or running campaign uses it, or Meta refused the deletion.</response>
     [HttpDelete("{id}")]
     [RequirePermission(Permissions.WhatsApp.TemplatesSync)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]

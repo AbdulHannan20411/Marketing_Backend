@@ -167,21 +167,46 @@ public interface IWhatsAppCloudApi
     /// <summary>Creates a message template and submits it to Meta for review.</summary>
     /// <param name="wabaId">WhatsApp Business Account identifier.</param>
     /// <param name="payload">Template definition.</param>
+    /// <param name="authorization">
+    /// Bearer token, always explicit. A Super Admin acting for a customer carries the tenant in a
+    /// scope the stored-token handler cannot see, so relying on it would send no credential at all.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Post("/{wabaId}/message_templates")]
     public Task<TemplateMutationResponse> CreateTemplateAsync(
         string wabaId,
-        [Body] object payload,
+        [Body] TemplateDefinitionRequest payload,
+        [Header("Authorization")] string authorization,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Edits a rejected template, which resubmits it.</summary>
+    /// <summary>Replaces a submitted template's content, which resubmits it for review.</summary>
     /// <param name="metaTemplateId">Meta's identifier for the template.</param>
-    /// <param name="payload">Fields to change.</param>
+    /// <param name="payload">The new content.</param>
+    /// <param name="authorization">Bearer token, always explicit.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Post("/{metaTemplateId}")]
     public Task<GraphSuccess> UpdateTemplateAsync(
         string metaTemplateId,
-        [Body] object payload,
+        [Body] TemplateDefinitionRequest payload,
+        [Header("Authorization")] string authorization,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Deletes one language of a template.</summary>
+    /// <remarks>
+    /// Both the name and Meta's id are sent. By name alone Meta deletes the template in every language
+    /// at once, which would take translations the customer never asked to remove.
+    /// </remarks>
+    /// <param name="wabaId">WhatsApp Business Account identifier.</param>
+    /// <param name="name">Template name.</param>
+    /// <param name="metaTemplateId">Meta's identifier for this language of the template.</param>
+    /// <param name="authorization">Bearer token, always explicit.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [Delete("/{wabaId}/message_templates")]
+    public Task<GraphSuccess> DeleteTemplateAsync(
+        string wabaId,
+        [AliasAs("name")] string name,
+        [AliasAs("hsm_id")] string metaTemplateId,
+        [Header("Authorization")] string authorization,
         CancellationToken cancellationToken = default);
 
     /// <summary>Sends a message.</summary>

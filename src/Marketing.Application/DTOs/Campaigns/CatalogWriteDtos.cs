@@ -19,8 +19,16 @@ public sealed record ContactTagDraft(string Name, TagColor Color = TagColor.Neut
 /// <param name="HeaderText">Optional header.</param>
 /// <param name="BodyText">Body, with <c>{{1}}</c> placeholders.</param>
 /// <param name="FooterText">Optional footer.</param>
-/// <param name="Variables">Ordered variable names.</param>
-/// <param name="Buttons">Button labels.</param>
+/// <param name="Variables">
+/// Ignored. Kept so older clients still bind; the placeholders are read from the body instead.
+/// </param>
+/// <param name="Buttons">
+/// Buttons as the editor sends them - kind, label and value - or as bare labels, which are quick replies.
+/// </param>
+/// <param name="HeaderKind">
+/// <c>none</c>, <c>text</c>, <c>image</c>, <c>video</c> or <c>document</c>. When absent it is read from
+/// whether header text was given.
+/// </param>
 public sealed record MessageTemplateDraft(
     string Name,
     TemplateCategory Category,
@@ -29,7 +37,8 @@ public sealed record MessageTemplateDraft(
     string BodyText,
     string? FooterText,
     IReadOnlyList<string>? Variables = null,
-    IReadOnlyList<string>? Buttons = null);
+    IReadOnlyList<TemplateButtonDraft>? Buttons = null,
+    string? HeaderKind = null);
 
 /// <summary>Request to create or replace a campaign.</summary>
 /// <param name="Name">Campaign name.</param>

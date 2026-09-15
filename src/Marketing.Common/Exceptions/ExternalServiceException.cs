@@ -35,6 +35,20 @@ public sealed class ExternalServiceException : AppException
     /// <summary>Whether the failure is transient and safe to retry.</summary>
     public bool IsTransient { get; }
 
+    /// <summary>
+    /// The dependency's own numeric error code, when it gave one - Meta's <c>error.code</c>, for
+    /// example. Lets a caller act on the specific failure without parsing the message.
+    /// </summary>
+    public int? ProviderErrorCode { get; init; }
+
+    /// <summary>
+    /// The dependency's own explanation meant for an end user, when it gave one - Meta's
+    /// <c>error_user_msg</c>, such as "a template with that name already exists". Unlike
+    /// <see cref="Exception.Message"/> it is written for the person who made the request, and it has
+    /// already had personal data masked.
+    /// </summary>
+    public string? ProviderUserMessage { get; init; }
+
     /// <inheritdoc />
     public override HttpStatusCode StatusCode =>
         IsTransient ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.BadGateway;

@@ -120,7 +120,77 @@ public interface IWhatsAppGateway
         string wabaId,
         string accessToken,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Creates a template on a business account and submits it for Meta's review.</summary>
+    /// <param name="wabaId">Business account the template will belong to.</param>
+    /// <param name="definition">What the template says.</param>
+    /// <param name="accessToken">The tenant's business token.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Meta's id for the template, and the status and category it assigned.</returns>
+    public Task<MetaTemplateSubmission> CreateTemplateAsync(
+        string wabaId,
+        MetaTemplateDefinition definition,
+        string accessToken,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Replaces a submitted template's content, which resubmits it for review.</summary>
+    /// <param name="metaTemplateId">Meta's id for the template.</param>
+    /// <param name="definition">What the template now says. Its name and language are not sent.</param>
+    /// <param name="includeCategory">Whether the category changed and must be sent.</param>
+    /// <param name="accessToken">The tenant's business token.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task UpdateTemplateAsync(
+        string metaTemplateId,
+        MetaTemplateDefinition definition,
+        bool includeCategory,
+        string accessToken,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Deletes one language of a template from a business account.</summary>
+    /// <param name="wabaId">Business account the template belongs to.</param>
+    /// <param name="name">Template name.</param>
+    /// <param name="metaTemplateId">Meta's id for this language of the template.</param>
+    /// <param name="accessToken">The tenant's business token.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task DeleteTemplateAsync(
+        string wabaId,
+        string name,
+        string metaTemplateId,
+        string accessToken,
+        CancellationToken cancellationToken = default);
 }
+
+/// <summary>A template's content, in the form Meta reviews.</summary>
+/// <param name="Name">Lowercase name, unique per language on the account.</param>
+/// <param name="Language">WhatsApp language code, for example <c>en_US</c>.</param>
+/// <param name="Category"><c>MARKETING</c> or <c>UTILITY</c>.</param>
+/// <param name="HeaderText">Text header, or null for none.</param>
+/// <param name="BodyText">Body, with placeholders such as <c>{{1}}</c> verbatim.</param>
+/// <param name="BodyExamples">One example value per body placeholder, in number order.</param>
+/// <param name="FooterText">Footer, or null for none.</param>
+/// <param name="Buttons">Buttons, in display order.</param>
+public sealed record MetaTemplateDefinition(
+    string Name,
+    string Language,
+    string Category,
+    string? HeaderText,
+    string BodyText,
+    IReadOnlyList<string> BodyExamples,
+    string? FooterText,
+    IReadOnlyList<MetaTemplateButton> Buttons);
+
+/// <summary>A template button, in the form Meta reviews.</summary>
+/// <param name="Type"><c>QUICK_REPLY</c>, <c>URL</c> or <c>PHONE_NUMBER</c>.</param>
+/// <param name="Text">Button label.</param>
+/// <param name="Url">Web address, for a <c>URL</c> button.</param>
+/// <param name="PhoneNumber">Phone number, for a <c>PHONE_NUMBER</c> button.</param>
+public sealed record MetaTemplateButton(string Type, string Text, string? Url = null, string? PhoneNumber = null);
+
+/// <summary>Meta's acknowledgement of a newly submitted template.</summary>
+/// <param name="Id">Meta's id for the template.</param>
+/// <param name="Status">Review status, usually <c>PENDING</c>.</param>
+/// <param name="Category">The category Meta filed it under, which may differ from the one requested.</param>
+public sealed record MetaTemplateSubmission(string Id, string? Status, string? Category);
 
 /// <summary>A business account as Meta holds it.</summary>
 /// <param name="Id">Account identifier.</param>
