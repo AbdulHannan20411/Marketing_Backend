@@ -37,13 +37,97 @@ public sealed record WebhookChange(
 /// <param name="TemplateName">Template the review outcome concerns.</param>
 /// <param name="TemplateLanguage">Language of that template.</param>
 /// <param name="TemplateRejectionReason">Why Meta rejected it.</param>
+/// <param name="Messages">Messages a customer sent.</param>
+/// <param name="Contacts">Who sent them, with the profile names Meta reports.</param>
+/// <param name="NewCategory">Category Meta has moved a template to.</param>
+/// <param name="PreviousCategory">Category it held before.</param>
+/// <param name="CurrentLimit">Messaging tier Meta now allows the number.</param>
 public sealed record WebhookValue(
     [property: JsonPropertyName("metadata")] WebhookMetadata? Metadata,
     [property: JsonPropertyName("statuses")] IReadOnlyList<WebhookStatus>? Statuses,
     [property: JsonPropertyName("event")] string? TemplateEvent,
     [property: JsonPropertyName("message_template_name")] string? TemplateName,
     [property: JsonPropertyName("message_template_language")] string? TemplateLanguage,
-    [property: JsonPropertyName("reason")] string? TemplateRejectionReason);
+    [property: JsonPropertyName("reason")] string? TemplateRejectionReason,
+    [property: JsonPropertyName("messages")] IReadOnlyList<WebhookInboundMessage>? Messages = null,
+    [property: JsonPropertyName("contacts")] IReadOnlyList<WebhookContact>? Contacts = null,
+    [property: JsonPropertyName("new_category")] string? NewCategory = null,
+    [property: JsonPropertyName("previous_category")] string? PreviousCategory = null,
+    [property: JsonPropertyName("current_limit")] string? CurrentLimit = null);
+
+/// <summary>One message a customer sent.</summary>
+/// <param name="Id">Meta's message identifier, unique and the key against redelivery.</param>
+/// <param name="From">Sender's WhatsApp number.</param>
+/// <param name="Timestamp">Unix seconds, as a string.</param>
+/// <param name="Type">Message type: <c>text</c>, <c>image</c>, <c>interactive</c> and the rest.</param>
+/// <param name="Text">Body, for a text message.</param>
+/// <param name="Image">Attachment, for an image.</param>
+/// <param name="Video">Attachment, for a video.</param>
+/// <param name="Document">Attachment, for a file.</param>
+/// <param name="Audio">Attachment, for a voice note or audio file.</param>
+/// <param name="Button">What was tapped, for a quick-reply button on a template.</param>
+/// <param name="Interactive">What was chosen, for a button or list reply.</param>
+public sealed record WebhookInboundMessage(
+    [property: JsonPropertyName("id")] string? Id,
+    [property: JsonPropertyName("from")] string? From,
+    [property: JsonPropertyName("timestamp")] string? Timestamp,
+    [property: JsonPropertyName("type")] string? Type,
+    [property: JsonPropertyName("text")] WebhookTextPayload? Text = null,
+    [property: JsonPropertyName("image")] WebhookMediaPayload? Image = null,
+    [property: JsonPropertyName("video")] WebhookMediaPayload? Video = null,
+    [property: JsonPropertyName("document")] WebhookMediaPayload? Document = null,
+    [property: JsonPropertyName("audio")] WebhookMediaPayload? Audio = null,
+    [property: JsonPropertyName("button")] WebhookButtonPayload? Button = null,
+    [property: JsonPropertyName("interactive")] WebhookInteractivePayload? Interactive = null);
+
+/// <summary>The text of a message.</summary>
+/// <param name="Body">What was written.</param>
+public sealed record WebhookTextPayload([property: JsonPropertyName("body")] string? Body);
+
+/// <summary>An attachment Meta is holding for 30 days.</summary>
+/// <param name="Id">Media identifier, which the bytes are fetched with.</param>
+/// <param name="MimeType">Media type.</param>
+/// <param name="Caption">Caption the customer typed, where the type allows one.</param>
+/// <param name="FileName">Original file name, for a document.</param>
+public sealed record WebhookMediaPayload(
+    [property: JsonPropertyName("id")] string? Id,
+    [property: JsonPropertyName("mime_type")] string? MimeType = null,
+    [property: JsonPropertyName("caption")] string? Caption = null,
+    [property: JsonPropertyName("filename")] string? FileName = null);
+
+/// <summary>A quick-reply button on a template, as tapped.</summary>
+/// <param name="Text">Button label.</param>
+/// <param name="Payload">Value the template attached to it.</param>
+public sealed record WebhookButtonPayload(
+    [property: JsonPropertyName("text")] string? Text,
+    [property: JsonPropertyName("payload")] string? Payload = null);
+
+/// <summary>A reply to an interactive message.</summary>
+/// <param name="Type">Which kind of reply it is.</param>
+/// <param name="ButtonReply">The button chosen.</param>
+/// <param name="ListReply">The list item chosen.</param>
+public sealed record WebhookInteractivePayload(
+    [property: JsonPropertyName("type")] string? Type,
+    [property: JsonPropertyName("button_reply")] WebhookReplyPayload? ButtonReply = null,
+    [property: JsonPropertyName("list_reply")] WebhookReplyPayload? ListReply = null);
+
+/// <summary>One choice from an interactive message.</summary>
+/// <param name="Id">Identifier the template gave the option.</param>
+/// <param name="Title">What the customer saw and chose.</param>
+public sealed record WebhookReplyPayload(
+    [property: JsonPropertyName("id")] string? Id,
+    [property: JsonPropertyName("title")] string? Title = null);
+
+/// <summary>Who sent the messages in this change.</summary>
+/// <param name="WaId">Their WhatsApp number.</param>
+/// <param name="Profile">Their WhatsApp profile.</param>
+public sealed record WebhookContact(
+    [property: JsonPropertyName("wa_id")] string? WaId,
+    [property: JsonPropertyName("profile")] WebhookProfile? Profile = null);
+
+/// <summary>A customer's WhatsApp profile.</summary>
+/// <param name="Name">The name they set, which is not a name the business chose.</param>
+public sealed record WebhookProfile([property: JsonPropertyName("name")] string? Name);
 
 /// <summary>Identifies the number a change concerns.</summary>
 /// <param name="DisplayPhoneNumber">Number in display format.</param>

@@ -82,6 +82,15 @@ public interface IRealtimeNotifier
         long? tenantId,
         DTOs.Payments.PaymentRequestEvent payment,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Announces a customer's message to everyone watching the workspace's inbox.</summary>
+    /// <param name="tenantId">Workspace the conversation belongs to.</param>
+    /// <param name="message">What arrived, and where.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task PublishInboundMessageAsync(
+        long tenantId,
+        InboundMessageEvent message,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>An import's live state, as pushed to the wizard.</summary>
@@ -98,6 +107,23 @@ public sealed record ImportProgress(
     string? FailureReason);
 
 /// <summary>Names of the methods the client subscribes to. Shared with the Angular client.</summary>
+/// <summary>A customer's message, as the inbox needs to hear about it.</summary>
+/// <param name="ConversationId">Thread it belongs to, so the client can update in place.</param>
+/// <param name="ContactName">Who wrote, for a notification the agent can read at a glance.</param>
+/// <param name="PhoneNumber">Their number in display form.</param>
+/// <param name="Preview">First line of what they wrote.</param>
+/// <param name="UnreadCount">Unread messages on the thread after this one.</param>
+/// <param name="WindowExpiresAt">When free-form replies stop being allowed.</param>
+/// <param name="OccurredAt">When the message arrived.</param>
+public sealed record InboundMessageEvent(
+    string ConversationId,
+    string ContactName,
+    string PhoneNumber,
+    string Preview,
+    int UnreadCount,
+    DateTimeOffset? WindowExpiresAt,
+    DateTimeOffset OccurredAt);
+
 public static class RealtimeEvents
 {
     /// <summary>A new notification arrived.</summary>
@@ -108,6 +134,9 @@ public static class RealtimeEvents
 
     /// <summary>An import's status or counters changed.</summary>
     public const string ImportProgress = "importProgress";
+
+    /// <summary>Raised when a customer messages the workspace.</summary>
+    public const string InboundMessage = "inboundMessage";
 
     /// <summary>A manual payment was submitted or decided.</summary>
     public const string PaymentRequestUpdated = "paymentRequestUpdated";

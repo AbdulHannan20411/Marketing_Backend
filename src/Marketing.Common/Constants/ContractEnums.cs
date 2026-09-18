@@ -607,6 +607,9 @@ public static class ContractEnums
         [JsonStringEnumMemberName("subscription.expiring")]
         SubscriptionExpiring,
 
+        /// <summary>The month's automatic replies have been used up.</summary>
+        AiRepliesExhausted,
+
         /// <summary>The Meta connection dropped.</summary>
         [JsonStringEnumMemberName("meta.disconnected")]
         MetaDisconnected,
@@ -945,5 +948,108 @@ public static class ContractEnums
         /// <summary>Something else. Requires free text, or it says nothing at all.</summary>
         [JsonStringEnumMemberName("other")]
         Other,
+    }
+
+    /// <summary>Who sent a message in a conversation.</summary>
+    public enum MessageDirection
+    {
+        /// <summary>From the customer to the business.</summary>
+        Inbound,
+
+        /// <summary>From the business to the customer.</summary>
+        Outbound,
+    }
+
+    /// <summary>What a conversation message carries.</summary>
+    /// <remarks>
+    /// <c>System</c> is the catch-all for message types Meta supports that this platform does not
+    /// render specially - a location, a sticker, a shared contact. It keeps the thread honest: the
+    /// agent sees that something arrived and what it was, rather than an unexplained gap.
+    /// </remarks>
+    public enum ConversationMessageKind
+    {
+        /// <summary>Plain text.</summary>
+        Text,
+
+        /// <summary>A photo.</summary>
+        Image,
+
+        /// <summary>A video.</summary>
+        Video,
+
+        /// <summary>A file.</summary>
+        Document,
+
+        /// <summary>A voice note or an audio file.</summary>
+        Audio,
+
+        /// <summary>An approved template, sent by a campaign or by an agent.</summary>
+        Template,
+
+        /// <summary>Anything else, described in the body.</summary>
+        System,
+    }
+
+    /// <summary>Delivery state of a conversation message.</summary>
+    /// <remarks>
+    /// Separate from <see cref="AppConstants.CampaignMessageStatus"/> despite the overlap: this one
+    /// starts at <c>Queued</c>, which is what an agent's reply is between pressing send and Meta
+    /// accepting it, and the client renders these values by name.
+    /// </remarks>
+    public enum InboxMessageStatus
+    {
+        /// <summary>Written down, not yet accepted by Meta.</summary>
+        Queued,
+
+        /// <summary>Accepted by Meta.</summary>
+        Sent,
+
+        /// <summary>Delivered to the handset.</summary>
+        Delivered,
+
+        /// <summary>Opened by the recipient.</summary>
+        Read,
+
+        /// <summary>Rejected or undeliverable.</summary>
+        Failed,
+    }
+
+    /// <summary>Kinds of file that can be exchanged with a customer.</summary>
+    public enum MediaKind
+    {
+        /// <summary>JPEG or PNG.</summary>
+        Image,
+
+        /// <summary>MP4 or 3GP.</summary>
+        Video,
+
+        /// <summary>PDF, Word or Excel.</summary>
+        Document,
+
+        /// <summary>AAC, MP3, M4A or OGG. Valid in a conversation only, never in a template.</summary>
+        Audio,
+    }
+
+    /// <summary>What a template's header contains.</summary>
+    /// <remarks>
+    /// Stored so the campaign builder knows whether a template needs a file attached. Without it the
+    /// client has to guess from whether header text came back, and guesses wrong for media headers.
+    /// </remarks>
+    public enum TemplateHeaderKind
+    {
+        /// <summary>No header.</summary>
+        None,
+
+        /// <summary>A line of text.</summary>
+        Text,
+
+        /// <summary>An image, supplied per send.</summary>
+        Image,
+
+        /// <summary>A video, supplied per send.</summary>
+        Video,
+
+        /// <summary>A document, supplied per send.</summary>
+        Document,
     }
 }

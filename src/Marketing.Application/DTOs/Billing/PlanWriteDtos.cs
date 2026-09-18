@@ -20,6 +20,7 @@ namespace Marketing.Application.DTOs.Billing;
 /// <param name="Status">Availability.</param>
 /// <param name="SupportLevel">Support tier.</param>
 /// <param name="Modules">Feature modules, keyed by module name.</param>
+/// <param name="AutoReplyTriggers">Automatic-reply occasions this plan unlocks, keyed greeting, first_message and unanswered.</param>
 /// <param name="Limits">Plan ceilings; null means unlimited.</param>
 /// <param name="Highlights">Marketing bullets.</param>
 /// <param name="SortOrder">Display order.</param>
@@ -38,6 +39,7 @@ public sealed record PlanDraft(
     PlanStatus Status,
     SupportLevel SupportLevel,
     IReadOnlyDictionary<string, bool>? Modules,
+    IReadOnlyDictionary<string, bool>? AutoReplyTriggers,
     PlanLimits? Limits,
     IReadOnlyList<string>? Highlights,
     int SortOrder);
@@ -65,6 +67,7 @@ public sealed record PlanPatch(
     PlanStatus? Status = null,
     SupportLevel? SupportLevel = null,
     IReadOnlyDictionary<string, bool>? Modules = null,
+    IReadOnlyDictionary<string, bool>? AutoReplyTriggers = null,
     PlanLimits? Limits = null,
     IReadOnlyList<string>? Highlights = null,
     int? SortOrder = null);

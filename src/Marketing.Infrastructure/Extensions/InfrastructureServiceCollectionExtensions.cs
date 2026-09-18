@@ -383,6 +383,12 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHttpClient<Application.Interfaces.IAiService, Ai.GeminiAiService>(
             client => client.Timeout = Timeout.InfiniteTimeSpan);
 
+        // Media lives on a different Meta host than Graph, and its URLs are handed out per file,
+        // so this client carries no base address - only the pooling and DNS refresh every other
+        // outbound call gets.
+        services.AddHttpClient(WhatsApp.MetaWhatsAppGateway.MediaDownloadClient)
+            .SetHandlerLifetime(TimeSpan.FromMinutes(5));
+
         services.AddTransient<GraphApiErrorHandler>();
         services.AddTransient<TenantAccessTokenHandler>();
 

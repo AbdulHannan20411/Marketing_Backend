@@ -88,6 +88,15 @@ public static class PublicId
     /// </summary>
     public const string PaymentRequest = "pyr";
 
+    /// <summary>Conversation identifier prefix.</summary>
+    public const string Conversation = "cnv";
+
+    /// <summary>Conversation message identifier prefix.</summary>
+    public const string Message = "msg";
+
+    /// <summary>Media asset identifier prefix.</summary>
+    public const string Media = "med";
+
     private const char Separator = '_';
 
     /// <summary>Formats a key as its public identifier.</summary>

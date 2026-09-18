@@ -396,6 +396,17 @@ public sealed class CatalogService : ICatalogService
         if (template.MetaTemplateId is { Length: > 0 } metaTemplateId
             && string.Equals(template.WabaId, account.WabaId, StringComparison.Ordinal))
         {
+            // Approved wording is what Meta reviewed and what customers have received; changing it in
+            // place would let a template drift away from the thing that was approved. Rejected is the
+            // one state where an edit is a fix rather than a rewrite of history.
+            if (template.Status != TemplateStatus.Rejected)
+            {
+                throw new BusinessRuleException(
+                    "template_not_editable",
+                    $"Meta only allows a rejected template to be edited. \"{template.Name}\" is "
+                    + $"{template.Status.ToString().ToLowerInvariant()}, so create a new template instead.");
+            }
+
             // Meta identifies a template by name and language, and neither can change once submitted.
             if (!string.Equals(template.Name, definition.Name, StringComparison.Ordinal)
                 || !string.Equals(template.Language, definition.Language, StringComparison.Ordinal))
@@ -512,6 +523,7 @@ public sealed class CatalogService : ICatalogService
         template.Language = definition.Language;
         template.Category = draft.Category;
         template.HeaderText = definition.HeaderText;
+        template.HeaderKind = TemplateDraftRules.HeaderKindFor(draft);
         template.BodyText = definition.BodyText;
         template.FooterText = definition.FooterText;
 
@@ -621,5 +633,6 @@ public sealed class CatalogService : ICatalogService
             template.QualityScore,
             template.TimesUsed,
             template.ModifiedOn ?? template.CreatedOn,
-            template.RejectionReason);
+            template.RejectionReason,
+            template.HeaderKind);
 }

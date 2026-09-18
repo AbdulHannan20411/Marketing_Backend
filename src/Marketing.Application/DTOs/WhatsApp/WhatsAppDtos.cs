@@ -160,6 +160,11 @@ public sealed record WhatsAppConnectionResponse(
 /// <param name="TimesUsed">How many campaigns have used it.</param>
 /// <param name="UpdatedAt">Instant it last changed.</param>
 /// <param name="RejectionReason">Why Meta rejected it, when it did.</param>
+/// <param name="HeaderKind">
+/// What the header carries, so the campaign builder knows whether a file has to be attached rather
+/// than guessing from whether header text came back. <c>None</c> for templates synced from Meta,
+/// which does not report components in its template list.
+/// </param>
 public sealed record MessageTemplateResponse(
     string Id,
     string Name,
@@ -174,7 +179,8 @@ public sealed record MessageTemplateResponse(
     QualityRating QualityScore,
     int TimesUsed,
     DateTimeOffset UpdatedAt,
-    string? RejectionReason);
+    string? RejectionReason,
+    TemplateHeaderKind HeaderKind = TemplateHeaderKind.None);
 
 /// <summary>Search, filter and paging for the templates screen.</summary>
 /// <remarks>

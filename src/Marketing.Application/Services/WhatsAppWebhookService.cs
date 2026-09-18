@@ -31,6 +31,7 @@ public interface IWhatsAppWebhookService
 public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
 {
     private readonly ICampaignMessageRepository _messages;
+    private readonly WhatsApp.IInboundMessageService _inbound;
     private readonly IWhatsAppConnectionRepository _connections;
     private readonly IRepository<Campaign> _campaigns;
     private readonly IRepository<DeliveryFailure> _failures;
@@ -46,6 +47,7 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
     /// <summary>Initialises a new instance.</summary>
     public WhatsAppWebhookService(
         ICampaignMessageRepository messages,
+        WhatsApp.IInboundMessageService inbound,
         IWhatsAppConnectionRepository connections,
         IRepository<Campaign> campaigns,
         IRepository<DeliveryFailure> failures,
@@ -59,6 +61,7 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
         ILogger<WhatsAppWebhookService> logger)
     {
         _messages = messages;
+        _inbound = inbound;
         _connections = connections;
         _campaigns = campaigns;
         _failures = failures;
@@ -100,9 +103,15 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
 
             using (_tenantContext.BeginScope(tenantId))
             {
+                // Inbound first: a customer's message is what an agent is waiting for, and it is the
+                // only branch that reopens the 24-hour window they have to answer in.
+                applied += await _inbound.ApplyAsync(value, connection, cancellationToken);
+
                 applied += await ApplyStatusesAsync(value, connection, cancellationToken);
 
                 await ApplyTemplateReviewAsync(value, cancellationToken);
+                await ApplyTemplateCategoryAsync(value, cancellationToken);
+                await ApplyAccountUpdateAsync(value, connection, cancellationToken);
             }
         }
 
@@ -133,7 +142,23 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
 
             var message = await _messages.FindByMetaMessageIdAsync(messageId, cancellationToken);
 
-            if (message is null || !ShouldAdvance(message.Status, status))
+            if (message is null)
+            {
+                // Not a campaign send. Agents' replies come back on the same webhook, keyed only by
+                // Meta's id, and their delivery ticks are the inbox's only evidence a reply landed.
+                if (await _inbound.ApplyReceiptAsync(
+                        messageId,
+                        receipt.Status,
+                        receipt.Errors is { Count: > 0 } errors ? errors[0].Title : null,
+                        cancellationToken))
+                {
+                    applied++;
+                }
+
+                continue;
+            }
+
+            if (!ShouldAdvance(message.Status, status))
             {
                 // Meta re-delivers a webhook until it is acknowledged, so the same receipt arrives
                 // more than once. Refusing to move backwards is what makes reprocessing harmless -
@@ -281,6 +306,85 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
         LogTemplateReviewed(name, template.Status);
     }
 
+    /// <summary>Records a template's new category when Meta reclassifies it.</summary>
+    /// <remarks>
+    /// Meta categorises on content, not on what was claimed: a "utility" template carrying an offer
+    /// becomes marketing, and is then priced as marketing. What Meta says is stored, because that is
+    /// what the customer will be charged for.
+    /// </remarks>
+    private async Task ApplyTemplateCategoryAsync(WebhookValue value, CancellationToken cancellationToken)
+    {
+        if (value.NewCategory is not { Length: > 0 } category
+            || value.TemplateName is not { Length: > 0 } name
+            || !Enum.TryParse<TemplateCategory>(category, ignoreCase: true, out var parsed))
+        {
+            return;
+        }
+
+        var template = await _queries.FirstOrDefaultAsync(
+            _templates.Query(asNoTracking: false).Where(candidate => candidate.Name == name),
+            cancellationToken);
+
+        if (template is null || template.Category == parsed)
+        {
+            return;
+        }
+
+        template.Category = parsed;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        LogTemplateRecategorised(name, parsed);
+    }
+
+    /// <summary>Refreshes what Meta says about the number itself.</summary>
+    /// <remarks>
+    /// Quality and the messaging tier are facts reported by Meta, never settings. They arrive on
+    /// their own webhooks because they change without anything happening on this platform - a run of
+    /// blocks, or a tier upgrade earned overnight.
+    /// </remarks>
+    private async Task ApplyAccountUpdateAsync(
+        WebhookValue value,
+        WhatsAppConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var changed = false;
+
+        if (value.TemplateEvent is { Length: > 0 } quality
+            && Enum.TryParse<QualityRating>(quality, ignoreCase: true, out var rating)
+            && connection.QualityRating != rating)
+        {
+            connection.QualityRating = rating;
+            changed = true;
+        }
+
+        if (value.CurrentLimit is { Length: > 0 } limit && ParseTier(limit) is { } tier && connection.MessagingTier != tier)
+        {
+            connection.MessagingTier = tier;
+            changed = true;
+        }
+
+        if (!changed)
+        {
+            return;
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        LogConnectionUpdated(connection.QualityRating, connection.MessagingTier);
+    }
+
+    /// <summary>Reads Meta's tier strings, which arrive as <c>TIER_1K</c> and similar.</summary>
+    private static MessagingTier? ParseTier(string tier) => tier.Trim().ToUpperInvariant() switch
+    {
+        "TIER_50" or "TIER_250" => MessagingTier.Tier250,
+        "TIER_1K" => MessagingTier.Tier1K,
+        "TIER_10K" => MessagingTier.Tier10K,
+        "TIER_100K" => MessagingTier.Tier100K,
+        "TIER_UNLIMITED" or "UNLIMITED" => MessagingTier.Unlimited,
+        _ => null,
+    };
+
     /// <summary>Adds one to the pre-aggregated daily counters the dashboard reads.</summary>
     private async Task RecordDailyStatAsync(
         CampaignMessageStatus status,
@@ -423,4 +527,18 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
         Level = LogLevel.Information,
         Message = "Template {TemplateName} was reviewed by Meta: {Status}.")]
     private partial void LogTemplateReviewed(string templateName, TemplateStatus status);
+
+    [LoggerMessage(
+        EventId = 2745,
+        Level = LogLevel.Information,
+        Message = "Meta recategorised template {TemplateName} as {Category}; the new category is what it is priced at.")]
+    private partial void LogTemplateRecategorised(string templateName, TemplateCategory category);
+
+    [LoggerMessage(
+        EventId = 2746,
+        Level = LogLevel.Information,
+        Message = "Meta reported quality {QualityRating} and tier {MessagingTier} for the connected number.")]
+    private partial void LogConnectionUpdated(
+        QualityRating qualityRating,
+        MessagingTier messagingTier);
 }

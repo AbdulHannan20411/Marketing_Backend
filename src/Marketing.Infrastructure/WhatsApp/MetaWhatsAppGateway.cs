@@ -6,6 +6,8 @@ using Marketing.Infrastructure.WhatsApp.Models;
 using Marketing.Shared.Abstractions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Refit;
+using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Infrastructure.WhatsApp;
 
@@ -24,7 +26,11 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
     /// </summary>
     private const int MaxTemplatePages = 50;
 
+    /// <summary>Named client for Meta's media host, which is not the Graph host.</summary>
+    public const string MediaDownloadClient = "meta-media";
+
     private readonly IWhatsAppCloudApi _client;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly IDateTimeProvider _clock;
     private readonly WhatsAppOptions _options;
     private readonly ILogger<MetaWhatsAppGateway> _logger;
@@ -32,6 +38,7 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
     /// <summary>Initialises a new instance.</summary>
     public MetaWhatsAppGateway(
         IWhatsAppCloudApi client,
+        IHttpClientFactory httpClientFactory,
         IDateTimeProvider clock,
         IOptions<WhatsAppOptions> options,
         ILogger<MetaWhatsAppGateway> logger)
@@ -39,6 +46,7 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
         ArgumentNullException.ThrowIfNull(options);
 
         _client = client;
+        _httpClientFactory = httpClientFactory;
         _clock = clock;
         _options = options.Value;
         _logger = logger;
@@ -165,6 +173,165 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
             wabaId, Bearer(accessToken), cancellationToken: cancellationToken);
 
         return new MetaBusinessAccount(account.Id ?? wabaId, account.Name, account.TemplateNamespace);
+    }
+
+    /// <inheritdoc />
+    public Task<string> SendTextAsync(
+        string phoneNumberId,
+        string recipient,
+        string body,
+        string accessToken,
+        CancellationToken cancellationToken = default) =>
+        SendFreeFormAsync(
+            phoneNumberId,
+            new Dictionary<string, object?>
+            {
+                ["messaging_product"] = "whatsapp",
+                ["recipient_type"] = "individual",
+                ["to"] = PhoneNumbers.Normalise(recipient),
+                ["type"] = "text",
+
+                // Link previews on: an agent pasting a tracking link means the customer to open it,
+                // and a bare URL with no card reads as suspicious in a chat.
+                ["text"] = new Dictionary<string, object?>
+                {
+                    ["preview_url"] = true,
+                    ["body"] = body,
+                },
+            },
+            accessToken,
+            cancellationToken);
+
+    /// <inheritdoc />
+    public Task<string> SendMediaAsync(
+        string phoneNumberId,
+        string recipient,
+        ConversationMessageKind kind,
+        string metaMediaId,
+        string? caption,
+        string accessToken,
+        CancellationToken cancellationToken = default)
+    {
+        var type = kind switch
+        {
+            ConversationMessageKind.Image => "image",
+            ConversationMessageKind.Video => "video",
+            ConversationMessageKind.Document => "document",
+            ConversationMessageKind.Audio => "audio",
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a media message kind."),
+        };
+
+        var content = new Dictionary<string, object?> { ["id"] = metaMediaId };
+
+        // Audio carries no caption at all - Meta refuses the message rather than ignoring the field.
+        if (kind != ConversationMessageKind.Audio && caption is { Length: > 0 } text)
+        {
+            content["caption"] = text;
+        }
+
+        return SendFreeFormAsync(
+            phoneNumberId,
+            new Dictionary<string, object?>
+            {
+                ["messaging_product"] = "whatsapp",
+                ["recipient_type"] = "individual",
+                ["to"] = PhoneNumbers.Normalise(recipient),
+                ["type"] = type,
+                [type] = content,
+            },
+            accessToken,
+            cancellationToken);
+    }
+
+    /// <summary>Posts a prepared message body and returns the id Meta assigned it.</summary>
+    private async Task<string> SendFreeFormAsync(
+        string phoneNumberId,
+        Dictionary<string, object?> payload,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        var response = await _client.SendMessageAsync(
+            phoneNumberId,
+            payload,
+            Bearer(accessToken),
+            cancellationToken);
+
+        // An accepted request that queued nothing is not a send, and reporting it as one would leave
+        // an agent believing a customer had been answered.
+        return response.Messages.Count > 0
+            ? response.Messages[0].Id
+            : throw new ExternalServiceException(
+                "MetaWhatsAppCloudApi",
+                "Meta accepted the message but returned no message id.");
+    }
+
+    /// <inheritdoc />
+    public async Task<string> UploadMediaAsync(
+        string phoneNumberId,
+        Stream content,
+        string fileName,
+        string mimeType,
+        string accessToken,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await _client.UploadMediaAsync(
+            phoneNumberId,
+            new StreamPart(content, fileName, mimeType),
+            "whatsapp",
+            mimeType,
+            Bearer(accessToken),
+            cancellationToken);
+
+        // Without an id the file cannot be attached to anything, so an acknowledgement that lacks
+        // one is a failure rather than something to store and discover later.
+        return response.Id is { Length: > 0 }
+            ? response.Id
+            : throw new ExternalServiceException(
+                "MetaWhatsAppCloudApi",
+                "Meta accepted the upload but returned no media id.");
+    }
+
+    /// <inheritdoc />
+    public async Task<MetaMediaDownload> DownloadMediaAsync(
+        string mediaId,
+        string accessToken,
+        CancellationToken cancellationToken = default)
+    {
+        var handle = await _client.GetMediaAsync(mediaId, Bearer(accessToken), cancellationToken);
+
+        if (handle.Url is not { Length: > 0 } url)
+        {
+            throw new ExternalServiceException(
+                "MetaWhatsAppCloudApi",
+                "Meta described the media but gave no download URL.");
+        }
+
+        // Not the Graph client: the URL points at Meta's media host, and the Refit client is bound
+        // to the Graph base address. The credential still has to travel, or the host returns 401.
+        using var client = _httpClientFactory.CreateClient(MediaDownloadClient);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+
+        request.Headers.TryAddWithoutValidation("Authorization", Bearer(accessToken));
+
+        using var response = await client.SendAsync(request, cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new ExternalServiceException(
+                "MetaWhatsAppCloudApi",
+                $"Media download returned {(int)response.StatusCode}.",
+                innerException: null,
+                isTransient: (int)response.StatusCode >= 500);
+        }
+
+        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+
+        return new MetaMediaDownload(
+            bytes,
+            handle.MimeType is { Length: > 0 } mimeType
+                ? mimeType
+                : response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream",
+            handle.FileSize > 0 ? handle.FileSize : bytes.LongLength);
     }
 
     /// <summary>Formats a token as an Authorization header value.</summary>

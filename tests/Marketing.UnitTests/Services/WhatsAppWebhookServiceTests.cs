@@ -66,6 +66,9 @@ public sealed class WhatsAppWebhookServiceTests
     private WhatsAppWebhookService CreateService() =>
         new(
             _messages,
+
+            // Inbound messages have their own tests; this suite is about receipts and verdicts.
+            Substitute.For<Marketing.Application.Services.WhatsApp.IInboundMessageService>(),
             _connections,
             _campaigns,
             _failures,

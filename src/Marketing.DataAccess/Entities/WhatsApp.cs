@@ -142,6 +142,11 @@ public sealed class MessageTemplate : BaseEntity, IRequiresTenant
     /// </remarks>
     public string? WabaId { get; set; }
 
+    /// <summary>
+    /// What the header carries, so a campaign knows whether the template needs a file attached.
+    /// </summary>
+    public TemplateHeaderKind HeaderKind { get; set; } = TemplateHeaderKind.None;
+
     /// <summary>Template name.</summary>
     public required string Name { get; set; }
 

@@ -22,6 +22,7 @@ public sealed class WhatsAppController : ApiControllerBase
 {
     private readonly IWhatsAppService _whatsApp;
     private readonly IWhatsAppConnectionService _connections;
+    private readonly Application.Services.WhatsApp.IMediaService _media;
     private readonly ITenantScopeResolver _scope;
     private readonly WhatsAppOptions _options;
 
@@ -29,11 +30,13 @@ public sealed class WhatsAppController : ApiControllerBase
     public WhatsAppController(
         IWhatsAppService whatsApp,
         IWhatsAppConnectionService connections,
+        Application.Services.WhatsApp.IMediaService media,
         ITenantScopeResolver scope,
         IOptions<WhatsAppOptions> options)
     {
         _whatsApp = whatsApp;
         _connections = connections;
+        _media = media;
         _scope = scope;
         _options = options.Value;
     }
@@ -194,6 +197,95 @@ public sealed class WhatsAppController : ApiControllerBase
             await _connections.DisconnectAsync(cancellationToken),
             "WhatsApp Business Account disconnected.");
     }
+
+    /// <summary>
+    /// Stores a file and uploads it to Meta, returning the handle a message can reference.
+    /// </summary>
+    /// <remarks>
+    /// The browser never uploads to Meta directly: the credential that would authorise it must not
+    /// leave the server, and the stored copy is what keeps an old thread renderable after Meta's own
+    /// copy expires.
+    /// </remarks>
+    /// <param name="request">The file and what kind it is.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The stored file.</response>
+    /// <response code="409">No WhatsApp account is connected.</response>
+    /// <response code="422">The file is of a type or size WhatsApp refuses.</response>
+    [HttpPost("media")]
+    [RequirePermission(Permissions.WhatsApp.InboxReply, Permissions.WhatsApp.CampaignsCreate)]
+    [RequestSizeLimit(MediaLimits.LargestUploadBytes)]
+    [ProducesResponseType(typeof(ApiResponse<MediaAssetResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UploadMediaAsync(
+        [FromForm] WhatsAppMediaUploadRequest request,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        if (request.File is not { Length: > 0 } file)
+        {
+            throw new Common.Exceptions.ValidationException("file", "Choose a file to upload.");
+        }
+
+        if (!Enum.TryParse<ContractEnums.MediaKind>(request.Kind, ignoreCase: true, out var kind))
+        {
+            throw new Common.Exceptions.ValidationException(
+                "kind",
+                "Kind must be image, video, document or audio.");
+        }
+
+        await using var content = file.OpenReadStream();
+
+        var media = await _media.UploadAsync(
+            new MediaUploadCommand(kind, file.FileName, file.ContentType, file.Length, content),
+            cancellationToken);
+
+        return Success(media, "File uploaded.");
+    }
+
+    /// <summary>Streams a stored file back.</summary>
+    /// <remarks>
+    /// Serves this platform's own copy, not Meta's URL - which expires after 30 days and would let
+    /// anyone holding the link read another workspace's attachment. An id belonging to a different
+    /// workspace is not found rather than forbidden.
+    /// </remarks>
+    /// <param name="id">Public media identifier.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The bytes.</response>
+    /// <response code="404">No such file in this workspace.</response>
+    [HttpGet("media/{id}")]
+    [RequirePermission(Permissions.WhatsApp.InboxView, Permissions.WhatsApp.TemplatesView)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetMediaAsync(
+        string id,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        var download = await _media.OpenAsync(id, cancellationToken);
+
+        // No file name on the response: the client fetches this as a blob and renders it inline, and
+        // a download disposition would turn every preview into a save prompt.
+        return File(download.Content, download.ContentType);
+    }
+}
+
+/// <summary>The multipart body of a media upload.</summary>
+public sealed class WhatsAppMediaUploadRequest
+{
+    /// <summary>The file.</summary>
+    public IFormFile? File { get; init; }
+
+    /// <summary>What it is: <c>image</c>, <c>video</c>, <c>document</c> or <c>audio</c>.</summary>
+    public string? Kind { get; init; }
 }
 
 /// <summary>Message templates for the resolved tenant.</summary>

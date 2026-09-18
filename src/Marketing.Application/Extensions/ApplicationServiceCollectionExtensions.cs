@@ -86,6 +86,12 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<Services.Workspace.IWorkspaceDeactivationService,
             Services.Workspace.WorkspaceDeactivationService>();
         services.AddScoped<ISubscriptionExpiryReminderService, SubscriptionExpiryReminderService>();
+        services.AddScoped<Services.WhatsApp.IMediaService, Services.WhatsApp.MediaService>();
+        services.AddScoped<Services.WhatsApp.IInboxService, Services.WhatsApp.InboxService>();
+        services.AddScoped<Services.WhatsApp.IInboundMessageService, Services.WhatsApp.InboundMessageService>();
+        services.AddScoped<Services.WhatsApp.IAutoReplyAllowance, Services.WhatsApp.AutoReplyAllowanceReader>();
+        services.AddScoped<Services.WhatsApp.IAutoReplyService, Services.WhatsApp.AutoReplyService>();
+        services.AddScoped<Services.WhatsApp.IAutoReplyDispatchService, Services.WhatsApp.AutoReplyDispatchService>();
         services.AddScoped<ICampaignWriteService, CampaignWriteService>();
         services.AddScoped<IAdminAccountService, AdminAccountService>();
         services.AddScoped<IWhatsAppConnectionService, WhatsAppConnectionService>();

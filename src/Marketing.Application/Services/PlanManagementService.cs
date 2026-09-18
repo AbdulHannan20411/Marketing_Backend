@@ -66,6 +66,7 @@ public sealed class PlanManagementService : IPlanManagementService
             Status = draft.Status,
             SupportLevel = draft.SupportLevel,
             EnabledModules = PlanModules.Collapse(draft.Modules),
+            AutoReplyTriggers = Common.Constants.AutoReplyTriggers.Collapse(draft.AutoReplyTriggers),
             Highlights = [.. draft.Highlights ?? []],
             SortOrder = draft.SortOrder,
         };
@@ -105,6 +106,11 @@ public sealed class PlanManagementService : IPlanManagementService
         plan.Status = patch.Status ?? plan.Status;
         plan.SupportLevel = patch.SupportLevel ?? plan.SupportLevel;
         plan.SortOrder = patch.SortOrder ?? plan.SortOrder;
+
+        if (patch.AutoReplyTriggers is not null)
+        {
+            plan.AutoReplyTriggers = Common.Constants.AutoReplyTriggers.Collapse(patch.AutoReplyTriggers);
+        }
 
         if (patch.Modules is not null)
         {
@@ -167,6 +173,8 @@ public sealed class PlanManagementService : IPlanManagementService
             MaxStorageMb = source.MaxStorageMb,
             DailyMessageLimit = source.DailyMessageLimit,
             MonthlyMessageLimit = source.MonthlyMessageLimit,
+            AutoReplyTriggers = [.. source.AutoReplyTriggers],
+            MonthlyAiReplyLimit = source.MonthlyAiReplyLimit,
         };
 
         _plans.Add(copy);
@@ -233,5 +241,6 @@ public sealed class PlanManagementService : IPlanManagementService
         plan.MaxStorageMb = limits.MaxStorageMb;
         plan.DailyMessageLimit = limits.DailyMessageLimit;
         plan.MonthlyMessageLimit = limits.MonthlyMessageLimit;
+        plan.MonthlyAiReplyLimit = limits.MonthlyAiReplyLimit;
     }
 }

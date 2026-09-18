@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Marketing.DataAccess.Context;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Marketing.DataAccess.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260918065232_AddInboxConversationsAndMedia")]
+    partial class AddInboxConversationsAndMedia
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -178,111 +181,6 @@ namespace Marketing.DataAccess.Migrations
                         .HasDatabaseName("ix_audit_logs_tenant_id_occurred_on");
 
                     b.ToTable("audit_logs", (string)null);
-                });
-
-            modelBuilder.Entity("Marketing.DataAccess.Entities.AutoReplySettings", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
-
-                    b.Property<long>("CreatedBy")
-                        .HasColumnType("bigint")
-                        .HasColumnName("created_by");
-
-                    b.Property<DateTimeOffset>("CreatedOn")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("created_on");
-
-                    b.Property<int>("DelaySeconds")
-                        .HasColumnType("integer")
-                        .HasColumnName("delay_seconds");
-
-                    b.Property<long?>("DeletedBy")
-                        .HasColumnType("bigint")
-                        .HasColumnName("deleted_by");
-
-                    b.Property<DateTimeOffset?>("DeletedOn")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("deleted_on");
-
-                    b.Property<bool>("Enabled")
-                        .HasColumnType("boolean")
-                        .HasColumnName("enabled");
-
-                    b.Property<bool>("FirstMessageEnabled")
-                        .HasColumnType("boolean")
-                        .HasColumnName("first_message_enabled");
-
-                    b.Property<bool>("GreetingEnabled")
-                        .HasColumnType("boolean")
-                        .HasColumnName("greeting_enabled");
-
-                    b.Property<string>("Instructions")
-                        .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)")
-                        .HasColumnName("instructions");
-
-                    b.Property<bool>("IsDeleted")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false)
-                        .HasColumnName("is_deleted");
-
-                    b.Property<int>("MaxPerConversationPerDay")
-                        .HasColumnType("integer")
-                        .HasColumnName("max_per_conversation_per_day");
-
-                    b.Property<long?>("ModifiedBy")
-                        .HasColumnType("bigint")
-                        .HasColumnName("modified_by");
-
-                    b.Property<DateTimeOffset?>("ModifiedOn")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("modified_on");
-
-                    b.Property<DateTimeOffset?>("QuotaNoticeSentForPeriodEnd")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("quota_notice_sent_for_period_end");
-
-                    b.Property<uint>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
-
-                    b.Property<long?>("TenantId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<int>("UnansweredAfterMinutes")
-                        .HasColumnType("integer")
-                        .HasColumnName("unanswered_after_minutes");
-
-                    b.Property<bool>("UnansweredEnabled")
-                        .HasColumnType("boolean")
-                        .HasColumnName("unanswered_enabled");
-
-                    b.HasKey("Id")
-                        .HasName("pk_auto_reply_settings");
-
-                    b.HasIndex("IsDeleted")
-                        .HasDatabaseName("ix_auto_reply_settings_is_deleted")
-                        .HasFilter("is_deleted = false");
-
-                    b.HasIndex("TenantId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_auto_reply_settings_tenant_id")
-                        .HasFilter("is_deleted = false");
-
-                    b.HasIndex("TenantId", "Id")
-                        .HasDatabaseName("ix_auto_reply_settings_tenant_id_id");
-
-                    b.ToTable("auto_reply_settings", (string)null);
                 });
 
             modelBuilder.Entity("Marketing.DataAccess.Entities.BillingProfile", b =>
@@ -1822,10 +1720,6 @@ namespace Marketing.DataAccess.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
                         .HasColumnName("failure_reason");
-
-                    b.Property<bool>("IsAutoReply")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_auto_reply");
 
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
@@ -3925,11 +3819,6 @@ namespace Marketing.DataAccess.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
 
-                    b.PrimitiveCollection<List<string>>("AutoReplyTriggers")
-                        .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("auto_reply_triggers");
-
                     b.Property<long>("CreatedBy")
                         .HasColumnType("bigint")
                         .HasColumnName("created_by");
@@ -4028,10 +3917,6 @@ namespace Marketing.DataAccess.Migrations
                     b.Property<DateTimeOffset?>("ModifiedOn")
                         .HasColumnType("timestamptz")
                         .HasColumnName("modified_on");
-
-                    b.Property<int?>("MonthlyAiReplyLimit")
-                        .HasColumnType("integer")
-                        .HasColumnName("monthly_ai_reply_limit");
 
                     b.Property<int?>("MonthlyMessageLimit")
                         .HasColumnType("integer")

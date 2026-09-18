@@ -90,6 +90,24 @@ public sealed class SubscriptionPlan : BaseEntity
 
     /// <summary>Maximum messages per month, or null for unlimited.</summary>
     public int? MonthlyMessageLimit { get; set; }
+
+    /// <summary>
+    /// Automatic-reply triggers this plan unlocks. Empty means the feature is not sold on it.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the <c>ai</c> module, which says whether the workspace may use the assistant at
+    /// all. This says which occasions it may answer on by itself, so answering greetings can be sold
+    /// on a starter plan while answering every unanswered message stays on a larger one.
+    /// </remarks>
+    public List<string> AutoReplyTriggers { get; set; } = [];
+
+    /// <summary>
+    /// Automatic replies allowed per billing period, or null for no ceiling.
+    /// </summary>
+    /// <remarks>
+    /// Every reply is a paid model call, so unlike a contact limit this one protects a real cost.
+    /// </remarks>
+    public int? MonthlyAiReplyLimit { get; set; }
 }
 
 /// <summary>A tenant's subscription to a plan.</summary>

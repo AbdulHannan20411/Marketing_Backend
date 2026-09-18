@@ -13,6 +13,7 @@ namespace Marketing.Application.DTOs.Billing;
 /// <param name="MaxStorageMb">Stored media, in megabytes.</param>
 /// <param name="DailyMessageLimit">Messages per day.</param>
 /// <param name="MonthlyMessageLimit">Messages per month.</param>
+/// <param name="MonthlyAiReplyLimit">Automatic AI replies per billing period, or null for no ceiling.</param>
 public sealed record PlanLimits(
     int? MaxEmployees,
     int? MaxContacts,
@@ -23,7 +24,8 @@ public sealed record PlanLimits(
     int? MaxApiCallsPerMonth,
     int? MaxStorageMb,
     int? DailyMessageLimit,
-    int? MonthlyMessageLimit);
+    int? MonthlyMessageLimit,
+    int? MonthlyAiReplyLimit = null);
 
 /// <summary>A subscription plan.</summary>
 /// <param name="Id">Opaque identifier, prefixed <c>plan_</c>.</param>
@@ -45,6 +47,7 @@ public sealed record PlanLimits(
 /// <param name="Highlights">Marketing bullets.</param>
 /// <param name="SortOrder">Display order.</param>
 /// <param name="UpdatedAt">Instant it last changed.</param>
+/// <param name="AutoReplyTriggers">Automatic-reply occasions this plan unlocks, keyed greeting, first_message and unanswered.</param>
 public sealed record SubscriptionPlanResponse(
     string Id,
     string Name,
@@ -64,7 +67,8 @@ public sealed record SubscriptionPlanResponse(
     PlanLimits Limits,
     IReadOnlyList<string> Highlights,
     int SortOrder,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    IReadOnlyDictionary<string, bool>? AutoReplyTriggers = null);
 
 /// <summary>A tenant's subscription.</summary>
 /// <param name="PlanId">Plan identifier.</param>

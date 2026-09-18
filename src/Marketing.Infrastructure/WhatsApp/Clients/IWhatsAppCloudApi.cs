@@ -146,6 +146,7 @@ public interface IWhatsAppCloudApi
     /// <param name="file">The bytes, as a multipart part.</param>
     /// <param name="messagingProduct">Always <c>whatsapp</c>.</param>
     /// <param name="type">Media MIME type.</param>
+    /// <param name="authorization">Bearer token, always explicit.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Multipart]
     [Post("/{phoneNumberId}/media")]
@@ -154,14 +155,17 @@ public interface IWhatsAppCloudApi
         StreamPart file,
         [AliasAs("messaging_product")] string messagingProduct,
         [AliasAs("type")] string type,
+        [Header("Authorization")] string authorization,
         CancellationToken cancellationToken = default);
 
     /// <summary>Resolves a media id to the short-lived URL its bytes can be read from.</summary>
     /// <param name="mediaId">Media identifier from a webhook or an upload.</param>
+    /// <param name="authorization">Bearer token, always explicit.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     [Get("/{mediaId}")]
     public Task<MediaHandle> GetMediaAsync(
         string mediaId,
+        [Header("Authorization")] string authorization,
         CancellationToken cancellationToken = default);
 
     /// <summary>Creates a message template and submits it to Meta for review.</summary>

@@ -571,10 +571,12 @@ public sealed class BillingService : IBillingService
                 plan.MaxApiCallsPerMonth,
                 plan.MaxStorageMb,
                 plan.DailyMessageLimit,
-                plan.MonthlyMessageLimit),
+                plan.MonthlyMessageLimit,
+                plan.MonthlyAiReplyLimit),
             plan.Highlights,
             plan.SortOrder,
-            plan.ModifiedOn ?? plan.CreatedOn);
+            plan.ModifiedOn ?? plan.CreatedOn,
+            AutoReplyTriggers.Expand(plan.AutoReplyTriggers));
 
     /// <inheritdoc />
     public async Task<RenderedInvoice> RenderInvoiceAsync(

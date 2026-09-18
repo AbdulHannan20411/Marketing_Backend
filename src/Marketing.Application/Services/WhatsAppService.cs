@@ -199,6 +199,7 @@ public sealed class WhatsAppService : IWhatsAppService
                 template.ModifiedOn,
                 template.CreatedOn,
                 template.RejectionReason,
+                template.HeaderKind,
             });
 
         var page = await _queries.ToPagedAsync(projected, query.Page, query.PageSize, cancellationToken);
@@ -217,7 +218,8 @@ public sealed class WhatsAppService : IWhatsAppService
             row.QualityScore,
             row.TimesUsed,
             row.ModifiedOn ?? row.CreatedOn,
-            row.RejectionReason));
+            row.RejectionReason,
+            row.HeaderKind));
     }
 
     /// <inheritdoc />
@@ -282,6 +284,7 @@ public sealed class WhatsAppService : IWhatsAppService
                     template.ModifiedOn,
                     template.CreatedOn,
                     template.RejectionReason,
+                    template.HeaderKind,
                 }),
             cancellationToken);
 
@@ -301,7 +304,8 @@ public sealed class WhatsAppService : IWhatsAppService
             row.QualityScore,
             row.TimesUsed,
             row.ModifiedOn ?? row.CreatedOn,
-            row.RejectionReason))];
+            row.RejectionReason,
+            row.HeaderKind))];
     }
 
     /// <inheritdoc />

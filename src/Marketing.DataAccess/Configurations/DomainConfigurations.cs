@@ -175,6 +175,11 @@ public sealed class MessageTemplateConfiguration : BaseEntityConfiguration<Messa
         builder.Property(template => template.Name).IsRequired().HasMaxLength(120);
         builder.Property(template => template.MetaTemplateId).HasMaxLength(64);
         builder.Property(template => template.WabaId).HasMaxLength(64);
+
+        builder.Property(template => template.HeaderKind)
+            .IsRequired()
+            .HasMaxLength(16)
+            .HasConversion<string>();
         builder.Property(template => template.Language).IsRequired().HasMaxLength(16);
         builder.Property(template => template.Category).IsRequired().HasMaxLength(24).HasConversion<string>();
         builder.Property(template => template.Status).IsRequired().HasMaxLength(16).HasConversion<string>();
@@ -359,6 +364,7 @@ public sealed class SubscriptionPlanConfiguration : BaseEntityConfiguration<Subs
         builder.Property(plan => plan.SupportLevel).IsRequired().HasMaxLength(16).HasConversion<string>();
         builder.Property(plan => plan.EnabledModules).HasColumnType("text[]").IsRequired();
         builder.Property(plan => plan.Highlights).HasColumnType("text[]").IsRequired();
+        builder.Property(plan => plan.AutoReplyTriggers).HasColumnType("text[]").IsRequired();
 
         builder.HasIndex(plan => new { plan.Status, plan.SortOrder });
     }
@@ -855,6 +861,113 @@ public sealed class EmailTemplateConfiguration : BaseEntityConfiguration<EmailTe
         // The sending code looks a template up by key on every email. Partial, matching the
         // soft-delete convention.
         builder.HasIndex(template => template.Key)
+            .IsUnique()
+            .HasFilter("is_deleted = false");
+    }
+}
+
+
+/// <summary>Maps <see cref="Conversation"/>.</summary>
+public sealed class ConversationConfiguration : BaseEntityConfiguration<Conversation>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<Conversation> builder)
+    {
+        builder.ToTable("conversations");
+
+        builder.Property(conversation => conversation.WaId).IsRequired().HasMaxLength(32);
+        builder.Property(conversation => conversation.ContactName).HasMaxLength(200);
+        builder.Property(conversation => conversation.LastMessagePreview).HasMaxLength(300);
+
+        // One thread per customer number. A second row would split a conversation in half, and the
+        // webhook - which finds a thread by number alone - would append to whichever it found first.
+        builder.HasIndex(conversation => new { conversation.TenantId, conversation.WaId })
+            .IsUnique()
+            .HasFilter("is_deleted = false");
+
+        // The inbox lists newest activity first within a workspace.
+        builder.HasIndex(conversation => new { conversation.TenantId, conversation.LastMessageAt })
+            .IsDescending(false, true);
+    }
+}
+
+/// <summary>Maps <see cref="ConversationMessage"/>.</summary>
+public sealed class ConversationMessageConfiguration : BaseEntityConfiguration<ConversationMessage>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<ConversationMessage> builder)
+    {
+        builder.ToTable("conversation_messages");
+
+        builder.Property(message => message.MetaMessageId).HasMaxLength(128);
+        builder.Property(message => message.Body).HasMaxLength(4096);
+        builder.Property(message => message.FailureReason).HasMaxLength(500);
+        builder.Property(message => message.TemplateName).HasMaxLength(120);
+        builder.Property(message => message.IsAutoReply).IsRequired();
+        builder.Property(message => message.Direction).IsRequired().HasMaxLength(16).HasConversion<string>();
+        builder.Property(message => message.Kind).IsRequired().HasMaxLength(16).HasConversion<string>();
+        builder.Property(message => message.Status).IsRequired().HasMaxLength(16).HasConversion<string>();
+
+        // Meta redelivers webhooks, and out of order. This constraint is what makes a redelivery a
+        // no-op rather than a second bubble in the thread.
+        builder.HasIndex(message => message.MetaMessageId)
+            .IsUnique()
+            .HasFilter("meta_message_id IS NOT NULL AND is_deleted = false");
+
+        // A thread renders oldest first for one conversation, which this index answers directly.
+        builder.HasIndex(message => new { message.ConversationId, message.OccurredAt });
+
+        builder.HasOne(message => message.Conversation)
+            .WithMany(conversation => conversation.Messages)
+            .HasForeignKey(message => message.ConversationId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Media outlives the message that referenced it: removing a thread must not strand bytes
+        // another message still shows.
+        builder.HasOne(message => message.Media)
+            .WithMany()
+            .HasForeignKey(message => message.MediaId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+/// <summary>Maps <see cref="MediaAsset"/>.</summary>
+public sealed class MediaAssetConfiguration : BaseEntityConfiguration<MediaAsset>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<MediaAsset> builder)
+    {
+        builder.ToTable("media_assets");
+
+        builder.Property(media => media.MetaMediaId).HasMaxLength(128);
+        builder.Property(media => media.FileName).HasMaxLength(260);
+        builder.Property(media => media.MimeType).HasMaxLength(120);
+        builder.Property(media => media.StoragePath).IsRequired().HasMaxLength(500);
+        builder.Property(media => media.Kind).IsRequired().HasMaxLength(16).HasConversion<string>();
+
+        builder.HasIndex(media => new { media.TenantId, media.UploadedAt });
+
+        // Inbound media is matched on Meta's id while it downloads, so a redelivered webhook finds
+        // the copy already stored rather than fetching the same bytes twice.
+        builder.HasIndex(media => media.MetaMediaId)
+            .HasFilter("meta_media_id IS NOT NULL");
+    }
+}
+
+
+/// <summary>Maps <see cref="AutoReplySettings"/>.</summary>
+public sealed class AutoReplySettingsConfiguration : BaseEntityConfiguration<AutoReplySettings>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<AutoReplySettings> builder)
+    {
+        builder.ToTable("auto_reply_settings");
+
+        builder.Property(settings => settings.Instructions).HasMaxLength(2000);
+
+        // One row per workspace. A second would mean two sets of rules racing to answer the same
+        // customer, and whichever the planner returned first would win.
+        builder.HasIndex(settings => settings.TenantId)
             .IsUnique()
             .HasFilter("is_deleted = false");
     }

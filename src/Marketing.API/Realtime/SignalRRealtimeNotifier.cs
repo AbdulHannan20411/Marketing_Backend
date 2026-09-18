@@ -53,6 +53,17 @@ public sealed partial class SignalRRealtimeNotifier : IRealtimeNotifier
             cancellationToken);
 
     /// <inheritdoc />
+    /// <inheritdoc />
+    public Task PublishInboundMessageAsync(
+        long tenantId,
+        InboundMessageEvent message,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            RealtimeHub.TenantGroup(tenantId),
+            RealtimeEvents.InboundMessage,
+            message,
+            cancellationToken);
+
     public Task PublishImportProgressAsync(
         long tenantId,
         ImportProgress progress,

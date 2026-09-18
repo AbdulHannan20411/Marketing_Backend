@@ -36,7 +36,27 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
 
     /// <summary>Widest radius sent to the provider, matching Google's own 50 km ceiling.</summary>
     private const double MaximumRadiusKm = 50;
-    private const string GeocodeUrl = "https://maps.googleapis.com/maps/api/geocode/json";
+    private const string SearchNearbyUrl = "https://places.googleapis.com/v1/places:searchNearby";
+
+    /// <summary>
+    /// Fields a place lookup asks for. Narrower than a business search: a suggestion needs a name, a
+    /// point and a country, and every extra field is charged for.
+    /// </summary>
+    private const string PlaceFieldMask =
+        "places.id,places.displayName,places.formattedAddress,places.location,places.addressComponents";
+
+    /// <summary>Suggestions offered for one search. A dropdown nobody scrolls past five is enough.</summary>
+    private const int SuggestionCount = 5;
+
+    /// <summary>
+    /// How far a dropped pin may be from something with a name, in metres.
+    /// </summary>
+    /// <remarks>
+    /// Wide enough to name a pin dropped in a street or a park, narrow enough that the answer is
+    /// somewhere the person can see. Beyond this the honest answer is no name at all, which the
+    /// client already renders as bare coordinates.
+    /// </remarks>
+    private const double ReverseLookupRadiusMetres = 400;
 
     /// <summary>Fields requested from a text search. Every addition here has a price.</summary>
     private const string SearchFieldMask =
@@ -75,18 +95,19 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
         string query,
         CancellationToken cancellationToken = default)
     {
-        var url = $"{GeocodeUrl}?address={Uri.EscapeDataString(query)}&key={_options.ApiKey}";
+        EnsureConfigured();
 
-        var payload = await SendAsync<GeocodeResponse>(
-            new HttpRequestMessage(HttpMethod.Get, url),
-            cancellationToken);
-
-        if (!GeocodeSucceeded(payload))
+        var request = new HttpRequestMessage(HttpMethod.Post, SearchTextUrl)
         {
-            return [];
-        }
+            Content = JsonContent.Create(new PlaceLookupRequest(query, SuggestionCount), options: Json),
+        };
 
-        return [.. (payload?.Results ?? []).Select(ToSuggestion)];
+        request.Headers.Add("X-Goog-Api-Key", _options.ApiKey);
+        request.Headers.Add("X-Goog-FieldMask", PlaceFieldMask);
+
+        var payload = await SendAsync<SearchTextResponse>(request, cancellationToken);
+
+        return [.. (payload?.Places ?? []).Select(ToSuggestion)];
     }
 
     /// <inheritdoc />
@@ -95,22 +116,49 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
         double longitude,
         CancellationToken cancellationToken = default)
     {
-        var point = string.Create(CultureInfo.InvariantCulture, $"{latitude:F6},{longitude:F6}");
-        var url = $"{GeocodeUrl}?latlng={point}&key={_options.ApiKey}";
+        EnsureConfigured();
 
-        var payload = await SendAsync<GeocodeResponse>(
-            new HttpRequestMessage(HttpMethod.Get, url),
-            cancellationToken);
-
-        if (!GeocodeSucceeded(payload))
+        var request = new HttpRequestMessage(HttpMethod.Post, SearchNearbyUrl)
         {
-            return null;
-        }
+            Content = JsonContent.Create(
+                new PlaceNearbyRequest(
+                    new NearbyRestriction(new Circle(
+                        new LatLng(latitude, longitude),
+                        ReverseLookupRadiusMetres)),
 
-        var first = payload?.Results?.FirstOrDefault();
+                    // Nearest first and one result: naming a pin wants the closest thing to it, not
+                    // the most prominent thing in the area.
+                    "DISTANCE",
+                    1),
+                options: Json),
+        };
+
+        request.Headers.Add("X-Goog-Api-Key", _options.ApiKey);
+        request.Headers.Add("X-Goog-FieldMask", PlaceFieldMask);
+
+        var payload = await SendAsync<SearchTextResponse>(request, cancellationToken);
+        var nearest = payload?.Places is { Count: > 0 } places ? places[0] : null;
 
         // Null is a normal answer for a pin in open country, not an error.
-        return first is null ? null : ToSuggestion(first);
+        return nearest is null ? null : ToSuggestion(nearest);
+    }
+
+    /// <summary>
+    /// Refuses a lookup this deployment cannot make, before a request is built.
+    /// </summary>
+    /// <remarks>
+    /// Matches the business search, so a deployment with no key answers "not available here" on every
+    /// endpoint of the feature rather than an empty dropdown on one of them - which is exactly how a
+    /// denied key spent a week looking like a typo.
+    /// </remarks>
+    private void EnsureConfigured()
+    {
+        if (!IsConfigured)
+        {
+            throw new BusinessRuleException(
+                "provider_not_configured",
+                "Location search is not available on this workspace yet.");
+        }
     }
 
     /// <inheritdoc />
@@ -212,48 +260,25 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
             "The business directory could not be reached. Please try again.");
     }
 
-    /// <summary>
-    /// Whether a geocoding call actually succeeded, logging Google's reason when it did not.
-    /// </summary>
-    /// <remarks>
-    /// The Geocoding API answers a denied key, an unbilled project or an exhausted quota with an HTTP
-    /// 200 and a status in the body. Read only by HTTP status, every one of those looked like "no
-    /// places found", with nothing in the logs.
-    /// <para>
-    /// A failure still degrades to no suggestions rather than an error. Naming a pin is a nicety, and
-    /// the business search itself works from coordinates alone - so a broken geocoder must not stop
-    /// someone searching from a pin they dropped by hand.
-    /// </para>
-    /// </remarks>
-    private bool GeocodeSucceeded(GeocodeResponse? payload)
-    {
-        var status = payload?.Status;
-
-        if (status is null || status is "OK" or "ZERO_RESULTS")
-        {
-            return true;
-        }
-
-        LogGeocodeFailed(status, payload?.ErrorMessage ?? string.Empty);
-
-        return false;
-    }
-
-    private static PlaceSuggestion ToSuggestion(GeocodeResult result)
+    private static PlaceSuggestion ToSuggestion(Place place)
     {
         // Read once, so the name and the code are always taken from the same component.
-        var country = result.AddressComponents
+        var country = place.AddressComponents
             ?.FirstOrDefault(component => component.Types?.Contains("country") == true);
 
         return new PlaceSuggestion(
-            result.PlaceId ?? result.FormattedAddress ?? Guid.NewGuid().ToString("N"),
-            result.FormattedAddress ?? "Unknown location",
-            result.Geometry?.Location?.Lat ?? 0,
-            result.Geometry?.Location?.Lng ?? 0,
-            country?.LongName,
+            place.Id,
 
-            // Google's short name for a country component is its ISO 3166-1 alpha-2 code.
-            country?.ShortName);
+            // The full address, not the display name: two towns share a name often enough that a
+            // dropdown of bare names is a guess, and "Hyderabad, Pakistan" is not "Hyderabad, India".
+            place.FormattedAddress ?? place.DisplayName?.Text ?? "Unknown location",
+            place.Location?.Latitude ?? 0,
+            place.Location?.Longitude ?? 0,
+            country?.LongText,
+
+            // Google's short name for a country component is its ISO 3166-1 alpha-2 code, which the
+            // CSV export and the phone-number expansion both read.
+            country?.ShortText);
     }
 
     private static ProviderBusiness ToBusiness(Place place) =>
@@ -336,6 +361,7 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
         LocalizedText? DisplayName,
         string? FormattedAddress,
         PlaceLocation? Location,
+        List<AddressComponent>? AddressComponents,
         string? NationalPhoneNumber,
         string? InternationalPhoneNumber,
         string? WebsiteUri,
@@ -349,29 +375,27 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
 
     private sealed record OpeningHours(List<string>? WeekdayDescriptions);
 
-    private sealed record GeocodeResponse(
-        List<GeocodeResult>? Results,
-        [property: JsonPropertyName("status")] string? Status,
-        [property: JsonPropertyName("error_message")] string? ErrorMessage);
-
-    private sealed record GeocodeResult(
-        [property: JsonPropertyName("place_id")] string? PlaceId,
-        [property: JsonPropertyName("formatted_address")] string? FormattedAddress,
-        Geometry? Geometry,
-        [property: JsonPropertyName("address_components")] List<AddressComponent>? AddressComponents);
-
-    private sealed record Geometry(GeoLocation? Location);
-
-    private sealed record GeoLocation(double Lat, double Lng);
-
+    /// <summary>One component of a place's address, as the Places API returns it.</summary>
     private sealed record AddressComponent(
-        [property: JsonPropertyName("long_name")] string? LongName,
-        [property: JsonPropertyName("short_name")] string? ShortName,
+        [property: JsonPropertyName("longText")] string? LongText,
+        [property: JsonPropertyName("shortText")] string? ShortText,
         List<string>? Types);
 
-    [LoggerMessage(
-        EventId = 3602,
-        Level = LogLevel.Warning,
-        Message = "Geocoding returned {Status}: {Detail}")]
-    private partial void LogGeocodeFailed(string status, string detail);
+    private sealed record PlaceLookupRequest(
+        [property: JsonPropertyName("textQuery")] string TextQuery,
+        [property: JsonPropertyName("pageSize")] int PageSize);
+
+    private sealed record PlaceNearbyRequest(
+        [property: JsonPropertyName("locationRestriction")] NearbyRestriction LocationRestriction,
+        [property: JsonPropertyName("rankPreference")] string RankPreference,
+        [property: JsonPropertyName("maxResultCount")] int MaxResultCount);
+
+    private sealed record NearbyRestriction(
+        [property: JsonPropertyName("circle")] Circle Circle);
+
+    private sealed record Circle(
+        [property: JsonPropertyName("center")] LatLng Center,
+
+        // Metres, unlike every other distance in this file. Google's units, not the platform's.
+        [property: JsonPropertyName("radius")] double Radius);
 }

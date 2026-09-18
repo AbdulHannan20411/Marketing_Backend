@@ -158,6 +158,69 @@ public interface IWhatsAppGateway
         string metaTemplateId,
         string accessToken,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Sends a plain text message inside an open customer service window.</summary>
+    /// <param name="phoneNumberId">Sending number.</param>
+    /// <param name="recipient">Recipient in E.164.</param>
+    /// <param name="body">Message text.</param>
+    /// <param name="accessToken">The tenant's business token.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Meta's message identifier, which later receipts are keyed by.</returns>
+    public Task<string> SendTextAsync(
+        string phoneNumberId,
+        string recipient,
+        string body,
+        string accessToken,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Sends a previously uploaded file inside an open customer service window.</summary>
+    /// <param name="phoneNumberId">Sending number.</param>
+    /// <param name="recipient">Recipient in E.164.</param>
+    /// <param name="kind">Which of Meta's media message types to send.</param>
+    /// <param name="metaMediaId">Meta's media identifier from an upload.</param>
+    /// <param name="caption">Caption, where the kind supports one. Audio never does.</param>
+    /// <param name="accessToken">The tenant's business token.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Meta's message identifier.</returns>
+    public Task<string> SendMediaAsync(
+        string phoneNumberId,
+        string recipient,
+        Common.Constants.ContractEnums.ConversationMessageKind kind,
+        string metaMediaId,
+        string? caption,
+        string accessToken,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Uploads a file to Meta so a message can reference it.</summary>
+    /// <param name="phoneNumberId">Sending number the file is uploaded against.</param>
+    /// <param name="content">The bytes.</param>
+    /// <param name="fileName">Original file name.</param>
+    /// <param name="mimeType">Media type.</param>
+    /// <param name="accessToken">The tenant's business token.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Meta's media identifier, which a send refers to.</returns>
+    public Task<string> UploadMediaAsync(
+        string phoneNumberId,
+        Stream content,
+        string fileName,
+        string mimeType,
+        string accessToken,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Downloads a file a customer sent.
+    /// </summary>
+    /// <remarks>
+    /// Two calls: Meta answers with a short-lived URL rather than the bytes, and that URL needs the
+    /// same credential again. Both happen here so no caller has to know it takes two round trips.
+    /// </remarks>
+    /// <param name="mediaId">Meta's media identifier, from a webhook.</param>
+    /// <param name="accessToken">The tenant's business token.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<MetaMediaDownload> DownloadMediaAsync(
+        string mediaId,
+        string accessToken,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>A template's content, in the form Meta reviews.</summary>
@@ -191,6 +254,12 @@ public sealed record MetaTemplateButton(string Type, string Text, string? Url = 
 /// <param name="Status">Review status, usually <c>PENDING</c>.</param>
 /// <param name="Category">The category Meta filed it under, which may differ from the one requested.</param>
 public sealed record MetaTemplateSubmission(string Id, string? Status, string? Category);
+
+/// <summary>A file fetched from Meta.</summary>
+/// <param name="Content">The bytes.</param>
+/// <param name="MimeType">Media type Meta reported.</param>
+/// <param name="SizeBytes">Size in bytes.</param>
+public sealed record MetaMediaDownload(byte[] Content, string MimeType, long SizeBytes);
 
 /// <summary>A business account as Meta holds it.</summary>
 /// <param name="Id">Account identifier.</param>

@@ -299,6 +299,29 @@ public static partial class TemplateDraftRules
         return null;
     }
 
+    /// <summary>
+    /// What the draft's header carries, as the value stored against the template.
+    /// </summary>
+    /// <remarks>
+    /// Kept so a campaign knows whether the template needs a file attached. A template synced from
+    /// Meta has no header kind of its own here - Meta's list call does not return components - so it
+    /// stays <c>None</c> until someone edits it through this platform.
+    /// </remarks>
+    /// <param name="draft">The draft being saved.</param>
+    public static TemplateHeaderKind HeaderKindFor(MessageTemplateDraft draft)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+
+        return HeaderKindOf(draft) switch
+        {
+            HeaderKindText => TemplateHeaderKind.Text,
+            "image" => TemplateHeaderKind.Image,
+            "video" => TemplateHeaderKind.Video,
+            "document" => TemplateHeaderKind.Document,
+            _ => TemplateHeaderKind.None,
+        };
+    }
+
     /// <summary>The header kind, inferred from the header text when a client does not send one.</summary>
     private static string HeaderKindOf(MessageTemplateDraft draft)
     {
