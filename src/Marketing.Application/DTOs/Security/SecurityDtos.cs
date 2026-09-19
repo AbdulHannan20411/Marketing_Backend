@@ -49,6 +49,8 @@ public sealed record RiskResponse(RiskLevel Level, int Score, IReadOnlyList<stri
 /// <param name="Risk">
 /// The risk assessment - present for platform staff, always null for a workspace's own administrators.
 /// </param>
+/// <param name="Status"><c>active</c>, <c>invited</c> or <c>suspended</c> - the same status every other screen shows.</param>
+/// <param name="CanSuspend">Whether this viewer may suspend them: never themselves, platform staff, or (from a workspace) its admin.</param>
 public sealed record EmployeeSecurityResponse(
     string UserId,
     string Name,
@@ -58,7 +60,17 @@ public sealed record EmployeeSecurityResponse(
     int Devices,
     DateTimeOffset? LastActiveAt,
     int DisplacedLast24Hours,
-    RiskResponse? Risk);
+    RiskResponse? Risk,
+    EmployeeStatus Status = EmployeeStatus.Active,
+    bool CanSuspend = false);
+
+/// <summary>Suspends an account from the security screen.</summary>
+/// <param name="Reason">Why, in plain words. Optional; at most 500 characters.</param>
+/// <param name="AlertLevel">
+/// What the screen showed when the button was pressed: <c>low</c>, <c>warning</c> or <c>high</c>.
+/// Recorded in the audit trail next to the server's own assessment, never trusted for anything else.
+/// </param>
+public sealed record SuspendAccountRequest(string? Reason, string? AlertLevel);
 
 /// <summary>A workspace's seats against how its logins are actually being used.</summary>
 /// <param name="OrganizationId">Public tenant identifier.</param>

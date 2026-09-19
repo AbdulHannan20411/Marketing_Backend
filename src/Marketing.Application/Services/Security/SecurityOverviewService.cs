@@ -17,10 +17,43 @@ public interface ISecurityOverviewService
     /// <summary>A workspace's seats against its sessions and devices.</summary>
     /// <param name="tenantId">Workspace to read.</param>
     /// <param name="includeRisk">True for platform staff only; a workspace never sees risk about its own people.</param>
+    /// <param name="viewerUserId">Who is looking, so their own row is not offered for suspension.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<OrganizationSecurityResponse> GetOrganizationAsync(
         long tenantId,
         bool includeRisk,
+        long? viewerUserId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Suspends an account: sign-in refused and every session ended, in one transaction.
+    /// </summary>
+    /// <param name="tenantId">Workspace the account must belong to.</param>
+    /// <param name="userId">The account.</param>
+    /// <param name="request">Reason, and the level the screen showed.</param>
+    /// <param name="byPlatformStaff">True from the platform route, which may also suspend the workspace's admin.</param>
+    /// <param name="actorUserId">Who is suspending.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The account's row, as the overview shows it.</returns>
+    public Task<EmployeeSecurityResponse> SuspendAsync(
+        long tenantId,
+        long userId,
+        SuspendAccountRequest request,
+        bool byPlatformStaff,
+        long actorUserId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Lets a suspended account sign in again. Sessions do not come back.</summary>
+    /// <param name="tenantId">Workspace the account must belong to.</param>
+    /// <param name="userId">The account.</param>
+    /// <param name="byPlatformStaff">True from the platform route.</param>
+    /// <param name="actorUserId">Who is reactivating.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<EmployeeSecurityResponse> ReactivateAsync(
+        long tenantId,
+        long userId,
+        bool byPlatformStaff,
+        long actorUserId,
         CancellationToken cancellationToken = default);
 
     /// <summary>The devices one account has used within the window.</summary>
@@ -66,6 +99,10 @@ public sealed class SecurityOverviewService : ISecurityOverviewService
     private readonly IQueryExecutor _queries;
     private readonly IDateTimeProvider _clock;
     private readonly AuthenticationPolicyOptions _policy;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IAuditLogRepository _audit;
+    private readonly IRepository<Notification> _notifications;
+    private readonly IRequestContext _requestContext;
 
     /// <summary>Initialises a new instance.</summary>
     public SecurityOverviewService(
@@ -78,10 +115,18 @@ public sealed class SecurityOverviewService : ISecurityOverviewService
         IAccountRiskEvaluator risk,
         IQueryExecutor queries,
         IDateTimeProvider clock,
-        IOptions<AuthenticationPolicyOptions> policy)
+        IOptions<AuthenticationPolicyOptions> policy,
+        IUnitOfWork unitOfWork,
+        IAuditLogRepository audit,
+        IRepository<Notification> notifications,
+        IRequestContext requestContext)
     {
         ArgumentNullException.ThrowIfNull(policy);
 
+        _unitOfWork = unitOfWork;
+        _audit = audit;
+        _notifications = notifications;
+        _requestContext = requestContext;
         _sessions = sessions;
         _events = events;
         _tenants = tenants;
@@ -98,6 +143,7 @@ public sealed class SecurityOverviewService : ISecurityOverviewService
     public async Task<OrganizationSecurityResponse> GetOrganizationAsync(
         long tenantId,
         bool includeRisk,
+        long? viewerUserId = null,
         CancellationToken cancellationToken = default)
     {
         var now = _clock.UtcNow;
@@ -132,8 +178,15 @@ public sealed class SecurityOverviewService : ISecurityOverviewService
                     user.Email,
                     user.Status,
                     Role = user.UserRoles.Where(userRole => !userRole.IsDeleted).Select(userRole => userRole.Role.Name).FirstOrDefault(),
+                    IsPlatformStaff = user.UserRoles.Any(userRole =>
+                        !userRole.IsDeleted && userRole.Role.Name == Common.Constants.Roles.SuperAdmin),
+                    IsAdmin = user.UserRoles.Any(userRole =>
+                        !userRole.IsDeleted && userRole.Role.Name == Common.Constants.Roles.Admin),
                 }),
             cancellationToken);
+
+        // Platform staff never appear here, whatever row a data fix may have left carrying a tenant.
+        people = [.. people.Where(person => !person.IsPlatformStaff)];
 
         var sessions = await _queries.ToListAsync(
             _sessions.Query().IgnoreQueryFilters()
@@ -175,7 +228,9 @@ public sealed class SecurityOverviewService : ISecurityOverviewService
                 own.Select(session => session.DeviceId).Distinct(StringComparer.Ordinal).Count(),
                 own.Count > 0 ? own.Max(session => session.LastActivityAt) : null,
                 displaced.Count(userId => userId == person.Id),
-                risk));
+                risk,
+                ToEmployeeStatus(person.Status),
+                CanSuspend(person.Id, viewerUserId, person.IsPlatformStaff, person.IsAdmin, byPlatformStaff: includeRisk)));
         }
 
         // Riskiest first for staff, who are here to find the problem; alphabetical for a workspace,
@@ -199,6 +254,218 @@ public sealed class SecurityOverviewService : ISecurityOverviewService
             _policy.DeviceWindowDays,
             [.. ordered]);
     }
+
+    /// <inheritdoc />
+    public async Task<EmployeeSecurityResponse> SuspendAsync(
+        long tenantId,
+        long userId,
+        SuspendAccountRequest request,
+        bool byPlatformStaff,
+        long actorUserId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var reason = request.Reason?.Trim() is { Length: > 0 } written ? written : null;
+
+        if (reason is { Length: > 500 })
+        {
+            throw new ValidationException("reason", "Keep the reason to 500 characters or fewer.");
+        }
+
+        var alertLevel = request.AlertLevel?.Trim().ToLowerInvariant() is "low" or "warning" or "high"
+            ? request.AlertLevel.Trim().ToLowerInvariant()
+            : null;
+
+        var target = await LoadTargetAsync(tenantId, userId, byPlatformStaff, actorUserId, cancellationToken);
+
+        if (target.Status != Common.Constants.AppConstants.UserStatus.Disabled)
+        {
+            // The server's own view, recorded next to what the screen showed: the level the button
+            // was pressed at is a claim from the browser, this is the evidence.
+            var assessment = await _risk.EvaluateAsync(target.Id, cancellationToken);
+
+            await _unitOfWork.ExecuteInTransactionAsync(
+                async token =>
+                {
+                    target.Status = Common.Constants.AppConstants.UserStatus.Disabled;
+
+                    // Any access token still in flight is refused at its next refresh as well.
+                    target.SecurityStamp = Guid.NewGuid();
+
+                    await _tracker.RevokeAllAsync(target.Id, "Account suspended.", actorUserId, token);
+
+                    Audit(tenantId, actorUserId, target.Id, "security.account.suspended", new
+                    {
+                        actor = actorUserId,
+                        target = PublicId.From(PublicId.Employee, target.Id),
+                        alertLevel,
+                        riskLevel = assessment.Level.ToString().ToLowerInvariant(),
+                        riskScore = assessment.Score,
+                        reason,
+                        byPlatformStaff,
+                    });
+
+                    if (byPlatformStaff)
+                    {
+                        await NotifyWorkspaceAdminsAsync(tenantId, target, token);
+                    }
+
+                    await _unitOfWork.SaveChangesAsync(token);
+                },
+                cancellationToken);
+        }
+
+        return await RowAsync(tenantId, target.Id, byPlatformStaff, actorUserId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<EmployeeSecurityResponse> ReactivateAsync(
+        long tenantId,
+        long userId,
+        bool byPlatformStaff,
+        long actorUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var target = await LoadTargetAsync(tenantId, userId, byPlatformStaff, actorUserId, cancellationToken);
+
+        // Only an account suspended is reactivated here. An invited one stays invited: this must not
+        // become a way to skip accepting an invitation.
+        if (target.Status == Common.Constants.AppConstants.UserStatus.Disabled)
+        {
+            target.Status = Common.Constants.AppConstants.UserStatus.Active;
+
+            Audit(tenantId, actorUserId, target.Id, "security.account.reactivated", new
+            {
+                actor = actorUserId,
+                target = PublicId.From(PublicId.Employee, target.Id),
+                byPlatformStaff,
+            });
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+
+        return await RowAsync(tenantId, target.Id, byPlatformStaff, actorUserId, cancellationToken);
+    }
+
+    /// <summary>Who may be suspended from a given screen, by whom.</summary>
+    private static bool CanSuspend(long target, long? viewer, bool isPlatformStaff, bool isAdmin, bool byPlatformStaff) =>
+        target != viewer && !isPlatformStaff && (byPlatformStaff || !isAdmin);
+
+    private static EmployeeStatus ToEmployeeStatus(Common.Constants.AppConstants.UserStatus status) => status switch
+    {
+        Common.Constants.AppConstants.UserStatus.Active => EmployeeStatus.Active,
+        Common.Constants.AppConstants.UserStatus.Invited => EmployeeStatus.Invited,
+        _ => EmployeeStatus.Suspended,
+    };
+
+    /// <summary>
+    /// Loads the account to act on, refusing anyone the caller may not suspend.
+    /// </summary>
+    /// <remarks>
+    /// Platform staff are refused before the workspace check, so the answer is the same on every
+    /// route. Otherwise the workspace boundary is applied here: an id from another workspace is not
+    /// found, exactly as it is on the overview.
+    /// </remarks>
+    private async Task<User> LoadTargetAsync(
+        long tenantId,
+        long userId,
+        bool byPlatformStaff,
+        long actorUserId,
+        CancellationToken cancellationToken)
+    {
+        if (userId == actorUserId)
+        {
+            throw new ForbiddenException("cannot_suspend_self", "You can't suspend your own account.");
+        }
+
+        var target = await _queries.FirstOrDefaultAsync(
+            _users.Query(asNoTracking: false).IgnoreQueryFilters()
+                .Include(user => user.UserRoles).ThenInclude(userRole => userRole.Role)
+                .Where(user => user.Id == userId && !user.IsDeleted),
+            cancellationToken)
+            ?? throw new NotFoundException("Employee", PublicId.From(PublicId.Employee, userId));
+
+        var roles = target.UserRoles.Where(userRole => !userRole.IsDeleted).Select(userRole => userRole.Role.Name).ToList();
+
+        if (target.TenantId is null || roles.Contains(Common.Constants.Roles.SuperAdmin, StringComparer.Ordinal))
+        {
+            throw new ForbiddenException(
+                "cannot_suspend_platform_staff",
+                "Platform staff accounts can't be suspended from the security screen.");
+        }
+
+        if (target.TenantId != tenantId)
+        {
+            throw new NotFoundException("Employee", PublicId.From(PublicId.Employee, userId));
+        }
+
+        if (!byPlatformStaff && roles.Contains(Common.Constants.Roles.Admin, StringComparer.Ordinal))
+        {
+            throw new ForbiddenException(
+                "cannot_suspend_admin",
+                "Workspace admins can't be suspended here. Change their role first, or contact support.");
+        }
+
+        return target;
+    }
+
+    private async Task<EmployeeSecurityResponse> RowAsync(
+        long tenantId,
+        long userId,
+        bool byPlatformStaff,
+        long viewerUserId,
+        CancellationToken cancellationToken)
+    {
+        var organization = await GetOrganizationAsync(tenantId, byPlatformStaff, viewerUserId, cancellationToken);
+        var publicId = PublicId.From(PublicId.Employee, userId);
+
+        return organization.Employees.FirstOrDefault(employee => employee.UserId == publicId)
+               ?? throw new NotFoundException("Employee", publicId);
+    }
+
+    /// <summary>Tells the workspace's admins that platform staff suspended one of them.</summary>
+    /// <remarks>
+    /// Including the suspended admin themself, when it is an admin: they cannot sign in to read it
+    /// until reactivated, but the record should exist when they do.
+    /// </remarks>
+    private async Task NotifyWorkspaceAdminsAsync(long tenantId, User target, CancellationToken cancellationToken)
+    {
+        var administrators = await _users.GetTenantAdministratorsAsync(tenantId, cancellationToken);
+        var now = _clock.UtcNow;
+
+        foreach (var administrator in administrators)
+        {
+            _notifications.Add(new Notification
+            {
+                TenantId = tenantId,
+                UserId = administrator.Id,
+                Kind = NotificationKind.SecurityAccountSuspended,
+                Title = $"{target.DisplayName}'s account was suspended",
+                Body = $"Platform support suspended {target.DisplayName} ({target.Email}) after a security review. "
+                       + "They can't sign in until the account is reactivated.",
+                Priority = NotificationPriority.Warning,
+                Icon = "shield-exclamation",
+                ActionLabel = "Review security",
+                ActionRoute = "/settings/security",
+                OccurredOn = now,
+            });
+        }
+    }
+
+    private void Audit(long tenantId, long actorUserId, long targetUserId, string eventName, object detail) =>
+        _audit.Add(new AuditLog
+        {
+            TenantId = tenantId,
+            UserId = actorUserId,
+            EntityName = eventName,
+            EntityId = targetUserId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            Action = Common.Constants.AppConstants.AuditAction.Updated,
+            Changes = System.Text.Json.JsonSerializer.Serialize(detail),
+            CorrelationId = _requestContext.CorrelationId,
+            IpAddress = _requestContext.IpAddress,
+            OccurredOn = _clock.UtcNow,
+        });
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<DeviceResponse>> GetDevicesAsync(

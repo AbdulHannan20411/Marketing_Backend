@@ -59,6 +59,13 @@ public sealed class AccountSessionsController : ApiControllerBase
             return Unauthorized();
         }
 
+        // Activity tracking is session security, which does not apply to platform staff. A session
+        // of theirs that has been ended is still refused - by token validation, before this runs.
+        if (_currentUser.IsSuperAdmin)
+        {
+            return NoContent();
+        }
+
         if (!await _sessions.TouchAsync(userId, sessionId, cancellationToken))
         {
             Response.Headers[AppConstants.Headers.SessionRevoked] = "true";
@@ -143,7 +150,76 @@ public sealed class WorkspaceSecurityController : ApiControllerBase
         return Success(await _overview.GetOrganizationAsync(
             _tenantContext.RequireTenantId(),
             includeRisk: false,
+            _currentUser.UserId,
             cancellationToken));
+    }
+
+    /// <summary>Suspends a member of the workspace: sign-in refused, every session ended.</summary>
+    /// <param name="employeeId">Public employee identifier.</param>
+    /// <param name="request">Reason, and the level the screen showed.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">Their updated row.</response>
+    /// <response code="403">
+    /// Yourself (<c>cannot_suspend_self</c>), the workspace's admin (<c>cannot_suspend_admin</c>), or
+    /// platform staff (<c>cannot_suspend_platform_staff</c>).
+    /// </response>
+    /// <response code="404">Not a member of this workspace.</response>
+    [HttpPost("employees/{employeeId}/suspend")]
+    [RequirePermission(Permissions.Settings.Employees)]
+    [ProducesResponseType(typeof(ApiResponse<EmployeeSecurityResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SuspendAsync(
+        string employeeId,
+        [FromBody] SuspendAccountRequest request,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        var actor = _currentUser.UserId ?? throw new AuthenticationException("not_authenticated");
+
+        return Success(
+            await _overview.SuspendAsync(
+                _tenantContext.RequireTenantId(),
+                PublicId.Parse(PublicId.Employee, employeeId, "employee"),
+                request,
+                byPlatformStaff: false,
+                actor,
+                cancellationToken),
+            "Account suspended.");
+    }
+
+    /// <summary>Lets a suspended member sign in again. Their sessions do not come back.</summary>
+    /// <param name="employeeId">Public employee identifier.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">Their updated row.</response>
+    /// <response code="403">As for suspend.</response>
+    /// <response code="404">Not a member of this workspace.</response>
+    [HttpPost("employees/{employeeId}/reactivate")]
+    [RequirePermission(Permissions.Settings.Employees)]
+    [ProducesResponseType(typeof(ApiResponse<EmployeeSecurityResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ReactivateAsync(
+        string employeeId,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        var actor = _currentUser.UserId ?? throw new AuthenticationException("not_authenticated");
+
+        return Success(
+            await _overview.ReactivateAsync(
+                _tenantContext.RequireTenantId(),
+                PublicId.Parse(PublicId.Employee, employeeId, "employee"),
+                byPlatformStaff: false,
+                actor,
+                cancellationToken),
+            "Account reactivated.");
     }
 
     /// <summary>One person's devices.</summary>
@@ -226,7 +302,72 @@ public sealed class SuperAdminSecurityController : ApiControllerBase
     {
         var id = PublicId.Parse(PublicId.Tenant, tenantId, "tenant");
 
-        return Success(await _overview.GetOrganizationAsync(id, includeRisk: true, cancellationToken));
+        return Success(await _overview.GetOrganizationAsync(id, includeRisk: true, _currentUser.UserId, cancellationToken));
+    }
+
+    /// <summary>
+    /// Suspends a workspace member, its admin included. The organisation itself stays active.
+    /// </summary>
+    /// <remarks>
+    /// Different from suspending an admin account from the Admins screen, which suspends the
+    /// organisation too. This stops one person; everybody else in the workspace keeps working.
+    /// </remarks>
+    /// <param name="tenantId">Public tenant identifier.</param>
+    /// <param name="employeeId">Public employee identifier.</param>
+    /// <param name="request">Reason, and the level the screen showed.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">Their updated row, with risk.</response>
+    /// <response code="403">Yourself, or platform staff.</response>
+    /// <response code="404">Not a member of that workspace.</response>
+    [HttpPost("tenants/{tenantId}/employees/{employeeId}/suspend")]
+    [ProducesResponseType(typeof(ApiResponse<EmployeeSecurityResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SuspendAsync(
+        string tenantId,
+        string employeeId,
+        [FromBody] SuspendAccountRequest request,
+        CancellationToken cancellationToken)
+    {
+        var actor = _currentUser.UserId ?? throw new AuthenticationException("not_authenticated");
+
+        return Success(
+            await _overview.SuspendAsync(
+                PublicId.Parse(PublicId.Tenant, tenantId, "tenant"),
+                PublicId.Parse(PublicId.Employee, employeeId, "employee"),
+                request,
+                byPlatformStaff: true,
+                actor,
+                cancellationToken),
+            "Account suspended.");
+    }
+
+    /// <summary>Lets a suspended workspace member sign in again.</summary>
+    /// <param name="tenantId">Public tenant identifier.</param>
+    /// <param name="employeeId">Public employee identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">Their updated row, with risk.</response>
+    /// <response code="403">Yourself, or platform staff.</response>
+    /// <response code="404">Not a member of that workspace.</response>
+    [HttpPost("tenants/{tenantId}/employees/{employeeId}/reactivate")]
+    [ProducesResponseType(typeof(ApiResponse<EmployeeSecurityResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ReactivateAsync(
+        string tenantId,
+        string employeeId,
+        CancellationToken cancellationToken)
+    {
+        var actor = _currentUser.UserId ?? throw new AuthenticationException("not_authenticated");
+
+        return Success(
+            await _overview.ReactivateAsync(
+                PublicId.Parse(PublicId.Tenant, tenantId, "tenant"),
+                PublicId.Parse(PublicId.Employee, employeeId, "employee"),
+                byPlatformStaff: true,
+                actor,
+                cancellationToken),
+            "Account reactivated.");
     }
 
     /// <summary>One person's devices in a workspace.</summary>

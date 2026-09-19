@@ -691,6 +691,10 @@ public static class ContractEnums
         /// <summary>Something about an account's sign-ins looks like it is being shared.</summary>
         [JsonStringEnumMemberName("security.alert")]
         SecurityAlert,
+
+        /// <summary>Platform staff suspended a member of the workspace.</summary>
+        [JsonStringEnumMemberName("security.account_suspended")]
+        SecurityAccountSuspended,
     }
 
     // -------------------------------------------------------------------------------------

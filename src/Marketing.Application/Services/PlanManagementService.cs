@@ -230,7 +230,7 @@ public sealed class PlanManagementService : IPlanManagementService
         }
 
         // The platform's own ceiling is 10 km; a plan can narrow it, never widen it.
-        if (limits.MaxSearchRadiusKm is < 0 or > 10)
+        if (limits.MaxSearchRadiusKm is < 0 or > SearchRadius.MaximumKm)
         {
             throw new ValidationException(
                 "limits.maxSearchRadiusKm",

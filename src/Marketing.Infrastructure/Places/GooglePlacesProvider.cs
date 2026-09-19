@@ -34,8 +34,10 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
 {
     private const string SearchTextUrl = "https://places.googleapis.com/v1/places:searchText";
 
-    /// <summary>Widest radius sent to the provider, matching Google's own 50 km ceiling.</summary>
-    private const double MaximumRadiusKm = 50;
+    /// <summary>
+    /// Widest radius sent to the provider: the platform's ceiling, which is well inside Google's 50 km.
+    /// </summary>
+    private const double MaximumRadiusKm = Common.Constants.SearchRadius.MaximumKm;
     private const string SearchNearbyUrl = "https://places.googleapis.com/v1/places:searchNearby";
 
     /// <summary>

@@ -83,6 +83,16 @@ public interface ISessionTracker
     /// <param name="user">Account whose password was wrong.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task RecordFailedLoginAsync(User user, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Ends every session one account has, without saving. The caller's save commits it, so it can
+    /// share a transaction with whatever made it necessary.
+    /// </summary>
+    /// <param name="userId">The account.</param>
+    /// <param name="reason">Why, for the session rows.</param>
+    /// <param name="revokedByUserId">Who ended them.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task RevokeAllAsync(long userId, string reason, long? revokedByUserId, CancellationToken cancellationToken = default);
 }
 
 /// <inheritdoc cref="ISessionTracker" />
@@ -200,6 +210,14 @@ public sealed partial class SessionTracker : ISessionTracker
             LastActivityAt = now,
         });
 
+        // Platform staff keep a session row, so "your devices" still lists and ends their own
+        // sessions, and nothing else: no displacement, no device or location events, nothing that
+        // feeds a risk score.
+        if (user.TenantId is null)
+        {
+            return new SignInFacts(sessionId, device.Label, ip, location, false, false, false, 0, devicesInWindow);
+        }
+
         if (displaced.Count > 0)
         {
             await MarkDisplacedAsync(user, displaced, device.Label, ip, location, now, cancellationToken);
@@ -239,6 +257,14 @@ public sealed partial class SessionTracker : ISessionTracker
     /// <inheritdoc />
     public async Task AnnounceAsync(User user, SignInFacts facts, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(user);
+
+        // Never about platform staff: nobody is shown, emailed or scored for their sign-ins.
+        if (user.TenantId is null)
+        {
+            return;
+        }
+
         try
         {
             await _alerts.AnnounceSignInAsync(user, facts, cancellationToken);
@@ -381,9 +407,45 @@ public sealed partial class SessionTracker : ISessionTracker
     }
 
     /// <inheritdoc />
+    public async Task RevokeAllAsync(
+        long userId,
+        string reason,
+        long? revokedByUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var now = _clock.UtcNow;
+
+        var open = await _queries.ToListAsync(
+            _sessions.Query(asNoTracking: false)
+                .IgnoreQueryFilters()
+                .Where(session => !session.IsDeleted && session.UserId == userId && session.RevokedAt == null),
+            cancellationToken);
+
+        foreach (var session in open)
+        {
+            session.RevokedAt = now;
+            session.RevokedReason = reason;
+            session.RevokedByUserId = revokedByUserId;
+
+            // So the device is refused on its next request rather than when the cached answer lapses.
+            _cache.Remove(CacheKey(session.SessionId));
+        }
+
+        // One statement for every refresh token, including any from a session with no row.
+        await _refreshTokens.RevokeAllForUserAsync(userId, reason, now, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task RecordFailedLoginAsync(User user, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(user);
+
+        // Lockout still applies to platform staff - that is the authentication service's job and runs
+        // regardless. What is skipped is the security event and the alert built on it.
+        if (user.TenantId is null)
+        {
+            return;
+        }
 
         var now = _clock.UtcNow;
 

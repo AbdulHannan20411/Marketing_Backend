@@ -145,7 +145,15 @@ public sealed partial class AuthenticationService : IAuthenticationService
         var sessionId = Guid.NewGuid();
         var response = IssueSession(user, sessionId);
 
-        var displaced = await EnforceSessionLimitAsync(user.Id, utcNow, cancellationToken);
+        // Session security - one session per account, displacement, alerts - exists to stop a paid
+        // seat being shared. Platform staff have no seat and no workspace; they may be signed in on
+        // several machines at once, and none of it is counted against them.
+        var isPlatformStaff = user.TenantId is null;
+
+        IReadOnlyCollection<Guid> displaced = isPlatformStaff
+            ? []
+            : await EnforceSessionLimitAsync(user.Id, utcNow, cancellationToken);
+
         var facts = await _sessions.StartAsync(user, sessionId, displaced, cancellationToken);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -154,7 +162,10 @@ public sealed partial class AuthenticationService : IAuthenticationService
 
         // After the save, so an alert can never describe a sign-in that did not happen, and outside
         // the sign-in's own success: the tracker swallows its failures rather than failing this.
-        await _sessions.AnnounceAsync(user, facts, cancellationToken);
+        if (!isPlatformStaff)
+        {
+            await _sessions.AnnounceAsync(user, facts, cancellationToken);
+        }
 
         return response;
     }
@@ -856,8 +867,16 @@ public sealed partial class AuthenticationService : IAuthenticationService
     /// <summary>Rejects accounts and tenants that are not in a state that permits sign-in.</summary>
     private static void EnsureAccountUsable(User user)
     {
-        // Every branch throws the same generic error. Distinguishing "disabled" from "wrong
-        // password" would confirm the address is registered.
+        // Reached only after the password has been verified, so saying "suspended" confirms nothing
+        // to someone who does not already hold the credentials. For the person who does, it is the
+        // difference between knowing whom to ask and retyping a password that was never wrong.
+        if (user.Status == UserStatus.Disabled)
+        {
+            throw new AuthenticationException(
+                "account_suspended",
+                "This account has been suspended. Contact your workspace admin to have it reactivated.");
+        }
+
         if (user.Status != UserStatus.Active)
         {
             throw new AuthenticationException("account_not_active");

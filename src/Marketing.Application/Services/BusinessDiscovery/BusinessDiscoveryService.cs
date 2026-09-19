@@ -53,7 +53,7 @@ public interface IBusinessDiscoveryService
 public sealed partial class BusinessDiscoveryService : IBusinessDiscoveryService
 {
     /// <summary>Largest radius accepted, whatever the client offers.</summary>
-    private const double MaximumRadiusKm = 10;
+    private const double MaximumRadiusKm = SearchRadius.MaximumKm;
 
     /// <summary>Largest page accepted.</summary>
     private const int MaximumPageSize = 50;
