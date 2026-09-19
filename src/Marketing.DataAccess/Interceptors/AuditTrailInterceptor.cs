@@ -54,7 +54,12 @@ public sealed class AuditTrailInterceptor : SaveChangesInterceptor
     };
 
     /// <summary>Entity types that are not themselves audited.</summary>
-    private static readonly HashSet<Type> ExcludedTypes = [typeof(RefreshToken)];
+    /// <remarks>
+    /// Knowledge entries are replaced in bulk and recorded as one explicit entry per upload, without
+    /// their content. Reply attempts are operational bookkeeping that repeats the customer's words.
+    /// </remarks>
+    private static readonly HashSet<Type> ExcludedTypes =
+        [typeof(RefreshToken), typeof(AutoReplyKnowledgeEntry), typeof(AutoReplyAttempt)];
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {

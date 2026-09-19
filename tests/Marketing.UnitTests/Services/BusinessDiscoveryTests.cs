@@ -83,9 +83,19 @@ public sealed class BusinessSearchValidationTests
         (string)FingerprintMethod.Invoke(null, [latitude, longitude, 5d, "barber", 1, 25])!;
 
     [Fact]
+    public void The_platform_ceiling_is_10_km()
+    {
+        Validate(Request(radiusKm: 10));
+
+        var act = () => Validate(Request(radiusKm: 11));
+
+        act.Should().Throw<BusinessRuleException>().Which.ErrorCode.Should().Be("radius_too_large");
+    }
+
+    [Fact]
     public void A_radius_beyond_the_ceiling_is_refused_with_its_own_code()
     {
-        // The client offers 1/2/5/10/20/50, but that dropdown is a convenience for the user, not a
+        // The client offers 1 to 10, but that dropdown is a convenience for the user, not a
         // constraint on the caller - and a 5,000 km radius is a very expensive provider call.
         var act = () => Validate(Request(radiusKm: 500));
 

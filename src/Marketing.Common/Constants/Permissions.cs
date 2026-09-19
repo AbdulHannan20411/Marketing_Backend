@@ -198,6 +198,15 @@ public static class Permissions
         /// platform's AI provider quota, so it is granted deliberately rather than by default.
         /// </remarks>
         public const string AssistantUse = "ai.assistant.use";
+
+        /// <summary>
+        /// Configure AI auto-reply: switch, occasions, timing and the knowledge file.
+        /// </summary>
+        /// <remarks>
+        /// Not in the Employee default, for the same reason as the assistant and a stronger one:
+        /// it decides what the business tells customers with no person involved.
+        /// </remarks>
+        public const string AutoReplyManage = "ai.autoreply.manage";
     }
 
     /// <summary>Organisation settings.</summary>
@@ -278,7 +287,7 @@ public static class Permissions
 
         Reports.View, Reports.Export, Reports.DownloadCsv, Reports.DownloadExcel, Reports.DownloadPdf,
 
-        Ai.AssistantUse,
+        Ai.AssistantUse, Ai.AutoReplyManage,
 
         Settings.Company, Settings.Employees, Settings.Billing, Settings.Subscription,
         Settings.Integrations, Settings.ApiKeys,

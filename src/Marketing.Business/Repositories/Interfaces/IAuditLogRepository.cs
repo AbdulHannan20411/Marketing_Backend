@@ -21,4 +21,11 @@ public interface IAuditLogRepository
     /// </para>
     /// </summary>
     public IQueryable<AuditLog> Query();
+
+    /// <summary>
+    /// Records an event that is not a change to one row - a bulk replace, for instance - written with
+    /// the caller's next save.
+    /// </summary>
+    /// <param name="entry">The entry. Never content, only what happened.</param>
+    public void Add(AuditLog entry);
 }

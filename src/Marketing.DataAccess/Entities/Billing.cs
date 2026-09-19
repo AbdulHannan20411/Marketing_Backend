@@ -108,6 +108,16 @@ public sealed class SubscriptionPlan : BaseEntity
     /// Every reply is a paid model call, so unlike a contact limit this one protects a real cost.
     /// </remarks>
     public int? MonthlyAiReplyLimit { get; set; }
+
+    /// <summary>
+    /// Widest radius, in whole kilometres, the nearby-business search may use.
+    /// </summary>
+    /// <remarks>
+    /// Null means no plan ceiling (the platform's own 10 km still applies); zero means the plan has
+    /// no nearby search at all. A wider radius is more Places API calls per search, which is the cost
+    /// this limit prices.
+    /// </remarks>
+    public int? MaxSearchRadiusKm { get; set; }
 }
 
 /// <summary>A tenant's subscription to a plan.</summary>

@@ -48,6 +48,8 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
     private readonly IRepository<Conversation> _conversations;
     private readonly IRepository<ConversationMessage> _messages;
     private readonly IRepository<AutoReplySettings> _settings;
+    private readonly IAutoReplyKnowledgeRepository _knowledge;
+    private readonly IRepository<AutoReplyAttempt> _attempts;
     private readonly IRepository<Notification> _notifications;
     private readonly IWhatsAppConnectionRepository _connections;
     private readonly IUserRepository _users;
@@ -66,6 +68,8 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
         IRepository<Conversation> conversations,
         IRepository<ConversationMessage> messages,
         IRepository<AutoReplySettings> settings,
+        IAutoReplyKnowledgeRepository knowledge,
+        IRepository<AutoReplyAttempt> attempts,
         IRepository<Notification> notifications,
         IWhatsAppConnectionRepository connections,
         IUserRepository users,
@@ -82,6 +86,8 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
         _conversations = conversations;
         _messages = messages;
         _settings = settings;
+        _knowledge = knowledge;
+        _attempts = attempts;
         _notifications = notifications;
         _connections = connections;
         _users = users;
@@ -197,6 +203,12 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
             return 0;
         }
 
+        // Read once per workspace per run. When there are entries they replace the free-text
+        // instructions entirely; when there are none, replies behave exactly as they always have.
+        var knowledge = await _queries.ToListAsync(
+            _knowledge.Query().OrderBy(entry => entry.SortOrder).ThenBy(entry => entry.Id),
+            cancellationToken);
+
         var tokens = new Dictionary<long, string>();
         var remaining = allowance.Remaining;
         var sent = 0;
@@ -227,7 +239,8 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
                 tokens[sender.Id] = accessToken = _protector.Unprotect(sender.EncryptedAccessToken!);
             }
 
-            if (await SendAsync(candidate, trigger!, settings, sender.PhoneNumberId!, accessToken, now, cancellationToken))
+            if (await SendAsync(
+                    candidate, trigger!, settings, knowledge, sender.PhoneNumberId!, accessToken, now, cancellationToken))
             {
                 sent++;
                 remaining = remaining is { } left ? left - 1 : null;
@@ -242,6 +255,7 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
         WaitingConversation candidate,
         string trigger,
         AutoReplySettings settings,
+        IReadOnlyList<AutoReplyKnowledgeEntry> knowledge,
         string phoneNumberId,
         string accessToken,
         DateTimeOffset now,
@@ -260,6 +274,12 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
             .Reverse()
             .Where(message => message.Body.Length > 0)
             .Select(message => (message.Direction == MessageDirection.Inbound ? "Customer: " : "Business: ") + message.Body);
+
+        if (knowledge.Count > 0)
+        {
+            return await AnswerFromKnowledgeAsync(
+                candidate, trigger, settings, knowledge, transcript, phoneNumberId, accessToken, now, cancellationToken);
+        }
 
         string answer;
 
@@ -285,6 +305,151 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
             return false;
         }
 
+        return await DeliverAsync(candidate, trigger, answer, phoneNumberId, accessToken, now, cancellationToken);
+    }
+
+    /// <summary>
+    /// Answers from the knowledge file only - or, when it has no answer, falls back as the workspace chose.
+    /// </summary>
+    private async Task<bool> AnswerFromKnowledgeAsync(
+        WaitingConversation candidate,
+        string trigger,
+        AutoReplySettings settings,
+        IReadOnlyList<AutoReplyKnowledgeEntry> knowledge,
+        IEnumerable<string> transcript,
+        string phoneNumberId,
+        string accessToken,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        // Each customer message is put to the model once. Without this an unanswerable question would
+        // be asked again on every run until someone replied, at the model's price each time.
+        var attempted = await _queries.CountAsync(
+            _attempts.Query().Where(attempt =>
+                attempt.ConversationId == candidate.ConversationId
+                && attempt.InboundMessageAt >= candidate.LastInboundAt),
+            cancellationToken);
+
+        if (attempted > 0)
+        {
+            return false;
+        }
+
+        var prompt = AutoReplyKnowledgePrompt.Build(
+            knowledge, candidate.LastInboundBody, trigger, candidate.ContactName, transcript);
+
+        string raw;
+
+        try
+        {
+            raw = await _ai.GenerateAsync(prompt.Text, cancellationToken);
+        }
+        catch (Exception exception) when (exception is AppException)
+        {
+            // Not recorded: a failed call is not an answer, and the next run may succeed.
+            LogGenerationFailed(exception, candidate.ConversationId);
+
+            return false;
+        }
+
+        var (answer, outcome) = Judge(raw, prompt, knowledge, trigger);
+
+        if (outcome == OutcomeAnswered)
+        {
+            var sent = await DeliverAsync(candidate, trigger, answer, phoneNumberId, accessToken, now, cancellationToken);
+
+            await RecordAttemptAsync(candidate, trigger, OutcomeAnswered, fallbackSent: false, now, cancellationToken);
+
+            return sent;
+        }
+
+        // Not covered, or the reply failed the checks. A handoff sends the holding message at most once
+        // per conversation a day: three unanswerable questions should not get three identical replies.
+        var holdingMessage = settings.KnowledgeFallback == AutoReplyKnowledgeRules.Handoff
+                             && settings.KnowledgeFallbackMessage.Length > 0
+                             && await _queries.CountAsync(
+                                 _attempts.Query().Where(attempt =>
+                                     attempt.ConversationId == candidate.ConversationId
+                                     && attempt.FallbackSent
+                                     && attempt.AttemptedAt > now.AddHours(-24)),
+                                 cancellationToken) == 0;
+
+        var handedOff = holdingMessage
+                        && await DeliverAsync(
+                            candidate, trigger, settings.KnowledgeFallbackMessage, phoneNumberId, accessToken, now, cancellationToken);
+
+        await RecordAttemptAsync(candidate, trigger, outcome, handedOff, now, cancellationToken);
+
+        LogNotCovered(candidate.ConversationId, outcome, handedOff);
+
+        return handedOff;
+    }
+
+    /// <summary>
+    /// Decides whether a model reply may be sent: not "unknown", and quoting no price the file does
+    /// not contain.
+    /// </summary>
+    private static (string Answer, string Outcome) Judge(
+        string raw,
+        AutoReplyKnowledgePrompt.Prompt prompt,
+        IReadOnlyList<AutoReplyKnowledgeEntry> knowledge,
+        string trigger)
+    {
+        var answer = AutoReplyKnowledgePrompt.IsUnknown(raw) ? string.Empty : AutoReplyKnowledgePrompt.Tidy(raw);
+
+        // A greeting never needs the file to answer anything, so it is never "unknown": the business
+        // name makes one when the model declines.
+        if (answer.Length == 0 && trigger == AutoReplyTriggers.Greeting)
+        {
+            answer = AutoReplyKnowledgePrompt.Greeting(knowledge) ?? string.Empty;
+        }
+
+        if (answer.Length == 0)
+        {
+            return (string.Empty, OutcomeUnknown);
+        }
+
+        // The complaint this feature exists to prevent: a price the business never quoted.
+        return AutoReplyKnowledgePrompt.HasInventedPrice(answer, prompt.Included)
+            ? (string.Empty, OutcomeRejected)
+            : (answer, OutcomeAnswered);
+    }
+
+    private async Task RecordAttemptAsync(
+        WaitingConversation candidate,
+        string trigger,
+        string outcome,
+        bool fallbackSent,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var question = candidate.LastInboundBody.Trim();
+
+        _attempts.Add(new AutoReplyAttempt
+        {
+            TenantId = candidate.TenantId,
+            ConversationId = candidate.ConversationId,
+            InboundMessageAt = candidate.LastInboundAt,
+            Trigger = trigger,
+            Outcome = outcome,
+            FallbackSent = fallbackSent,
+            Question = question.Length <= 500 ? question : question[..500],
+            AttemptedAt = now,
+        });
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>Sends one automatic message, unless someone answered while it was being written.</summary>
+    private async Task<bool> DeliverAsync(
+        WaitingConversation candidate,
+        string trigger,
+        string answer,
+        string phoneNumberId,
+        string accessToken,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
         var conversation = await _queries.FirstOrDefaultAsync(
             _conversations.Query(asNoTracking: false)
                 .Where(existing => existing.Id == candidate.ConversationId),
@@ -547,6 +712,15 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
         return prompt.ToString();
     }
 
+    /// <summary>The reply was sent.</summary>
+    private const string OutcomeAnswered = "answered";
+
+    /// <summary>The knowledge file did not cover the question.</summary>
+    private const string OutcomeUnknown = "unknown";
+
+    /// <summary>The reply failed the output checks, such as an invented price.</summary>
+    private const string OutcomeRejected = "rejected";
+
     /// <summary>Strips the things a model adds that a chat window should not show.</summary>
     private static string Trim(string answer)
     {
@@ -585,6 +759,12 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
         Level = LogLevel.Information,
         Message = "Tenant {TenantId} has used its allowance of {MonthlyLimit} automatic replies; they are paused.")]
     private partial void LogAllowanceExhausted(long tenantId, int monthlyLimit);
+
+    [LoggerMessage(
+        EventId = 2754,
+        Level = LogLevel.Information,
+        Message = "The knowledge file did not answer conversation {ConversationId} ({Outcome}); holding message sent: {HandedOff}.")]
+    private partial void LogNotCovered(long conversationId, string outcome, bool handedOff);
 
     [LoggerMessage(
         EventId = 2753,

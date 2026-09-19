@@ -28,7 +28,7 @@ public sealed record PlaceSuggestionResponse(
 /// <summary>Request for one page of businesses near a point.</summary>
 /// <param name="Latitude">-90 to 90.</param>
 /// <param name="Longitude">-180 to 180.</param>
-/// <param name="RadiusKm">1 to 50. The ceiling is enforced here, not by the client's dropdown.</param>
+/// <param name="RadiusKm">1 to 10. The ceiling is enforced here, not by the client's dropdown.</param>
 /// <param name="Category">A known category id.</param>
 /// <param name="Page">One-based.</param>
 /// <param name="PageSize">1 to 50.</param>

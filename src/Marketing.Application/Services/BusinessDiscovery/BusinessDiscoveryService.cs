@@ -53,7 +53,7 @@ public interface IBusinessDiscoveryService
 public sealed partial class BusinessDiscoveryService : IBusinessDiscoveryService
 {
     /// <summary>Largest radius accepted, whatever the client offers.</summary>
-    private const double MaximumRadiusKm = 50;
+    private const double MaximumRadiusKm = 10;
 
     /// <summary>Largest page accepted.</summary>
     private const int MaximumPageSize = 50;
@@ -99,6 +99,7 @@ public sealed partial class BusinessDiscoveryService : IBusinessDiscoveryService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUser _currentUser;
+    private readonly IPlanGuard _planGuard;
     private readonly ILogger<BusinessDiscoveryService> _logger;
 
     /// <summary>Initialises a new instance.</summary>
@@ -112,8 +113,10 @@ public sealed partial class BusinessDiscoveryService : IBusinessDiscoveryService
         IUnitOfWork unitOfWork,
         ITenantContext tenantContext,
         ICurrentUser currentUser,
+        IPlanGuard planGuard,
         ILogger<BusinessDiscoveryService> logger)
     {
+        _planGuard = planGuard;
         _provider = provider;
         _cache = cache;
         _contacts = contacts;
@@ -174,6 +177,7 @@ public sealed partial class BusinessDiscoveryService : IBusinessDiscoveryService
         var tenantId = _tenantContext.RequireTenantId();
         var (radiusKm, pageSize, page) = Validate(request);
 
+        await EnforcePlanRadiusAsync(radiusKm, cancellationToken);
         await EnforceSearchQuotaAsync(tenantId, cancellationToken);
 
         // Rounded to about a hundred metres before it reaches the key, so nudging the pin a few
@@ -391,6 +395,39 @@ public sealed partial class BusinessDiscoveryService : IBusinessDiscoveryService
         if (longitude is < -180 or > 180 || double.IsNaN(longitude))
         {
             throw new ValidationException("longitude", "Longitude must be between -180 and 180.");
+        }
+    }
+
+    /// <summary>Refuses a radius wider than the workspace's plan allows.</summary>
+    /// <remarks>
+    /// After the platform's own 1-10 km check, so a radius nobody may use is still a validation
+    /// error rather than a plan one. Platform staff are exempt, including when viewing a workspace:
+    /// plan limits describe what a customer bought and never apply to them.
+    /// </remarks>
+    private async Task EnforcePlanRadiusAsync(double radiusKm, CancellationToken cancellationToken)
+    {
+        if (_currentUser.IsSuperAdmin)
+        {
+            return;
+        }
+
+        var plan = await _planGuard.CurrentPlanAsync(cancellationToken);
+
+        if (plan?.MaxSearchRadiusKm is not { } limit)
+        {
+            return;
+        }
+
+        if (limit == 0)
+        {
+            throw new ForbiddenException("radius_exceeds_plan", "Your plan does not include nearby business search.");
+        }
+
+        if (radiusKm > limit)
+        {
+            throw new ForbiddenException(
+                "radius_exceeds_plan",
+                string.Create(CultureInfo.InvariantCulture, $"Your plan allows searching up to {limit} km."));
         }
     }
 

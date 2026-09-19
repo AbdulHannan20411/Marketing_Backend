@@ -14,6 +14,10 @@ namespace Marketing.Application.DTOs.Billing;
 /// <param name="DailyMessageLimit">Messages per day.</param>
 /// <param name="MonthlyMessageLimit">Messages per month.</param>
 /// <param name="MonthlyAiReplyLimit">Automatic AI replies per billing period, or null for no ceiling.</param>
+/// <param name="MaxSearchRadiusKm">
+/// Widest nearby-business search radius in km: 1-10, null for no plan ceiling (the platform's 10 km still applies),
+/// or 0 when the plan has no nearby search.
+/// </param>
 public sealed record PlanLimits(
     int? MaxEmployees,
     int? MaxContacts,
@@ -25,7 +29,8 @@ public sealed record PlanLimits(
     int? MaxStorageMb,
     int? DailyMessageLimit,
     int? MonthlyMessageLimit,
-    int? MonthlyAiReplyLimit = null);
+    int? MonthlyAiReplyLimit = null,
+    int? MaxSearchRadiusKm = null);
 
 /// <summary>A subscription plan.</summary>
 /// <param name="Id">Opaque identifier, prefixed <c>plan_</c>.</param>

@@ -987,6 +987,11 @@ public sealed class AutoReplySettingsConfiguration : BaseEntityConfiguration<Aut
         builder.ToTable("auto_reply_settings");
 
         builder.Property(settings => settings.Instructions).HasMaxLength(2000);
+        builder.Property(settings => settings.KnowledgeFallback).IsRequired().HasMaxLength(16)
+            .HasDefaultValue("handoff");
+        builder.Property(settings => settings.KnowledgeFallbackMessage).IsRequired().HasMaxLength(300)
+            .HasDefaultValue("Thanks for your message! Someone from our team will get back to you shortly.");
+        builder.Property(settings => settings.KnowledgeSourceFileName).HasMaxLength(255);
 
         // One row per workspace. A second would mean two sets of rules racing to answer the same
         // customer, and whichever the planner returned first would win.
@@ -996,6 +1001,42 @@ public sealed class AutoReplySettingsConfiguration : BaseEntityConfiguration<Aut
     }
 }
 
+
+/// <summary>Maps <see cref="AutoReplyKnowledgeEntry"/>.</summary>
+public sealed class AutoReplyKnowledgeEntryConfiguration : BaseEntityConfiguration<AutoReplyKnowledgeEntry>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<AutoReplyKnowledgeEntry> builder)
+    {
+        builder.ToTable("auto_reply_knowledge_entries");
+
+        builder.Property(entry => entry.Kind).IsRequired().HasMaxLength(16);
+        builder.Property(entry => entry.Title).IsRequired().HasMaxLength(200);
+        builder.Property(entry => entry.Answer).IsRequired().HasMaxLength(1000);
+        builder.Property(entry => entry.Price).HasMaxLength(60);
+        builder.Property(entry => entry.Keywords).HasColumnType("text[]").IsRequired();
+
+        // Read whole, in upload order, once per reply.
+        builder.HasIndex(entry => new { entry.TenantId, entry.SortOrder });
+    }
+}
+
+/// <summary>Maps <see cref="AutoReplyAttempt"/>.</summary>
+public sealed class AutoReplyAttemptConfiguration : BaseEntityConfiguration<AutoReplyAttempt>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<AutoReplyAttempt> builder)
+    {
+        builder.ToTable("auto_reply_attempts");
+
+        builder.Property(attempt => attempt.Trigger).IsRequired().HasMaxLength(32);
+        builder.Property(attempt => attempt.Outcome).IsRequired().HasMaxLength(16);
+        builder.Property(attempt => attempt.Question).IsRequired().HasMaxLength(500);
+
+        builder.HasIndex(attempt => new { attempt.ConversationId, attempt.InboundMessageAt });
+        builder.HasIndex(attempt => new { attempt.TenantId, attempt.Outcome, attempt.AttemptedAt });
+    }
+}
 
 /// <summary>Maps <see cref="UserSession"/>.</summary>
 public sealed class UserSessionConfiguration : BaseEntityConfiguration<UserSession>

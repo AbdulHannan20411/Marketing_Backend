@@ -175,6 +175,7 @@ public sealed class PlanManagementService : IPlanManagementService
             MonthlyMessageLimit = source.MonthlyMessageLimit,
             AutoReplyTriggers = [.. source.AutoReplyTriggers],
             MonthlyAiReplyLimit = source.MonthlyAiReplyLimit,
+            MaxSearchRadiusKm = source.MaxSearchRadiusKm,
         };
 
         _plans.Add(copy);
@@ -228,6 +229,14 @@ public sealed class PlanManagementService : IPlanManagementService
             return;
         }
 
+        // The platform's own ceiling is 10 km; a plan can narrow it, never widen it.
+        if (limits.MaxSearchRadiusKm is < 0 or > 10)
+        {
+            throw new ValidationException(
+                "limits.maxSearchRadiusKm",
+                "Search radius must be between 0 and 10 km, or unlimited.");
+        }
+
         // Assigned wholesale, including nulls: null is a meaningful value here - it means
         // unlimited - so a null cannot be treated as "leave unchanged" the way it is elsewhere in
         // the patch.
@@ -242,5 +251,6 @@ public sealed class PlanManagementService : IPlanManagementService
         plan.DailyMessageLimit = limits.DailyMessageLimit;
         plan.MonthlyMessageLimit = limits.MonthlyMessageLimit;
         plan.MonthlyAiReplyLimit = limits.MonthlyAiReplyLimit;
+        plan.MaxSearchRadiusKm = limits.MaxSearchRadiusKm;
     }
 }

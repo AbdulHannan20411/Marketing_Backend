@@ -22,6 +22,9 @@ public sealed class AuditLogRepository : IAuditLogRepository
     }
 
     /// <inheritdoc />
+    public void Add(AuditLog entry) => _context.AuditLogs.Add(entry);
+
+    /// <inheritdoc />
     public IQueryable<AuditLog> Query()
     {
         var query = _context.AuditLogs.AsNoTracking();

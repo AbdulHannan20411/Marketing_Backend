@@ -93,6 +93,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<Services.WhatsApp.IInboundMessageService, Services.WhatsApp.InboundMessageService>();
         services.AddScoped<Services.WhatsApp.IAutoReplyAllowance, Services.WhatsApp.AutoReplyAllowanceReader>();
         services.AddScoped<Services.WhatsApp.IAutoReplyService, Services.WhatsApp.AutoReplyService>();
+        services.AddScoped<Services.WhatsApp.IAutoReplyKnowledgeService, Services.WhatsApp.AutoReplyKnowledgeService>();
         services.AddScoped<Services.WhatsApp.IAutoReplyDispatchService, Services.WhatsApp.AutoReplyDispatchService>();
 
         // Session security. The memory cache backs the per-request liveness check, which would
