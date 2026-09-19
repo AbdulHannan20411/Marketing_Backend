@@ -77,6 +77,7 @@ public sealed class CatalogServiceTemplateTests
             _templates,
             Substitute.For<IRepository<Campaign>>(),
             _connections,
+            Substitute.For<Marketing.Application.Services.WhatsApp.IWhatsAppAccessService>(),
             _protector,
             _gateway,
             _queries,
@@ -89,7 +90,7 @@ public sealed class CatalogServiceTemplateTests
         _gateway.CreateTemplateAsync(WabaId, Arg.Any<MetaTemplateDefinition>(), "token", Arg.Any<CancellationToken>())
             .Returns(new MetaTemplateSubmission("meta-77", "PENDING", "UTILITY"));
 
-        await CreateService().CreateTemplateAsync(Draft(), TestContext.Current.CancellationToken);
+        await CreateService().CreateTemplateAsync(Draft(), cancellationToken: TestContext.Current.CancellationToken);
 
         await _gateway.Received(1).CreateTemplateAsync(
             WabaId,
@@ -122,7 +123,7 @@ public sealed class CatalogServiceTemplateTests
                 ProviderUserMessage = "Content in this language already exists.",
             });
 
-        var create = () => CreateService().CreateTemplateAsync(Draft(), TestContext.Current.CancellationToken);
+        var create = () => CreateService().CreateTemplateAsync(Draft(), cancellationToken: TestContext.Current.CancellationToken);
 
         var refusal = (await create.Should().ThrowAsync<BusinessRuleException>()).Which;
 
@@ -138,7 +139,7 @@ public sealed class CatalogServiceTemplateTests
     {
         _connections.FindForTenantAsync(TenantId, Arg.Any<CancellationToken>()).Returns((WhatsAppConnection?)null);
 
-        var create = () => CreateService().CreateTemplateAsync(Draft(), TestContext.Current.CancellationToken);
+        var create = () => CreateService().CreateTemplateAsync(Draft(), cancellationToken: TestContext.Current.CancellationToken);
 
         (await create.Should().ThrowAsync<BusinessRuleException>()).Which.ErrorCode.Should().Be("whatsapp_not_connected");
 
@@ -150,7 +151,7 @@ public sealed class CatalogServiceTemplateTests
     [Fact]
     public async Task An_invalid_draft_never_reaches_meta()
     {
-        var create = () => CreateService().CreateTemplateAsync(Draft(headerKind: "image"), TestContext.Current.CancellationToken);
+        var create = () => CreateService().CreateTemplateAsync(Draft(headerKind: "image"), cancellationToken: TestContext.Current.CancellationToken);
 
         await create.Should().ThrowAsync<ValidationException>();
 

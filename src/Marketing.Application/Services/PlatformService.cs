@@ -122,7 +122,8 @@ public sealed class PlatformService : IPlatformService
                 .Sum(row => row.Count),
             admin.MessagesThisMonth,
             admin.LastActiveOn ?? admin.CreatedOn,
-            admin.CreatedOn))];
+            admin.CreatedOn,
+            PublicId.From(PublicId.Tenant, admin.TenantId)))];
     }
 
     /// <inheritdoc />

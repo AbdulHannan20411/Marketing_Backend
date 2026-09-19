@@ -43,6 +43,8 @@ public sealed record CampaignMetricsResponse(
 /// <param name="CreatedBy">Display name of the creator.</param>
 /// <param name="CreatedAt">Instant it was created.</param>
 /// <param name="UpdatedAt">Instant it was last modified.</param>
+/// <param name="WhatsAppAccountId">The number it sends from, <c>wa_…</c>.</param>
+/// <param name="WhatsAppAccountLabel">What the workspace calls that number, denormalised for the list.</param>
 public sealed record CampaignResponse(
     string Id,
     string Name,
@@ -62,7 +64,9 @@ public sealed record CampaignResponse(
     DateTimeOffset? CompletedAt,
     string CreatedBy,
     DateTimeOffset CreatedAt,
-    DateTimeOffset? UpdatedAt);
+    DateTimeOffset? UpdatedAt,
+    string? WhatsAppAccountId = null,
+    string? WhatsAppAccountLabel = null);
 
 /// <summary>Delivery counters for one firing.</summary>
 /// <param name="AudienceSize">Distinct contacts resolved at fire time.</param>

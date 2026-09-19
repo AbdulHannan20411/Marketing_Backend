@@ -101,6 +101,19 @@ public interface IWhatsAppGateway
         string accessToken,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Stops this app receiving a business account's webhooks.</summary>
+    /// <remarks>
+    /// Subscription is per business account, not per number: the caller must only unsubscribe when
+    /// no other connected number in any workspace still uses the account.
+    /// </remarks>
+    /// <param name="wabaId">Business account identifier.</param>
+    /// <param name="accessToken">The tenant's business token.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task UnsubscribeFromWebhooksAsync(
+        string wabaId,
+        string accessToken,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Registers a phone number so it can send.</summary>
     /// <param name="phoneNumberId">Phone number identifier.</param>
     /// <param name="pin">Six-digit two-factor PIN, generated and stored by the caller.</param>
@@ -265,7 +278,12 @@ public sealed record MetaMediaDownload(byte[] Content, string MimeType, long Siz
 /// <param name="Id">Account identifier.</param>
 /// <param name="Name">Business name.</param>
 /// <param name="TemplateNamespace">Namespace templates are published under.</param>
-public sealed record MetaBusinessAccount(string Id, string? Name, string? TemplateNamespace);
+/// <param name="ReviewStatus">Meta's review status for the account - APPROVED, PENDING, REJECTED.</param>
+public sealed record MetaBusinessAccount(
+    string Id,
+    string? Name,
+    string? TemplateNamespace,
+    string? ReviewStatus = null);
 
 /// <summary>A business access token issued by Meta.</summary>
 /// <param name="Value">The token. Encrypted before storage and never logged.</param>
@@ -282,12 +300,14 @@ public sealed record MetaAccessToken(string Value, DateTimeOffset? ExpiresAtUtc)
 /// does not return it, which the caller treats as "leave what we had" rather than as the lowest
 /// tier — silently demoting a number on a missing field would misreport what it can send.
 /// </param>
+/// <param name="Status">Meta's status for the number - CONNECTED, FLAGGED, RESTRICTED.</param>
 public sealed record MetaPhoneNumber(
     string Id,
     string DisplayPhoneNumber,
     string? VerifiedName,
     string? QualityRating,
-    string? MessagingTier = null);
+    string? MessagingTier = null,
+    string? Status = null);
 
 /// <summary>A message template as Meta holds it.</summary>
 /// <param name="Id">Meta's template identifier.</param>

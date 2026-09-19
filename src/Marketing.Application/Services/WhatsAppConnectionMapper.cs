@@ -39,7 +39,53 @@ public static class WhatsAppConnectionMapper
             connection.TokenExpiresAt,
             ToOnboarding(connection),
             connection.WebhookHealthy,
-            connection.TemplateNamespaceAlias);
+            connection.TemplateNamespaceAlias,
+            Common.Helpers.PublicId.From(Common.Helpers.PublicId.WhatsAppAccount, connection.Id));
+    }
+
+    /// <summary>Projects a connection onto the account shape, with what the caller may do on it.</summary>
+    /// <param name="connection">The stored connection.</param>
+    /// <param name="permissions">The caller's permissions on this number.</param>
+    /// <param name="now">The current instant, for the lapsed-token rule.</param>
+    public static WhatsAppAccountResponse ToAccountResponse(
+        this WhatsAppConnection connection,
+        IReadOnlyList<WhatsAppAccessLevel> permissions,
+        DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
+        // The same lapsed-token rule the single-connection response applies, so the two endpoints
+        // cannot disagree about whether one number is working.
+        var status = connection.Status == ConnectionStatus.Connected
+                     && connection.TokenExpiresAt is { } expiresAt
+                     && expiresAt <= now
+            ? ConnectionStatus.Error
+            : connection.Status;
+
+        return new WhatsAppAccountResponse(
+            Common.Helpers.PublicId.From(Common.Helpers.PublicId.WhatsAppAccount, connection.Id),
+            connection.Label,
+            connection.DisplayPhoneNumber,
+            connection.VerifiedName,
+            connection.WabaId ?? string.Empty,
+            connection.PhoneNumberId ?? string.Empty,
+            status,
+            connection.QualityRating,
+            connection.MessagingTier,
+            connection.MessagingLimit,
+            connection.MessagesLast24h,
+            connection.TokenExpiresAt,
+            connection.ConnectedAt,
+            connection.IsDefault,
+            permissions,
+            new WhatsAppAccountHealthResponse(
+                connection.ApiStatus,
+                connection.PhoneNumberStatus,
+                connection.AccountStatus,
+                connection.LastWebhookAt,
+                connection.LastMessageSentAt,
+                connection.LastMessageReceivedAt,
+                connection.LastError));
     }
 
     /// <summary>Projects the stored steps, in the order they run.</summary>

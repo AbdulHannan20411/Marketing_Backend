@@ -14,46 +14,63 @@ namespace Marketing.Application.Services;
 /// <summary>Reads and refreshes the tenant's Meta connection and templates.</summary>
 public interface IWhatsAppService
 {
-    /// <summary>Returns the connection, or a disconnected placeholder when there is none.</summary>
+    /// <summary>Returns a number's connection, or a disconnected placeholder when there is none.</summary>
+    /// <param name="accountId">Public account id, or null for the workspace default.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public Task<WhatsAppConnectionResponse> GetConnectionAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>Refreshes the connection from Meta and returns the updated state.</summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    public Task<WhatsAppConnectionResponse> SyncConnectionAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>Returns every template.</summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    public Task<IReadOnlyList<MessageTemplateResponse>> GetTemplatesAsync(
+    public Task<WhatsAppConnectionResponse> GetConnectionAsync(
+        string? accountId = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Returns a filtered, searched page of templates.</summary>
+    /// <summary>Refreshes a number from Meta and returns the updated state.</summary>
+    /// <param name="accountId">Public account id, or null for the workspace default.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<WhatsAppConnectionResponse> SyncConnectionAsync(
+        string? accountId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns every template of a number's business account.</summary>
+    /// <param name="accountId">Public account id, or null for the workspace default.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<IReadOnlyList<MessageTemplateResponse>> GetTemplatesAsync(
+        string? accountId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns a filtered, searched page of a number's templates.</summary>
     /// <param name="query">Search, filters and paging.</param>
+    /// <param name="accountId">Public account id, or null for the workspace default.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<PagedResult<MessageTemplateResponse>> SearchTemplatesAsync(
         TemplateQuery query,
+        string? accountId = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Counts templates by approval state, ignoring any active filter.</summary>
+    /// <summary>Counts a number's templates by approval state, ignoring any active filter.</summary>
+    /// <param name="accountId">Public account id, or null for the workspace default.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<TemplateStatusCountsResponse> CountTemplatesAsync(
+        string? accountId = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Returns every approved template, unpaged, for the campaign picker.</summary>
+    /// <summary>Returns every approved template of a number, unpaged, for the campaign picker.</summary>
+    /// <param name="accountId">Public account id, or null for the workspace default.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<IReadOnlyList<MessageTemplateResponse>> GetApprovedTemplatesAsync(
+        string? accountId = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Refreshes templates from Meta and returns them.</summary>
+    /// <summary>Refreshes a number's templates from Meta and returns them.</summary>
+    /// <param name="accountId">Public account id, or null for the workspace default.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<IReadOnlyList<MessageTemplateResponse>> SyncTemplatesAsync(
+        string? accountId = null,
         CancellationToken cancellationToken = default);
 }
 
 /// <inheritdoc cref="IWhatsAppService" />
 public sealed class WhatsAppService : IWhatsAppService
 {
-    private readonly IRepository<WhatsAppConnection> _connections;
+    private readonly Services.WhatsApp.IWhatsAppAccessService _access;
+    private readonly Services.WhatsApp.IWhatsAppAccountService _accounts;
     private readonly IRepository<MessageTemplate> _templates;
     private readonly IQueryExecutor _queries;
     private readonly IWhatsAppGateway _gateway;
@@ -64,7 +81,8 @@ public sealed class WhatsAppService : IWhatsAppService
 
     /// <summary>Initialises a new instance.</summary>
     public WhatsAppService(
-        IRepository<WhatsAppConnection> connections,
+        Services.WhatsApp.IWhatsAppAccessService access,
+        Services.WhatsApp.IWhatsAppAccountService accounts,
         IRepository<MessageTemplate> templates,
         IQueryExecutor queries,
         IWhatsAppGateway gateway,
@@ -73,7 +91,8 @@ public sealed class WhatsAppService : IWhatsAppService
         ITenantContext tenantContext,
         IDateTimeProvider clock)
     {
-        _connections = connections;
+        _access = access;
+        _accounts = accounts;
         _templates = templates;
         _queries = queries;
         _gateway = gateway;
@@ -84,13 +103,16 @@ public sealed class WhatsAppService : IWhatsAppService
     }
 
     /// <inheritdoc />
-    public async Task<WhatsAppConnectionResponse> GetConnectionAsync(CancellationToken cancellationToken = default)
+    public async Task<WhatsAppConnectionResponse> GetConnectionAsync(
+        string? accountId = null,
+        CancellationToken cancellationToken = default)
     {
         // Loaded as an entity rather than projected in SQL: the onboarding steps are a JSON
         // document on the row, and the derived "still running" flag the client polls on cannot be
         // built by the database.
-        var connection = await _queries.FirstOrDefaultAsync(
-            _connections.Query(),
+        var connection = await _access.ResolveAsync(
+            accountId,
+            Common.Constants.ContractEnums.WhatsAppAccessLevel.View,
             cancellationToken);
 
         // Never a 404. "No number connected yet" is a normal state the client renders a connect
@@ -104,51 +126,27 @@ public sealed class WhatsAppService : IWhatsAppService
     }
 
     /// <inheritdoc />
-    public async Task<WhatsAppConnectionResponse> SyncConnectionAsync(CancellationToken cancellationToken = default)
+    public async Task<WhatsAppConnectionResponse> SyncConnectionAsync(
+        string? accountId = null,
+        CancellationToken cancellationToken = default)
     {
-        var connection = await _queries.FirstOrDefaultAsync(
-            _connections.Query(asNoTracking: false),
-            cancellationToken);
+        var connection = await _accounts.SyncAsync(accountId, cancellationToken);
 
-        if (connection?.PhoneNumberId is not { Length: > 0 } phoneNumberId)
-        {
-            return WhatsAppConnectionResponse.Disconnected();
-        }
-
-        // Passed explicitly, like every other outbound call. A Super Admin refreshing on a
-        // customer's behalf carries the tenant in an explicit scope rather than in their own claims,
-        // and the handler that would otherwise supply the token resolves the tenant in a scope that
-        // cannot see it - so it sends none and Meta refuses the call.
-        var accessToken = connection.EncryptedAccessToken is { Length: > 0 } encrypted
-            ? _protector.Unprotect(encrypted)
-            : null;
-
-        var number = await _gateway.GetPhoneNumberAsync(phoneNumberId, accessToken, cancellationToken);
-
-        connection.DisplayPhoneNumber = number.DisplayPhoneNumber;
-        connection.VerifiedName = number.VerifiedName ?? connection.VerifiedName;
-        connection.QualityRating = Enum.TryParse<QualityRating>(number.QualityRating, true, out var rating)
-            ? rating
-            : connection.QualityRating;
-
-        // A successful round trip is itself the evidence the connection works, so the status is
-        // corrected here rather than left at whatever it was when it last failed.
-        connection.Status = ConnectionStatus.Connected;
-
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        return await GetConnectionAsync(cancellationToken);
+        return connection is null
+            ? WhatsAppConnectionResponse.Disconnected()
+            : connection.ToResponse().WithExpiryApplied(_clock.UtcNow);
     }
 
     /// <inheritdoc />
     public async Task<PagedResult<MessageTemplateResponse>> SearchTemplatesAsync(
         TemplateQuery query,
+        string? accountId = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(query);
 
         var filtered = _templates.Query()
-            .Where(TemplateAccount.BelongsTo(await ConnectedWabaIdAsync(cancellationToken)));
+            .Where(TemplateAccount.BelongsTo(await WabaIdAsync(accountId, cancellationToken)));
 
         if (Enum.TryParse<TemplateStatus>(query.Status, ignoreCase: true, out var status)
             && !string.Equals(query.Status, TemplateQuery.All, StringComparison.OrdinalIgnoreCase))
@@ -224,13 +222,14 @@ public sealed class WhatsAppService : IWhatsAppService
 
     /// <inheritdoc />
     public async Task<TemplateStatusCountsResponse> CountTemplatesAsync(
+        string? accountId = null,
         CancellationToken cancellationToken = default)
     {
         // One grouped query rather than five round trips. The tenant filter still applies, so this
         // counts the caller's templates and nobody else's.
         var counts = await _queries.ToListAsync(
             _templates.Query()
-                .Where(TemplateAccount.BelongsTo(await ConnectedWabaIdAsync(cancellationToken)))
+                .Where(TemplateAccount.BelongsTo(await WabaIdAsync(accountId, cancellationToken)))
                 .GroupBy(template => template.Status)
                 .Select(group => new { Status = group.Key, Count = group.Count() }),
             cancellationToken);
@@ -248,24 +247,26 @@ public sealed class WhatsAppService : IWhatsAppService
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<MessageTemplateResponse>> GetApprovedTemplatesAsync(
+        string? accountId = null,
         CancellationToken cancellationToken = default)
     {
         // Unpaged on purpose. A picker that offers "every approved template" cannot be built on a
         // page: PageSize is clamped to 100, so asking for a large page silently returns the first
         // hundred and hides the rest with no error anywhere. Only approved templates can be sent,
         // and Meta's own per-account ceiling keeps this list small.
-        var all = await GetTemplatesAsync(cancellationToken);
+        var all = await GetTemplatesAsync(accountId, cancellationToken);
 
         return [.. all.Where(template => template.Status == TemplateStatus.Approved)];
     }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<MessageTemplateResponse>> GetTemplatesAsync(
+        string? accountId = null,
         CancellationToken cancellationToken = default)
     {
         var rows = await _queries.ToListAsync(
             _templates.Query()
-                .Where(TemplateAccount.BelongsTo(await ConnectedWabaIdAsync(cancellationToken)))
+                .Where(TemplateAccount.BelongsTo(await WabaIdAsync(accountId, cancellationToken)))
                 .OrderBy(template => template.Name)
                 .Select(template => new
                 {
@@ -310,9 +311,13 @@ public sealed class WhatsAppService : IWhatsAppService
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<MessageTemplateResponse>> SyncTemplatesAsync(
+        string? accountId = null,
         CancellationToken cancellationToken = default)
     {
-        var connection = await _queries.FirstOrDefaultAsync(_connections.Query(), cancellationToken);
+        var connection = await _access.ResolveAsync(
+            accountId,
+            Common.Constants.ContractEnums.WhatsAppAccessLevel.View,
+            cancellationToken);
 
         if (connection?.WabaId is not { Length: > 0 } wabaId)
         {
@@ -336,9 +341,17 @@ public sealed class WhatsAppService : IWhatsAppService
 
         foreach (var template in remote)
         {
-            var local = existing.FirstOrDefault(entry =>
+            bool Same(MessageTemplate entry) =>
                 string.Equals(entry.Name, template.Name, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(entry.Language, template.Language, StringComparison.OrdinalIgnoreCase));
+                && string.Equals(entry.Language, template.Language, StringComparison.OrdinalIgnoreCase);
+
+            // This business account's own copy first, then one nobody has claimed. A template with
+            // the same name on another account is a different template at Meta - two numbers on
+            // two accounts can each have an "order_update" - so it is never taken over.
+            var local = existing.FirstOrDefault(entry =>
+                            string.Equals(entry.WabaId, wabaId, StringComparison.Ordinal) && Same(entry))
+                        ?? existing.FirstOrDefault(entry =>
+                            entry.WabaId is null && !returned.Contains(entry) && Same(entry));
 
             if (local is null)
             {
@@ -380,12 +393,19 @@ public sealed class WhatsAppService : IWhatsAppService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return await GetTemplatesAsync(cancellationToken);
+        return await GetTemplatesAsync(accountId, cancellationToken);
     }
 
-    /// <summary>The WhatsApp Business Account connected now, or null when there is none.</summary>
-    private async Task<string?> ConnectedWabaIdAsync(CancellationToken cancellationToken) =>
-        await _queries.FirstOrDefaultAsync(
-            _connections.Query().Select(connection => connection.WabaId),
-            cancellationToken);
+    /// <summary>
+    /// The business account whose templates a number uses, or null when the workspace has none.
+    /// </summary>
+    /// <remarks>
+    /// Requires view on the number, so an employee cannot list the templates of a number they
+    /// cannot see by naming it.
+    /// </remarks>
+    private async Task<string?> WabaIdAsync(string? accountId, CancellationToken cancellationToken) =>
+        (await _access.ResolveAsync(
+            accountId,
+            Common.Constants.ContractEnums.WhatsAppAccessLevel.View,
+            cancellationToken))?.WabaId;
 }

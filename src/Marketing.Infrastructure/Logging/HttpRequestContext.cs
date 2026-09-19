@@ -56,4 +56,49 @@ public sealed class HttpRequestContext : IRequestContext
         _httpContextAccessor.HttpContext?.Request.Headers[HeaderNames.UserAgent].ToString() is { Length: > 0 } agent
             ? agent
             : null;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Capped and restricted to identifier characters. It is caller-supplied, and it is stored and
+    /// shown to administrators, so it must not be a place to put anything else.
+    /// </remarks>
+    public string? DeviceId =>
+        Header(AppConstants.Headers.DeviceId) is { Length: > 0 and <= 64 } id
+        && id.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_')
+            ? id
+            : null;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Read from the geolocation headers edge networks add - Cloudflare's, or a load balancer set up
+    /// to send <c>X-Geo-City</c> and <c>X-Geo-Country</c>. Nothing here looks an address up: that
+    /// needs a GeoIP database, and a wrong city is worse than none in a report meant as evidence.
+    /// </remarks>
+    public string? Location
+    {
+        get
+        {
+            var city = Header("CF-IPCity") ?? Header("X-Geo-City");
+            var country = Header("CF-IPCountry") ?? Header("X-Geo-Country");
+
+            // Cloudflare reports "XX" and "T1" for unknown and Tor; neither is a place.
+            if (country is "XX" or "T1")
+            {
+                country = null;
+            }
+
+            return (city, country) switch
+            {
+                ({ Length: > 0 }, { Length: > 0 }) => $"{city}, {country}",
+                ({ Length: > 0 }, _) => city,
+                (_, { Length: > 0 }) => country,
+                _ => null,
+            };
+        }
+    }
+
+    private string? Header(string name) =>
+        _httpContextAccessor.HttpContext?.Request.Headers[name].ToString() is { Length: > 0 } value
+            ? value.Trim()
+            : null;
 }

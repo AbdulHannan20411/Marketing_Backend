@@ -1,0 +1,82 @@
+using static Marketing.Common.Constants.ContractEnums;
+
+namespace Marketing.Application.DTOs.Security;
+
+/// <summary>One device an account has signed in from.</summary>
+/// <param name="SessionId">The device's most recent session, which is what revoking it ends.</param>
+/// <param name="DeviceLabel">"Chrome / Windows".</param>
+/// <param name="Browser">Browser family.</param>
+/// <param name="OperatingSystem">Operating system family.</param>
+/// <param name="DeviceType"><c>desktop</c>, <c>mobile</c> or <c>tablet</c>.</param>
+/// <param name="IpAddress">Address it was last seen at.</param>
+/// <param name="Location">City and country, when the edge reported them.</param>
+/// <param name="FirstSeenAt">First sign-in from this device within the window.</param>
+/// <param name="LastActiveAt">Last sign of life.</param>
+/// <param name="IsActive">Signed in and seen within the last few minutes.</param>
+/// <param name="IsCurrent">The device making this request, so a person cannot sign themselves out by mistake.</param>
+/// <param name="CanRevoke">Whether there is still a session on it to end.</param>
+/// <param name="SignIns">Sign-ins from this device within the window.</param>
+public sealed record DeviceResponse(
+    string SessionId,
+    string DeviceLabel,
+    string Browser,
+    string OperatingSystem,
+    string DeviceType,
+    string? IpAddress,
+    string? Location,
+    DateTimeOffset FirstSeenAt,
+    DateTimeOffset LastActiveAt,
+    bool IsActive,
+    bool IsCurrent,
+    bool CanRevoke,
+    int SignIns);
+
+/// <summary>How likely an account is to be shared. Shown to platform staff only.</summary>
+/// <param name="Level">Low, medium or high.</param>
+/// <param name="Score">Points behind the level.</param>
+/// <param name="Reasons">Each contributing signal, in plain words.</param>
+public sealed record RiskResponse(RiskLevel Level, int Score, IReadOnlyList<string> Reasons);
+
+/// <summary>One person in a workspace, from a security point of view.</summary>
+/// <param name="UserId">Public identifier, as the employees screen uses it.</param>
+/// <param name="Name">Display name.</param>
+/// <param name="Email">Sign-in address.</param>
+/// <param name="Role">Admin or employee.</param>
+/// <param name="ActiveSessions">Sessions alive right now.</param>
+/// <param name="Devices">Distinct devices within the window.</param>
+/// <param name="LastActiveAt">Last sign of life on any device.</param>
+/// <param name="DisplacedLast24Hours">Times a new sign-in ended one of their sessions today.</param>
+/// <param name="Risk">
+/// The risk assessment - present for platform staff, always null for a workspace's own administrators.
+/// </param>
+public sealed record EmployeeSecurityResponse(
+    string UserId,
+    string Name,
+    string Email,
+    string Role,
+    int ActiveSessions,
+    int Devices,
+    DateTimeOffset? LastActiveAt,
+    int DisplacedLast24Hours,
+    RiskResponse? Risk);
+
+/// <summary>A workspace's seats against how its logins are actually being used.</summary>
+/// <param name="OrganizationId">Public tenant identifier.</param>
+/// <param name="OrganizationName">Workspace name.</param>
+/// <param name="PlanName">Plan it is on.</param>
+/// <param name="PurchasedSeats">Seats bought, or null for no ceiling.</param>
+/// <param name="UsedSeats">Active people in the workspace.</param>
+/// <param name="ActiveSessions">Sessions alive right now across everyone.</param>
+/// <param name="UniqueDevices">Distinct devices within the window across everyone.</param>
+/// <param name="DeviceWindowDays">How far back devices are counted.</param>
+/// <param name="Employees">Everyone in the workspace, riskiest first where risk is shown.</param>
+public sealed record OrganizationSecurityResponse(
+    string OrganizationId,
+    string OrganizationName,
+    string PlanName,
+    int? PurchasedSeats,
+    int UsedSeats,
+    int ActiveSessions,
+    int UniqueDevices,
+    int DeviceWindowDays,
+    IReadOnlyList<EmployeeSecurityResponse> Employees);

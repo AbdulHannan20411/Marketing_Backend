@@ -81,6 +81,10 @@ public sealed class StubRequestContext : IRequestContext
     public string? IpAddress { get; set; } = "203.0.113.7";
 
     public string? UserAgent { get; set; } = "xunit";
+
+    public string? DeviceId { get; set; }
+
+    public string? Location { get; set; }
 }
 
 /// <summary>Builds a context whose model is real but which never opens a connection.</summary>

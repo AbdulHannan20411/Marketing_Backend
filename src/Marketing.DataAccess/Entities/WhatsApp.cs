@@ -92,6 +92,73 @@ public sealed class WhatsAppConnection : BaseEntity, IRequiresTenant
     /// mid-onboarding must not lose what already succeeded.
     /// </remarks>
     public List<WhatsAppOnboardingStep> OnboardingSteps { get; set; } = [];
+
+    /// <summary>
+    /// What the workspace calls this number - "Sales", "Support". Unique within the workspace,
+    /// compared without regard to case.
+    /// </summary>
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The number anything unaware of multiple numbers uses: every endpoint without an account id,
+    /// every integration written before there was more than one. Exactly one per workspace while any
+    /// exist.
+    /// </summary>
+    public bool IsDefault { get; set; }
+
+    /// <summary>
+    /// Outcome of the most recent Graph call made for this number: <c>ok</c>, <c>degraded</c>,
+    /// <c>down</c> or <c>unknown</c>.
+    /// </summary>
+    public string ApiStatus { get; set; } = "unknown";
+
+    /// <summary>Meta's own status for the number - CONNECTED, FLAGGED, RESTRICTED - passed through.</summary>
+    public string? PhoneNumberStatus { get; set; }
+
+    /// <summary>Meta's review status for the business account - APPROVED, PENDING - passed through.</summary>
+    public string? AccountStatus { get; set; }
+
+    /// <summary>
+    /// When Meta last delivered a webhook for this number.
+    /// </summary>
+    /// <remarks>
+    /// The only evidence that Meta is still delivering. A number whose webhooks stopped looks
+    /// perfectly healthy by every other measure - it simply never hears from a customer again.
+    /// </remarks>
+    public DateTimeOffset? LastWebhookAt { get; set; }
+
+    /// <summary>When this number last sent a message that Meta accepted.</summary>
+    public DateTimeOffset? LastMessageSentAt { get; set; }
+
+    /// <summary>When a customer last wrote to this number.</summary>
+    public DateTimeOffset? LastMessageReceivedAt { get; set; }
+
+    /// <summary>What last went wrong, in plain words. Never a raw Meta error body, code or token.</summary>
+    public string? LastError { get; set; }
+}
+
+/// <summary>What one employee may do on one number.</summary>
+/// <remarks>
+/// The second of two layers. The global permissions say what kind of thing someone may do - read the
+/// inbox, send campaigns; this says on which number. Both must allow it. Administrators never have
+/// rows here: they may do everything on every number, by role.
+/// </remarks>
+public sealed class WhatsAppAccountAccess : BaseEntity, IRequiresTenant
+{
+    /// <summary>The employee.</summary>
+    public long UserId { get; set; }
+
+    /// <summary>The number.</summary>
+    public long WhatsAppConnectionId { get; set; }
+
+    /// <summary>May see its conversations and templates.</summary>
+    public bool CanView { get; set; }
+
+    /// <summary>May reply in its conversations, and assign them.</summary>
+    public bool CanReply { get; set; }
+
+    /// <summary>May send campaigns from it.</summary>
+    public bool CanBroadcast { get; set; }
 }
 
 /// <summary>One stage of connecting a WhatsApp account, and how it went.</summary>

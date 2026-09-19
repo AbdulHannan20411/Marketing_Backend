@@ -39,5 +39,9 @@ public sealed class RefreshTokenConfiguration : BaseEntityConfiguration<RefreshT
 
         // Supports the Quartz cleanup job, which sweeps expired rows.
         builder.HasIndex(token => token.ExpiresOn);
+
+        // The per-request liveness check asks "does this session still hold a live token" by session
+        // alone; the (user, session) index above cannot answer that without its leading column.
+        builder.HasIndex(token => token.SessionId);
     }
 }

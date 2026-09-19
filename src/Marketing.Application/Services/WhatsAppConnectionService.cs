@@ -23,8 +23,32 @@ public interface IWhatsAppConnectionService
         ManualConnectWhatsAppRequest request,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Disconnects the account and destroys the stored token.</summary>
-    public Task<WhatsAppConnectionResponse> DisconnectAsync(CancellationToken cancellationToken = default);
+    /// <summary>Disconnects one number and destroys its stored token.</summary>
+    /// <param name="accountId">Public account id, or null for the workspace default.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<WhatsAppConnectionResponse> DisconnectAsync(
+        string? accountId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Disconnects a number already resolved and authorised by the caller.
+    /// </summary>
+    /// <param name="connection">The tracked connection.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task DisconnectConnectionAsync(WhatsAppConnection connection, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Makes a number the workspace default, or - given null - the oldest connected number, if any.
+    /// </summary>
+    /// <remarks>
+    /// Clears the old default and saves before setting the new one. Exactly one default per
+    /// workspace is a unique index, and Postgres checks it row by row, so flipping both in one
+    /// statement batch can fail on whichever update runs first.
+    /// </remarks>
+    /// <param name="tenantId">Workspace.</param>
+    /// <param name="target">The number to make default, or null to pick one.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task SetDefaultAsync(long tenantId, WhatsAppConnection? target, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Advances every connection still part-way through onboarding.
@@ -50,6 +74,7 @@ public interface IWhatsAppConnectionService
     /// attempted, which matters most for registration: re-registering a number is not free.
     /// </para>
     /// </remarks>
+    /// <param name="accountId">Public account id, or null for the workspace default.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <exception cref="NotFoundException">No connection to resume.</exception>
     /// <exception cref="BusinessRuleException">
@@ -57,6 +82,7 @@ public interface IWhatsAppConnectionService
     /// connect again with a new one.
     /// </exception>
     public Task<WhatsAppConnectionResponse> ResumeOnboardingAsync(
+        string? accountId = null,
         CancellationToken cancellationToken = default);
 }
 
@@ -69,6 +95,8 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
     private readonly IUnitOfWork _unitOfWork;
     private readonly ITenantContext _tenantContext;
     private readonly IDateTimeProvider _clock;
+    private readonly WhatsApp.IWhatsAppAccessService _access;
+    private readonly IPlanGuard _planGuard;
     private readonly ILogger<WhatsAppConnectionService> _logger;
 
     /// <summary>Initialises a new instance.</summary>
@@ -79,6 +107,8 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         IUnitOfWork unitOfWork,
         ITenantContext tenantContext,
         IDateTimeProvider clock,
+        WhatsApp.IWhatsAppAccessService access,
+        IPlanGuard planGuard,
         ILogger<WhatsAppConnectionService> logger)
     {
         _connections = connections;
@@ -87,6 +117,8 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         _unitOfWork = unitOfWork;
         _tenantContext = tenantContext;
         _clock = clock;
+        _access = access;
+        _planGuard = planGuard;
         _logger = logger;
     }
 
@@ -96,6 +128,11 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        // Before the exchange, not after. Redeeming the code registers the number with this app at
+        // Meta; refusing it afterwards over the plan or a clash leaves it half connected, and the
+        // single-use code is already spent.
+        await EnsureConnectableAsync(request.PhoneNumberId, request.Label, cancellationToken);
 
         // Redeemed server-side. The app secret needed to exchange the code must never reach the
         // browser, which is the entire reason this endpoint exists rather than the client calling
@@ -126,6 +163,7 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
             request.PhoneNumberId,
             exchange.ExpiresAtUtc,
             isManual: false,
+            request.Label,
             cancellationToken);
     }
 
@@ -135,6 +173,8 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        await EnsureConnectableAsync(request.PhoneNumberId, request.Label, cancellationToken);
 
         // Asked, not assumed. Both a system-user token (no expiry) and a test-number token (often
         // hours) arrive through this same box, and the earlier assumption that a pasted token was
@@ -148,31 +188,152 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
             request.PhoneNumberId,
             expiresAt,
             isManual: true,
+            request.Label,
             cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task<WhatsAppConnectionResponse> DisconnectAsync(CancellationToken cancellationToken = default)
+    public async Task<WhatsAppConnectionResponse> DisconnectAsync(
+        string? accountId = null,
+        CancellationToken cancellationToken = default)
     {
-        var tenantId = _tenantContext.RequireTenantId();
-
-        var connection = await _connections.FindForTenantAsync(tenantId, cancellationToken)
+        var connection = await _access.ResolveAsync(accountId, WhatsAppAccessLevel.View, cancellationToken)
                          ?? throw new NotFoundException("No WhatsApp account is connected.");
+
+        await DisconnectConnectionAsync(connection, cancellationToken);
+
+        return Map(connection);
+    }
+
+    /// <inheritdoc />
+    public async Task DisconnectConnectionAsync(
+        WhatsAppConnection connection,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
+        var tenantId = connection.TenantId ?? _tenantContext.RequireTenantId();
+
+        // Unsubscribed while the token still exists to do it with - but only when this was the last
+        // live number on the business account, because the subscription belongs to the account and
+        // a second number on it would go silent.
+        if (connection is { WabaId: { Length: > 0 } wabaId, EncryptedAccessToken: { Length: > 0 } encrypted }
+            && !await _connections.IsWabaInUseElsewhereAsync(wabaId, connection.Id, cancellationToken))
+        {
+            try
+            {
+                await _gateway.UnsubscribeFromWebhooksAsync(wabaId, _protector.Unprotect(encrypted), cancellationToken);
+            }
+            catch (Exception exception) when (exception is ExternalServiceException or BusinessRuleException)
+            {
+                // Best effort. Webhooks for a number with no live connection are already dropped on
+                // arrival, so a failed unsubscribe costs noise, while refusing to disconnect would
+                // keep a credential the customer asked us to destroy.
+                LogUnsubscribeFailed(exception, connection.Id);
+            }
+        }
+
+        var wasDefault = connection.IsDefault;
 
         connection.Status = ConnectionStatus.Disconnected;
         connection.WebhookHealthy = false;
         connection.ConnectedAt = null;
+        connection.ApiStatus = "unknown";
 
         // The token is destroyed, not just orphaned. Leaving a live credential in a row nobody
-        // reads is how a disconnected account still gets used months later.
+        // reads is how a disconnected account still gets used months later. The row itself stays:
+        // its conversations and employee access come back if the same number is reconnected.
         connection.EncryptedAccessToken = null;
         connection.TokenExpiresAt = null;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        LogDisconnected(tenantId);
+        if (wasDefault)
+        {
+            // The default moves to the oldest number still connected, or to none.
+            await SetDefaultAsync(tenantId, null, cancellationToken);
+        }
 
-        return WhatsAppConnectionResponse.Disconnected();
+        LogDisconnected(tenantId);
+    }
+
+    /// <inheritdoc />
+    public async Task SetDefaultAsync(
+        long tenantId,
+        WhatsAppConnection? target,
+        CancellationToken cancellationToken = default)
+    {
+        var all = await _connections.FindAllForTenantAsync(tenantId, cancellationToken);
+
+        target ??= all
+            .Where(candidate => candidate.Status == ConnectionStatus.Connected)
+            .OrderBy(candidate => candidate.Id)
+            .FirstOrDefault();
+
+        var changed = false;
+
+        foreach (var other in all.Where(candidate => candidate.IsDefault && !ReferenceEquals(candidate, target)))
+        {
+            other.IsDefault = false;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+
+        if (target is { IsDefault: false })
+        {
+            target.IsDefault = true;
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Refuses a connection that the plan or another workspace rules out, before anything is spent.
+    /// </summary>
+    private async Task EnsureConnectableAsync(string phoneNumberId, string? label, CancellationToken cancellationToken)
+    {
+        var tenantId = _tenantContext.RequireTenantId();
+
+        if (label is not null)
+        {
+            WhatsAppAccountRules.ValidateLabel(label);
+        }
+
+        // Inbound webhooks are routed by phone number id alone, so letting two tenants hold one
+        // number would deliver a customer's conversations to a stranger.
+        var claimant = await _connections.FindByPhoneNumberIdAsync(phoneNumberId, cancellationToken);
+
+        if (claimant is not null && claimant.TenantId != tenantId)
+        {
+            throw new BusinessRuleException(
+                "whatsapp_number_in_use",
+                "That phone number is connected to another workspace. Disconnect it there first, or "
+                + "connect a different number.");
+        }
+
+        var existing = await _connections.FindAllForTenantAsync(tenantId, cancellationToken);
+
+        // Re-linking a number this workspace already holds uses no new slot.
+        if (existing.Any(connection => connection.PhoneNumberId == phoneNumberId))
+        {
+            return;
+        }
+
+        var plan = await _planGuard.CurrentPlanAsync(cancellationToken);
+
+        // Every number not deleted counts, disconnected ones included. Otherwise disconnecting and
+        // connecting another would take a workspace past its plan one number at a time.
+        if (plan?.MaxWhatsAppAccounts is { } limit && existing.Count >= limit)
+        {
+            throw new BusinessRuleException(
+                "whatsapp_account_limit_reached",
+                $"Your plan includes {limit} WhatsApp {(limit == 1 ? "number" : "numbers")}, and all of them are "
+                + "in use. Remove a disconnected number or upgrade your plan to connect another.");
+        }
     }
 
     /// <summary>
@@ -184,28 +345,21 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         string phoneNumberId,
         DateTimeOffset? expiresAt,
         bool isManual,
+        string? label,
         CancellationToken cancellationToken)
     {
         var tenantId = _tenantContext.RequireTenantId();
 
-        // Inbound webhooks are routed by phone number id alone, so letting two tenants hold one
-        // number would deliver a customer's conversations to a stranger. A unique index enforces
-        // this, but the index alone surfaces as a 500 from the driver; checking first turns it into
-        // an answer the operator can act on.
-        var claimant = await _connections.FindByPhoneNumberIdAsync(phoneNumberId, cancellationToken);
+        // Checked again after the exchange: another request may have taken the number or the last
+        // slot while this one was talking to Meta.
+        await EnsureConnectableAsync(phoneNumberId, label, cancellationToken);
 
-        if (claimant is not null && claimant.TenantId != tenantId)
-        {
-            throw new BusinessRuleException(
-                "whatsapp_number_already_connected",
-                "That phone number is already connected to another workspace. Disconnect it there "
-                + "first, or connect a different number.");
-        }
+        var existing = await _connections.FindAllForTenantAsync(tenantId, cancellationToken);
 
-        var connection = await _connections.FindForTenantAsync(tenantId, cancellationToken);
+        // The same number again is a re-link of that account - token refreshed, history and
+        // employee access intact - never a second account for one number.
+        var connection = existing.FirstOrDefault(candidate => candidate.PhoneNumberId == phoneNumberId);
 
-        // Stored first so the auth handler can find the token when the verification call below
-        // goes out - that call is itself authenticated as the tenant.
         if (connection is null)
         {
             connection = new WhatsAppConnection
@@ -213,7 +367,26 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
                 TenantId = tenantId,
             };
 
+            // Named now, from what Meta says the number is, so the account is recognisable in the
+            // selector while onboarding runs. Best effort: the name is cosmetic and the profile step
+            // reads the same fields again.
+            await PrefillProfileAsync(connection, phoneNumberId, accessToken, cancellationToken);
+
+            connection.Label = WhatsAppAccountRules.UniqueLabel(
+                label?.Trim() is { Length: > 0 } chosen
+                    ? chosen
+                    : WhatsAppAccountRules.DefaultLabel(connection.VerifiedName, connection.DisplayPhoneNumber),
+                existing.Select(other => other.Label),
+                allowSuffix: label is null);
+
             _connections.Add(connection);
+        }
+        else if (label?.Trim() is { Length: > 0 } relabel)
+        {
+            connection.Label = WhatsAppAccountRules.UniqueLabel(
+                relabel,
+                existing.Where(other => other.Id != connection.Id).Select(other => other.Label),
+                allowSuffix: false);
         }
 
         connection.WabaId = wabaId;
@@ -240,7 +413,16 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
             new WhatsAppOnboardingStep { Step = OnboardingStep.Profile },
         ];
 
+        connection.LastError = null;
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // The first number a workspace connects is its default, as is any number connected while
+        // the workspace has none.
+        if (!existing.Any(other => other.IsDefault && other.Id != connection.Id))
+        {
+            await SetDefaultAsync(tenantId, connection, cancellationToken);
+        }
 
         LogConnected(tenantId, phoneNumberId, isManual);
 
@@ -254,11 +436,12 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
 
     /// <inheritdoc />
     public async Task<WhatsAppConnectionResponse> ResumeOnboardingAsync(
+        string? accountId = null,
         CancellationToken cancellationToken = default)
     {
         var tenantId = _tenantContext.RequireTenantId();
 
-        var connection = await _connections.FindForTenantAsync(tenantId, cancellationToken)
+        var connection = await _access.ResolveAsync(accountId, WhatsAppAccessLevel.View, cancellationToken)
                          ?? throw new NotFoundException("No WhatsApp account is connected.");
 
         if (connection.EncryptedAccessToken is not { Length: > 0 })
@@ -338,11 +521,22 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         return advanced;
     }
 
-    /// <summary>Runs whatever steps remain for one tenant's pending connection.</summary>
+    /// <summary>Runs whatever steps remain for each of one tenant's pending numbers.</summary>
     private async Task ContinueOnboardingAsync(long tenantId, CancellationToken cancellationToken)
     {
-        var connection = await _connections.FindForTenantAsync(tenantId, cancellationToken);
+        var pending = (await _connections.FindAllForTenantAsync(tenantId, cancellationToken))
+            .Where(connection => connection.Status == ConnectionStatus.Pending)
+            .ToList();
 
+        foreach (var connection in pending)
+        {
+            await ContinueOnboardingAsync(connection, cancellationToken);
+        }
+    }
+
+    /// <summary>Runs whatever steps remain for one pending number.</summary>
+    private async Task ContinueOnboardingAsync(WhatsAppConnection connection, CancellationToken cancellationToken)
+    {
         if (connection is not { Status: ConnectionStatus.Pending, PhoneNumberId: { Length: > 0 } phoneNumberId }
             || connection.WabaId is not { Length: > 0 } wabaId
             || connection.EncryptedAccessToken is not { Length: > 0 } encrypted)
@@ -389,6 +583,7 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
                     connection.DisplayPhoneNumber = number.DisplayPhoneNumber;
                     connection.VerifiedName = number.VerifiedName ?? string.Empty;
                     connection.QualityRating = ParseQuality(number.QualityRating);
+                    connection.PhoneNumberStatus = number.Status ?? connection.PhoneNumberStatus;
 
                     // Absent means "leave what we had". Meta omits the tier on numbers it has not
                     // rated, and defaulting to the lowest would tell the customer their throughput
@@ -400,6 +595,7 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
 
                     connection.TemplateNamespaceAlias =
                         account.TemplateNamespace ?? connection.TemplateNamespaceAlias;
+                    connection.AccountStatus = account.ReviewStatus ?? connection.AccountStatus;
                 },
                 cancellationToken))
         {
@@ -408,8 +604,31 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
 
         connection.Status = ConnectionStatus.Connected;
         connection.ConnectedAt = _clock.UtcNow;
+        connection.ApiStatus = "ok";
+        connection.LastError = null;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>Reads the number's name before it is stored, when Meta will say.</summary>
+    private async Task PrefillProfileAsync(
+        WhatsAppConnection connection,
+        string phoneNumberId,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var number = await _gateway.GetPhoneNumberAsync(phoneNumberId, accessToken, cancellationToken);
+
+            connection.DisplayPhoneNumber = number.DisplayPhoneNumber;
+            connection.VerifiedName = number.VerifiedName ?? string.Empty;
+        }
+        catch (Exception exception) when (exception is ExternalServiceException or BusinessRuleException)
+        {
+            // The profile step reads it again; a label from the fallback is all this costs.
+            LogPrefillFailed(exception, phoneNumberId);
+        }
     }
 
     /// <summary>
@@ -461,6 +680,8 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
             if (!failureIsSkip)
             {
                 connection.Status = ConnectionStatus.Error;
+                connection.ApiStatus = "down";
+                connection.LastError = WhatsAppAccountRules.PlainError(step);
             }
         }
 
@@ -574,6 +795,18 @@ public sealed partial class WhatsAppConnectionService : IWhatsAppConnectionServi
         Level = LogLevel.Error,
         Message = "Onboarding could not be advanced for tenant {TenantId}.")]
     private partial void LogOnboardingFailed(Exception exception, long tenantId);
+
+    [LoggerMessage(
+        EventId = 2606,
+        Level = LogLevel.Warning,
+        Message = "Could not unsubscribe webhooks while disconnecting WhatsApp connection {ConnectionId}.")]
+    private partial void LogUnsubscribeFailed(Exception exception, long connectionId);
+
+    [LoggerMessage(
+        EventId = 2607,
+        Level = LogLevel.Information,
+        Message = "Could not read number {PhoneNumberId} before storing it; the profile step will.")]
+    private partial void LogPrefillFailed(Exception exception, string phoneNumberId);
 
     [LoggerMessage(
         EventId = 2605,

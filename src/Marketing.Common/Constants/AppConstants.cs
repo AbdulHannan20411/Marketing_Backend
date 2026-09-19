@@ -88,6 +88,15 @@ public static class AppConstants
         /// <summary>Ties every log entry and audit row for one request together.</summary>
         public const string CorrelationId = "X-Correlation-Id";
 
+        /// <summary>
+        /// A stable identifier the browser generates once and keeps, so a returning device is
+        /// recognised as the same device.
+        /// </summary>
+        public const string DeviceId = "X-Device-Id";
+
+        /// <summary>Set on a 401 when the session was ended rather than merely expired.</summary>
+        public const string SessionRevoked = "X-Session-Revoked";
+
         /// <summary>Identifier of a single request.</summary>
         public const string RequestId = "X-Request-Id";
 

@@ -36,10 +36,16 @@ public interface IWhatsAppCloudApi
     /// one. Onboarding passes it explicitly: at that point the token has only just been written and
     /// the caller already holds it.
     /// </param>
+    /// <param name="fields">
+    /// Fields to return. Named explicitly because <c>status</c> - CONNECTED, FLAGGED, RESTRICTED - is
+    /// not among Meta's defaults, and it is the health screen's warning that a number is in trouble.
+    /// </param>
     [Get("/{phoneNumberId}")]
     public Task<WhatsAppPhoneNumber> GetPhoneNumberAsync(
         string phoneNumberId,
         [Header("Authorization")] string? authorization = null,
+        [AliasAs("fields")] string fields =
+            "id,display_phone_number,verified_name,quality_rating,code_verification_status,messaging_limit_tier,status",
         CancellationToken cancellationToken = default);
 
     /// <summary>Lists the message templates defined on a WhatsApp Business Account.</summary>
@@ -107,6 +113,16 @@ public interface IWhatsAppCloudApi
     /// <param name="cancellationToken">Cancellation token.</param>
     [Post("/{wabaId}/subscribed_apps")]
     public Task<GraphSuccess> SubscribeAppAsync(
+        string wabaId,
+        [Header("Authorization")] string authorization,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Stops this app receiving a business account's webhooks.</summary>
+    /// <param name="wabaId">WhatsApp Business Account identifier.</param>
+    /// <param name="authorization">Bearer token.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [Delete("/{wabaId}/subscribed_apps")]
+    public Task<GraphSuccess> UnsubscribeAppAsync(
         string wabaId,
         [Header("Authorization")] string authorization,
         CancellationToken cancellationToken = default);

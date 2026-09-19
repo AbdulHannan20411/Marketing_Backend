@@ -103,6 +103,12 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
 
             using (_tenantContext.BeginScope(tenantId))
             {
+                // The only evidence Meta is still delivering for this number. Recorded for every
+                // change, receipts and account updates included, because a quiet number that still
+                // receives receipts is healthy - it simply has nobody writing to it.
+                connection.LastWebhookAt = _clock.UtcNow;
+                connection.WebhookHealthy = true;
+
                 // Inbound first: a customer's message is what an agent is waiting for, and it is the
                 // only branch that reopens the 24-hour window they have to answer in.
                 applied += await _inbound.ApplyAsync(value, connection, cancellationToken);
@@ -112,6 +118,8 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
                 await ApplyTemplateReviewAsync(value, cancellationToken);
                 await ApplyTemplateCategoryAsync(value, cancellationToken);
                 await ApplyAccountUpdateAsync(value, connection, cancellationToken);
+
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
             }
         }
 
@@ -512,7 +520,9 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
 
         await _realtime.PublishCampaignProgressAsync(
             tenantId,
-            CampaignMapper.ToResponse(campaign),
+            CampaignMapper.ToResponse(
+                campaign,
+                await _connections.LabelsForTenantAsync(tenantId, cancellationToken)),
             cancellationToken);
     }
 

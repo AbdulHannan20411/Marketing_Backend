@@ -18,13 +18,17 @@ namespace Marketing.Application.DTOs.Workspace;
 /// <paramref name="Permissions"/> is supplied, because an explicit list is the more specific
 /// instruction.
 /// </param>
+/// <param name="WhatsAppAccess">Starting access to the workspace's numbers; none when omitted.</param>
+/// <param name="DefaultWhatsAppAccountId">One of the numbers in <paramref name="WhatsAppAccess"/>, or null.</param>
 public sealed record InviteEmployeeRequest(
     string Email,
     string Name,
     string JobTitle,
     IReadOnlyList<string>? Permissions = null,
     string? Role = null,
-    string? PermissionSetId = null);
+    string? PermissionSetId = null,
+    IReadOnlyList<WhatsApp.WhatsAppAccessEntry>? WhatsAppAccess = null,
+    string? DefaultWhatsAppAccountId = null);
 
 /// <summary>Request to change an employee's role.</summary>
 /// <param name="Role">New role: <c>Admin</c> or <c>Employee</c>.</param>

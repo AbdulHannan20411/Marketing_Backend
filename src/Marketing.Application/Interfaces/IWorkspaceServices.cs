@@ -56,6 +56,15 @@ public interface IEmployeeService
         UpdateEmployeeRequest request,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Replaces an employee's access to the workspace's WhatsApp numbers.</summary>
+    /// <param name="employeeId">Employee identifier.</param>
+    /// <param name="request">The complete access set and their default number.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<EmployeeResponse> UpdateWhatsAppAccessAsync(
+        string employeeId,
+        DTOs.WhatsApp.UpdateWhatsAppAccessRequest request,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Issues a fresh invitation, invalidating any outstanding one.</summary>
     public Task ResendInviteAsync(string employeeId, CancellationToken cancellationToken = default);
 

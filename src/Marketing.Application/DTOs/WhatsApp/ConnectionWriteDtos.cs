@@ -11,7 +11,11 @@ namespace Marketing.Application.DTOs.WhatsApp;
 /// <param name="Code">Authorisation code from the signup callback.</param>
 /// <param name="WabaId">WhatsApp Business Account identifier from the callback.</param>
 /// <param name="PhoneNumberId">Phone number identifier from the callback.</param>
-public sealed record ConnectWhatsAppRequest(string Code, string WabaId, string PhoneNumberId);
+/// <param name="Label">
+/// What to call the number. Optional: a new number defaults to its verified name, de-duplicated; a
+/// number being re-linked keeps its label unless one is given.
+/// </param>
+public sealed record ConnectWhatsAppRequest(string Code, string WabaId, string PhoneNumberId, string? Label = null);
 
 /// <summary>
 /// Connects an account using a token supplied directly, bypassing Embedded Signup.
@@ -25,4 +29,9 @@ public sealed record ConnectWhatsAppRequest(string Code, string WabaId, string P
 /// <param name="AccessToken">A system-user access token with WhatsApp permissions.</param>
 /// <param name="WabaId">WhatsApp Business Account identifier.</param>
 /// <param name="PhoneNumberId">Phone number identifier to send from.</param>
-public sealed record ManualConnectWhatsAppRequest(string AccessToken, string WabaId, string PhoneNumberId);
+/// <param name="Label">What to call the number; optional, as on <see cref="ConnectWhatsAppRequest"/>.</param>
+public sealed record ManualConnectWhatsAppRequest(
+    string AccessToken,
+    string WabaId,
+    string PhoneNumberId,
+    string? Label = null);

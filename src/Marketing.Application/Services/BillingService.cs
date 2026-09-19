@@ -202,10 +202,11 @@ public sealed class BillingService : IBillingService
 
         if (breach is not null)
         {
+            // Says how many to remove, not just that there are too many - the customer's next step.
             throw new BusinessRuleException(
                 "downgrade_blocked",
-                $"The {target.Name} plan allows {breach.Limit} {breach.Label.ToLowerInvariant()}, "
-                + $"and you are using {breach.Used}. Reduce them before switching.");
+                $"The {target.Name} plan allows {breach.Limit} {breach.Unit}, and you are using {breach.Used}. "
+                + $"Remove {breach.Used - breach.Limit} {breach.Unit} ({breach.Label}) before switching.");
         }
 
         var isUpgrade = PriceFor(target, request.BillingCycle) >= PriceFor(currentPlan, subscription.BillingCycle);
@@ -508,8 +509,10 @@ public sealed class BillingService : IBillingService
             new(UsageMetricKey.Employees, "Employees", employees, plan.MaxEmployees, "seats"),
             new(UsageMetricKey.Contacts, "Contacts", contacts, plan.MaxContacts, "contacts"),
             new(UsageMetricKey.Campaigns, "Campaigns", campaigns, plan.MaxCampaigns, "campaigns"),
-            new(UsageMetricKey.WhatsAppAccounts, "WhatsApp accounts", whatsAppAccounts,
-                plan.MaxWhatsAppAccounts, "accounts"),
+            // Every number not removed, disconnected ones included: each occupies a slot until it is
+            // deleted, or disconnecting and connecting another would walk past the plan.
+            new(UsageMetricKey.WhatsAppAccounts, "WhatsApp numbers", whatsAppAccounts,
+                plan.MaxWhatsAppAccounts, "numbers"),
 
             // Not yet tracked - the email and social modules do not exist. Reported as zero rather
             // than omitted, so the panel shape stays constant and the limit is still visible.

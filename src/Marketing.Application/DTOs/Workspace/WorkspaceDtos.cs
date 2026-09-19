@@ -16,6 +16,11 @@ namespace Marketing.Application.DTOs.Workspace;
 /// </param>
 /// <param name="LastActiveAt">Instant of last activity.</param>
 /// <param name="InvitedAt">Instant they were invited.</param>
+/// <param name="WhatsAppAccess">
+/// Which WhatsApp numbers they may use, and for what. Always empty for an administrator, who holds
+/// every number by role rather than by rows.
+/// </param>
+/// <param name="DefaultWhatsAppAccountId">The number their screens open on, or null.</param>
 public sealed record EmployeeResponse(
     string Id,
     string Name,
@@ -26,7 +31,9 @@ public sealed record EmployeeResponse(
     EmployeeStatus Status,
     IReadOnlyList<string> Permissions,
     DateTimeOffset? LastActiveAt,
-    DateTimeOffset InvitedAt);
+    DateTimeOffset InvitedAt,
+    IReadOnlyList<WhatsApp.WhatsAppAccessEntry>? WhatsAppAccess = null,
+    string? DefaultWhatsAppAccountId = null);
 
 /// <summary>A reusable bundle of permissions.</summary>
 /// <param name="Id">Opaque identifier.</param>

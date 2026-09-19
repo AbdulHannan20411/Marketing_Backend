@@ -59,6 +59,7 @@ public sealed class WhatsAppController : ApiControllerBase
     /// A tenant with no connected number gets a <c>disconnected</c> connection rather than a 404,
     /// because the client renders a connect prompt from it.
     /// </remarks>
+    /// <param name="accountId">The number, <c>wa_…</c>; the workspace default when absent.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The connection state.</response>
@@ -66,15 +67,17 @@ public sealed class WhatsAppController : ApiControllerBase
     [RequirePermission(Permissions.WhatsApp.TemplatesView, Permissions.WhatsApp.Connect)]
     [ProducesResponseType(typeof(ApiResponse<WhatsAppConnectionResponse>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetConnectionAsync(
+        [FromQuery] string? accountId,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
-        return Success(await _whatsApp.GetConnectionAsync(cancellationToken));
+        return Success(await _whatsApp.GetConnectionAsync(accountId, cancellationToken));
     }
 
     /// <summary>Refreshes the connection from Meta.</summary>
+    /// <param name="accountId">The number, <c>wa_…</c>; the workspace default when absent.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The refreshed connection state.</response>
@@ -82,13 +85,14 @@ public sealed class WhatsAppController : ApiControllerBase
     [RequirePermission(Permissions.WhatsApp.Connect)]
     [ProducesResponseType(typeof(ApiResponse<WhatsAppConnectionResponse>), StatusCodes.Status200OK)]
     public async Task<IActionResult> SyncConnectionAsync(
+        [FromQuery] string? accountId,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
         return Success(
-            await _whatsApp.SyncConnectionAsync(cancellationToken),
+            await _whatsApp.SyncConnectionAsync(accountId, cancellationToken),
             "WhatsApp connection refreshed.");
     }
 
@@ -155,6 +159,7 @@ public sealed class WhatsAppController : ApiControllerBase
     /// steps, exactly as it does after a first connection.
     /// </para>
     /// </remarks>
+    /// <param name="accountId">The number, <c>wa_…</c>; the workspace default when absent.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">Onboarding restarted; poll the connection for progress.</response>
@@ -168,17 +173,19 @@ public sealed class WhatsAppController : ApiControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> ResumeAsync(
+        [FromQuery] string? accountId,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
         return Success(
-            await _connections.ResumeOnboardingAsync(cancellationToken),
+            await _connections.ResumeOnboardingAsync(accountId, cancellationToken),
             "Retrying the connection.");
     }
 
     /// <summary>Disconnects the account and destroys the stored token.</summary>
+    /// <param name="accountId">The number, <c>wa_…</c>; the workspace default when absent.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The disconnected state.</response>
@@ -188,13 +195,14 @@ public sealed class WhatsAppController : ApiControllerBase
     [ProducesResponseType(typeof(ApiResponse<WhatsAppConnectionResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DisconnectAsync(
+        [FromQuery] string? accountId,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
         return Success(
-            await _connections.DisconnectAsync(cancellationToken),
+            await _connections.DisconnectAsync(accountId, cancellationToken),
             "WhatsApp Business Account disconnected.");
     }
 
@@ -207,6 +215,10 @@ public sealed class WhatsAppController : ApiControllerBase
     /// copy expires.
     /// </remarks>
     /// <param name="request">The file and what kind it is.</param>
+    /// <param name="accountId">
+    /// The number that will send it; Meta's media handle belongs to one number. The workspace default
+    /// when absent.
+    /// </param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The stored file.</response>
@@ -220,6 +232,7 @@ public sealed class WhatsAppController : ApiControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> UploadMediaAsync(
         [FromForm] WhatsAppMediaUploadRequest request,
+        [FromQuery] string? accountId,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
@@ -243,6 +256,7 @@ public sealed class WhatsAppController : ApiControllerBase
 
         var media = await _media.UploadAsync(
             new MediaUploadCommand(kind, file.FileName, file.ContentType, file.Length, content),
+            accountId,
             cancellationToken);
 
         return Success(media, "File uploaded.");
@@ -310,6 +324,7 @@ public sealed class TemplatesController : ApiControllerBase
     /// "parameter absent" and "filter cleared" are the same request rather than two code paths.
     /// </remarks>
     /// <param name="query">Search, filters and paging.</param>
+    /// <param name="accountId">The number, <c>wa_…</c>; the workspace default when absent.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The matching page.</response>
@@ -318,12 +333,13 @@ public sealed class TemplatesController : ApiControllerBase
     [ProducesResponseType(typeof(ApiResponse<PagedResult<MessageTemplateResponse>>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAsync(
         [FromQuery] TemplateQuery query,
+        [FromQuery] string? accountId,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
-        return Success(await _whatsApp.SearchTemplatesAsync(query, cancellationToken));
+        return Success(await _whatsApp.SearchTemplatesAsync(query, accountId, cancellationToken));
     }
 
     /// <summary>Counts templates by approval state, across the whole collection.</summary>
@@ -332,6 +348,7 @@ public sealed class TemplatesController : ApiControllerBase
     /// while an operator clicks between them; counts that answered the active filter would show the
     /// selected chip's number and every other at zero.
     /// </remarks>
+    /// <param name="accountId">The number, <c>wa_…</c>; the workspace default when absent.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The counts.</response>
@@ -339,12 +356,13 @@ public sealed class TemplatesController : ApiControllerBase
     [RequirePermission(Permissions.WhatsApp.TemplatesView)]
     [ProducesResponseType(typeof(ApiResponse<TemplateStatusCountsResponse>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetCountsAsync(
+        [FromQuery] string? accountId,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
-        return Success(await _whatsApp.CountTemplatesAsync(cancellationToken));
+        return Success(await _whatsApp.CountTemplatesAsync(accountId, cancellationToken));
     }
 
     /// <summary>Returns every approved template, unpaged, for the campaign picker.</summary>
@@ -352,6 +370,7 @@ public sealed class TemplatesController : ApiControllerBase
     /// Deliberately not a page. <c>PageSize</c> is clamped to 100, so a picker built on a large page
     /// request would silently omit the hundred-and-first template with no error to notice.
     /// </remarks>
+    /// <param name="accountId">The number, <c>wa_…</c>; the workspace default when absent.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The approved templates.</response>
@@ -359,15 +378,17 @@ public sealed class TemplatesController : ApiControllerBase
     [RequirePermission(Permissions.WhatsApp.TemplatesView)]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<MessageTemplateResponse>>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetApprovedAsync(
+        [FromQuery] string? accountId,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
-        return Success(await _whatsApp.GetApprovedTemplatesAsync(cancellationToken));
+        return Success(await _whatsApp.GetApprovedTemplatesAsync(accountId, cancellationToken));
     }
 
     /// <summary>Refreshes templates from Meta.</summary>
+    /// <param name="accountId">The number, <c>wa_…</c>; the workspace default when absent.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The refreshed templates.</response>
@@ -375,12 +396,13 @@ public sealed class TemplatesController : ApiControllerBase
     [RequirePermission(Permissions.WhatsApp.TemplatesSync)]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<MessageTemplateResponse>>), StatusCodes.Status200OK)]
     public async Task<IActionResult> SyncAsync(
+        [FromQuery] string? accountId,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
-        var templates = await _whatsApp.SyncTemplatesAsync(cancellationToken);
+        var templates = await _whatsApp.SyncTemplatesAsync(accountId, cancellationToken);
 
         return Success(templates, $"Synced {templates.Count} templates from Meta.");
     }
@@ -403,6 +425,7 @@ public sealed class CampaignsController : ApiControllerBase
     }
 
     /// <summary>Returns every campaign, newest first.</summary>
+    /// <param name="accountId">Only campaigns sent from this number, <c>wa_…</c>. All when absent.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The campaigns.</response>
@@ -410,12 +433,13 @@ public sealed class CampaignsController : ApiControllerBase
     [RequirePermission(Permissions.WhatsApp.CampaignsReports, Permissions.WhatsApp.CampaignsCreate)]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<CampaignResponse>>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAsync(
+        [FromQuery] string? accountId,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
-        return Success(await _campaigns.GetCampaignsAsync(cancellationToken));
+        return Success(await _campaigns.GetCampaignsAsync(accountId, cancellationToken));
     }
 
     /// <summary>Returns one campaign, with its recurrence rule and audience.</summary>

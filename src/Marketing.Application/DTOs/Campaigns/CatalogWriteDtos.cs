@@ -46,12 +46,16 @@ public sealed record MessageTemplateDraft(
 /// <param name="AudienceLabel">Human-readable audience description.</param>
 /// <param name="GroupIds">Groups making up the audience.</param>
 /// <param name="Description">Free-text description.</param>
+/// <param name="WhatsAppAccountId">
+/// The number that sends it, <c>wa_…</c>. Required once the workspace has more than one.
+/// </param>
 public sealed record CampaignDraft(
     string Name,
     string TemplateId,
     string AudienceLabel = "",
     IReadOnlyList<string>? GroupIds = null,
-    string Description = "");
+    string Description = "",
+    string? WhatsAppAccountId = null);
 
 /// <summary>
 /// Request to schedule a campaign, as a one-off instant or as a repeating rule.

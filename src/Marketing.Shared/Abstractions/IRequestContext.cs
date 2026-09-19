@@ -18,4 +18,12 @@ public interface IRequestContext
 
     /// <summary>Client user agent, or null when there is no remote caller.</summary>
     public string? UserAgent { get; }
+
+    /// <summary>The browser's own device identifier, from the <c>X-Device-Id</c> header.</summary>
+    public string? DeviceId { get; }
+
+    /// <summary>
+    /// City and country as reported by the edge in front of the API, or null when it reports none.
+    /// </summary>
+    public string? Location { get; }
 }

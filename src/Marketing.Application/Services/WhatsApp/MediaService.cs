@@ -15,8 +15,15 @@ public interface IMediaService
 {
     /// <summary>Stores a file and uploads it to Meta so a message can reference it.</summary>
     /// <param name="command">The file and what the caller says it is.</param>
+    /// <param name="accountId">
+    /// The number that will send it, or null for the workspace default. Meta's media handle belongs
+    /// to the number it was uploaded through.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public Task<MediaAssetResponse> UploadAsync(MediaUploadCommand command, CancellationToken cancellationToken = default);
+    public Task<MediaAssetResponse> UploadAsync(
+        MediaUploadCommand command,
+        string? accountId = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Opens a stored file for streaming back to the caller.</summary>
     /// <param name="mediaId">Public media identifier.</param>
@@ -58,7 +65,7 @@ public sealed partial class MediaService : IMediaService
     private const string Container = "whatsapp-media";
 
     private readonly IRepository<MediaAsset> _media;
-    private readonly IWhatsAppConnectionRepository _connections;
+    private readonly IWhatsAppAccessService _access;
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IWhatsAppGateway _gateway;
@@ -71,7 +78,7 @@ public sealed partial class MediaService : IMediaService
     /// <summary>Initialises a new instance.</summary>
     public MediaService(
         IRepository<MediaAsset> media,
-        IWhatsAppConnectionRepository connections,
+        IWhatsAppAccessService access,
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
         IWhatsAppGateway gateway,
@@ -82,7 +89,7 @@ public sealed partial class MediaService : IMediaService
         ILogger<MediaService> logger)
     {
         _media = media;
-        _connections = connections;
+        _access = access;
         _queries = queries;
         _unitOfWork = unitOfWork;
         _gateway = gateway;
@@ -96,13 +103,14 @@ public sealed partial class MediaService : IMediaService
     /// <inheritdoc />
     public async Task<MediaAssetResponse> UploadAsync(
         MediaUploadCommand command,
+        string? accountId = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);
 
         Validate(command);
 
-        var connection = await _connections.FindForTenantAsync(_tenantContext.RequireTenantId(), cancellationToken);
+        var connection = await _access.ResolveAsync(accountId, WhatsAppAccessLevel.View, cancellationToken);
 
         if (connection is not { PhoneNumberId: { Length: > 0 } phoneNumberId, EncryptedAccessToken: { Length: > 0 } encrypted })
         {

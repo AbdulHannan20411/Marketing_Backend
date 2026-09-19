@@ -188,12 +188,13 @@ public sealed class TemplateWriteController : ApiControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> CreateAsync(
         [FromBody] MessageTemplateDraft draft,
+        [FromQuery] string? accountId,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
-        var template = await _catalog.CreateTemplateAsync(draft, cancellationToken);
+        var template = await _catalog.CreateTemplateAsync(draft, accountId, cancellationToken);
 
         return Success(template, $"Template \"{template.Name}\" created and awaiting Meta review.");
     }

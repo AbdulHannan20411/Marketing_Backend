@@ -28,4 +28,29 @@ public sealed class AuthenticationPolicyOptions
     /// </summary>
     [Range(1, 50)]
     public int MaxConcurrentSessions { get; init; } = 5;
+
+    /// <summary>
+    /// Distinct devices one account may use within <see cref="DeviceWindowDays"/> before its
+    /// administrators are told.
+    /// </summary>
+    /// <remarks>
+    /// A person has a laptop, a phone and perhaps a work desktop. Past that, a login is usually being
+    /// passed around, which is the abuse a per-seat price invites.
+    /// </remarks>
+    [Range(1, 50)]
+    public int MaxDevicesPerUser { get; init; } = 3;
+
+    /// <summary>How far back devices are counted, in days.</summary>
+    [Range(1, 90)]
+    public int DeviceWindowDays { get; init; } = 30;
+
+    /// <summary>
+    /// How recently a session must have shown activity to count as active, in minutes.
+    /// </summary>
+    /// <remarks>
+    /// A little over twice the client's heartbeat interval, so one missed beat - a sleeping laptop, a
+    /// flaky connection - does not mark a live session idle.
+    /// </remarks>
+    [Range(1, 60)]
+    public int ActiveWindowMinutes { get; init; } = 5;
 }

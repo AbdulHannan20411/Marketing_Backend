@@ -160,16 +160,23 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
             return 0;
         }
 
-        var connection = await _connections.FindForTenantAsync(tenantId, cancellationToken);
-
-        if (connection is not
+        // Every number the workspace can send from. A reply goes out from the number the customer
+        // wrote to - from any other it would arrive as a message from a stranger.
+        var senders = (await _connections.FindAllForTenantAsync(tenantId, cancellationToken))
+            .Where(connection => connection is
             {
-                PhoneNumberId: { Length: > 0 } phoneNumberId,
-                EncryptedAccessToken: { Length: > 0 } encrypted,
+                Status: not ConnectionStatus.Disconnected,
+                PhoneNumberId: { Length: > 0 },
+                EncryptedAccessToken: { Length: > 0 },
             })
+            .ToList();
+
+        if (senders.Count == 0)
         {
             return 0;
         }
+
+        var workspaceDefault = senders.FirstOrDefault(connection => connection.IsDefault) ?? senders[0];
 
         var due = waiting
             .Select(candidate => (Candidate: candidate, Trigger: TriggerFor(candidate, settings, allowance, now)))
@@ -190,7 +197,7 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
             return 0;
         }
 
-        var accessToken = _protector.Unprotect(encrypted);
+        var tokens = new Dictionary<long, string>();
         var remaining = allowance.Remaining;
         var sent = 0;
 
@@ -203,7 +210,24 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
                 break;
             }
 
-            if (await SendAsync(candidate, trigger!, settings, phoneNumberId, accessToken, now, cancellationToken))
+            // A thread written before there were several numbers has none recorded and belongs to the
+            // default; one whose number has since been disconnected is skipped rather than answered
+            // from somewhere else.
+            var sender = candidate.ConnectionId is { } connectionId
+                ? senders.FirstOrDefault(connection => connection.Id == connectionId)
+                : workspaceDefault;
+
+            if (sender is null)
+            {
+                continue;
+            }
+
+            if (!tokens.TryGetValue(sender.Id, out var accessToken))
+            {
+                tokens[sender.Id] = accessToken = _protector.Unprotect(sender.EncryptedAccessToken!);
+            }
+
+            if (await SendAsync(candidate, trigger!, settings, sender.PhoneNumberId!, accessToken, now, cancellationToken))
             {
                 sent++;
                 remaining = remaining is { } left ? left - 1 : null;
@@ -422,7 +446,8 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
                     message.Conversation.Messages.Count(other =>
                         !other.IsDeleted && other.Direction == MessageDirection.Outbound),
                     message.Conversation.Messages.Count(other =>
-                        !other.IsDeleted && other.IsAutoReply && other.OccurredAt >= dayStart))),
+                        !other.IsDeleted && other.IsAutoReply && other.OccurredAt >= dayStart),
+                    message.Conversation.WhatsAppConnectionId)),
             cancellationToken);
     }
 
@@ -540,7 +565,8 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
         DateTimeOffset LastInboundAt,
         int InboundCount,
         int OutboundCount,
-        int AutoRepliesToday);
+        int AutoRepliesToday,
+        long? ConnectionId);
 
     [LoggerMessage(
         EventId = 2750,

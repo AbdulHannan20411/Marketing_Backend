@@ -81,6 +81,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
     private readonly ICurrentUser _currentUser;
     private readonly ITenantContext _tenantContext;
     private readonly IDateTimeProvider _clock;
+    private readonly WhatsApp.IWhatsAppAccessService _access;
 
     /// <summary>Initialises a new instance.</summary>
     public CampaignWriteService(
@@ -95,8 +96,10 @@ public sealed class CampaignWriteService : ICampaignWriteService
         IRealtimeNotifier realtime,
         ICurrentUser currentUser,
         ITenantContext tenantContext,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        WhatsApp.IWhatsAppAccessService access)
     {
+        _access = access;
         _campaigns = campaigns;
         _runs = runs;
         _recurrence = recurrence;
@@ -118,12 +121,14 @@ public sealed class CampaignWriteService : ICampaignWriteService
     {
         ArgumentNullException.ThrowIfNull(draft);
 
-        var template = await LoadTemplateAsync(draft.TemplateId, cancellationToken);
+        var account = await ResolveAccountAsync(draft.WhatsAppAccountId, cancellationToken);
+        var template = await LoadTemplateAsync(draft.TemplateId, account, cancellationToken);
         var tenantId = _tenantContext.RequireTenantId();
 
         var campaign = new Campaign
         {
             TenantId = tenantId,
+            WhatsAppConnectionId = account?.Id,
             Name = draft.Name.Trim(),
             MessageTemplateId = template.Id,
             TemplateName = template.Name,
@@ -138,7 +143,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
         _campaigns.Add(campaign);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return Map(campaign);
+        return await MapAsync(campaign, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -160,8 +165,14 @@ public sealed class CampaignWriteService : ICampaignWriteService
                 $"A {campaign.Status.ToString().ToLowerInvariant()} campaign cannot be edited.");
         }
 
-        var template = await LoadTemplateAsync(draft.TemplateId, cancellationToken);
+        // The existing number when the draft names none, so editing the name of a campaign in a
+        // multi-number workspace does not demand the number be chosen again.
+        var account = await ResolveAccountAsync(
+            draft.WhatsAppAccountId ?? PublicId.FromNullable(PublicId.WhatsAppAccount, campaign.WhatsAppConnectionId),
+            cancellationToken);
+        var template = await LoadTemplateAsync(draft.TemplateId, account, cancellationToken);
 
+        campaign.WhatsAppConnectionId = account?.Id;
         campaign.Name = draft.Name.Trim();
         campaign.MessageTemplateId = template.Id;
         campaign.TemplateName = template.Name;
@@ -172,7 +183,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return Map(campaign);
+        return await MapAsync(campaign, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -203,6 +214,10 @@ public sealed class CampaignWriteService : ICampaignWriteService
         var campaign = await LoadForUpdateAsync(campaignId, cancellationToken);
 
         EnsureTransitionAllowed(campaign, CampaignStatus.Scheduled, [CampaignStatus.Draft, CampaignStatus.Scheduled]);
+
+        // Scheduling is sending later. Connection is checked again when it fires, not here: a number
+        // reconnected before Monday should still send on Monday.
+        await DemandBroadcastAsync(campaign, requireConnected: false, cancellationToken);
 
         // The rule wins when there is one, including a "once" rule: it carries the timezone and a
         // bare instant does not, and the client sends both during the transition.
@@ -246,6 +261,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
         var copy = new Campaign
         {
             TenantId = source.TenantId,
+            WhatsAppConnectionId = source.WhatsAppConnectionId,
             Name = $"{source.Name} (copy)",
             Description = source.Description,
             MessageTemplateId = source.MessageTemplateId,
@@ -267,7 +283,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
         _campaigns.Add(copy);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return Map(copy);
+        return await MapAsync(copy, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -328,6 +344,8 @@ public sealed class CampaignWriteService : ICampaignWriteService
                 "empty_audience",
                 "This campaign has no recipients. Choose an audience before running it.");
         }
+
+        await DemandBroadcastAsync(campaign, requireConnected: true, cancellationToken);
 
         // A run already in flight is returned rather than a second one started. This is what makes
         // a double-clicked button safe: the second click gets the first run back, not a second send
@@ -429,7 +447,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
         // dispatch. This is the guard that makes a retried request safe even without the header.
         if (campaign.Status is CampaignStatus.Sending or CampaignStatus.Completed)
         {
-            return Map(campaign);
+            return await MapAsync(campaign, cancellationToken);
         }
 
         EnsureTransitionAllowed(
@@ -443,6 +461,10 @@ public sealed class CampaignWriteService : ICampaignWriteService
                 "empty_audience",
                 "This campaign has no recipients. Choose an audience before sending.");
         }
+
+        // Refused here, leaving the campaign unsent, rather than accepted and then failed one
+        // recipient at a time by a number that cannot send.
+        await DemandBroadcastAsync(campaign, requireConnected: true, cancellationToken);
 
         campaign.Status = CampaignStatus.Sending;
         campaign.ScheduledAt ??= _clock.UtcNow;
@@ -494,7 +516,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
     {
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var response = Map(campaign);
+        var response = await MapAsync(campaign, cancellationToken);
 
         if (campaign.TenantId is { } tenantId)
         {
@@ -535,7 +557,10 @@ public sealed class CampaignWriteService : ICampaignWriteService
                ?? throw new NotFoundException("Campaign", campaignId);
     }
 
-    private async Task<MessageTemplate> LoadTemplateAsync(string templateId, CancellationToken cancellationToken)
+    private async Task<MessageTemplate> LoadTemplateAsync(
+        string templateId,
+        WhatsAppConnection? account,
+        CancellationToken cancellationToken)
     {
         var id = PublicId.Parse(PublicId.Template, templateId, "template");
 
@@ -544,16 +569,13 @@ public sealed class CampaignWriteService : ICampaignWriteService
             cancellationToken)
             ?? throw new NotFoundException("Template", templateId);
 
-        var connection = await _connections.FindForTenantAsync(_tenantContext.RequireTenantId(), cancellationToken);
-
-        // Approved somewhere is not approved here. Meta approves a template for one WhatsApp account,
-        // and one left over from a previous connection is refused at send, after the campaign starts.
-        if (!TemplateAccount.IsOn(template.WabaId, template.MetaTemplateId, connection?.WabaId))
+        // Approved somewhere is not approved here. Meta approves a template for one business account,
+        // and one from another number's account is refused at send, after the campaign starts.
+        if (!TemplateAccount.IsOn(template.WabaId, template.MetaTemplateId, account?.WabaId))
         {
-            throw new BusinessRuleException(
-                "template_not_on_connected_account",
-                $"\"{template.Name}\" belongs to a previously connected WhatsApp account. "
-                + "Sync templates and choose one of this account's approved templates.");
+            throw new ValidationException(
+                "templateId",
+                "This template belongs to a different WhatsApp account.");
         }
 
         if (template.Status != TemplateStatus.Approved)
@@ -614,5 +636,78 @@ public sealed class CampaignWriteService : ICampaignWriteService
             cancellationToken);
     }
 
-    private static CampaignResponse Map(Campaign campaign) => CampaignMapper.ToResponse(campaign);
+    private async Task<CampaignResponse> MapAsync(Campaign campaign, CancellationToken cancellationToken) =>
+        CampaignMapper.ToResponse(campaign, await _access.LabelsAsync(cancellationToken));
+
+    /// <summary>
+    /// The number a campaign will send from, with broadcast demanded on it.
+    /// </summary>
+    /// <remarks>
+    /// Required once the workspace has more than one number, because guessing would send a customer's
+    /// marketing from their support line. With exactly one it may be left out and means that one.
+    /// </remarks>
+    private async Task<WhatsAppConnection?> ResolveAccountAsync(string? accountId, CancellationToken cancellationToken)
+    {
+        if (accountId is { Length: > 0 })
+        {
+            return await _access.ResolveAsync(accountId, WhatsAppAccessLevel.Broadcast, cancellationToken);
+        }
+
+        var all = await _connections.FindAllForTenantAsync(_tenantContext.RequireTenantId(), cancellationToken);
+
+        if (all.Count > 1)
+        {
+            throw new ValidationException("whatsAppAccountId", "Choose which WhatsApp number sends this campaign.");
+        }
+
+        if (all.Count == 0)
+        {
+            return null;
+        }
+
+        var only = all[0];
+
+        _access.Demand(await _access.GetCallerScopeAsync(cancellationToken), only.Id, only.Label, WhatsAppAccessLevel.Broadcast);
+
+        return only;
+    }
+
+    /// <summary>Refuses to send from a number the caller may not broadcast on, or one that cannot send.</summary>
+    private async Task DemandBroadcastAsync(Campaign campaign, bool requireConnected, CancellationToken cancellationToken)
+    {
+        var connection = await _connections.FindForRecordAsync(
+            _tenantContext.RequireTenantId(),
+            campaign.WhatsAppConnectionId,
+            cancellationToken);
+
+        if (connection is null)
+        {
+            if (requireConnected)
+            {
+                throw new BusinessRuleException(
+                    "whatsapp_account_not_connected",
+                    "No WhatsApp number is connected. Connect one before sending this campaign.");
+            }
+
+            return;
+        }
+
+        _access.Demand(
+            await _access.GetCallerScopeAsync(cancellationToken),
+            connection.Id,
+            connection.Label,
+            WhatsAppAccessLevel.Broadcast);
+
+        if (requireConnected && connection.Status != ConnectionStatus.Connected)
+        {
+            throw new BusinessRuleException(
+                "whatsapp_account_not_connected",
+                $"{connection.Label} is not connected, so this campaign cannot be sent from it. "
+                + "Reconnect the number, or edit the campaign to send from another one.");
+        }
+
+        // A campaign written before there were several numbers is pinned to the one it is sent from,
+        // so a later change of default cannot move it mid-series.
+        campaign.WhatsAppConnectionId ??= connection.Id;
+    }
 }

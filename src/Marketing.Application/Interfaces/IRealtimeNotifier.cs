@@ -83,13 +83,28 @@ public interface IRealtimeNotifier
         DTOs.Payments.PaymentRequestEvent payment,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Announces a customer's message to everyone watching the workspace's inbox.</summary>
-    /// <param name="tenantId">Workspace the conversation belongs to.</param>
-    /// <param name="message">What arrived, and where.</param>
+    /// <summary>
+    /// Tells the people who may read a number's conversations that a customer wrote to it.
+    /// </summary>
+    /// <remarks>
+    /// Addressed to people, never to the workspace group: an employee without access to a number
+    /// must not receive its customers' messages from any list, search or push.
+    /// </remarks>
+    /// <param name="userIds">Members who may view the number.</param>
+    /// <param name="message">What arrived.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task PublishInboundMessageAsync(
-        long tenantId,
+        IReadOnlyCollection<long> userIds,
         InboundMessageEvent message,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Tells the people who may read a conversation that its assignment changed.</summary>
+    /// <param name="userIds">Members who may view the conversation's number.</param>
+    /// <param name="conversation">The conversation as it now stands.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task PublishConversationAssignedAsync(
+        IReadOnlyCollection<long> userIds,
+        DTOs.WhatsApp.ConversationResponse conversation,
         CancellationToken cancellationToken = default);
 }
 
@@ -115,6 +130,8 @@ public sealed record ImportProgress(
 /// <param name="UnreadCount">Unread messages on the thread after this one.</param>
 /// <param name="WindowExpiresAt">When free-form replies stop being allowed.</param>
 /// <param name="OccurredAt">When the message arrived.</param>
+/// <param name="AccountId">The number it was written to, <c>wa_…</c>.</param>
+/// <param name="AccountLabel">What the workspace calls that number.</param>
 public sealed record InboundMessageEvent(
     string ConversationId,
     string ContactName,
@@ -122,7 +139,9 @@ public sealed record InboundMessageEvent(
     string Preview,
     int UnreadCount,
     DateTimeOffset? WindowExpiresAt,
-    DateTimeOffset OccurredAt);
+    DateTimeOffset OccurredAt,
+    string? AccountId = null,
+    string? AccountLabel = null);
 
 public static class RealtimeEvents
 {
@@ -137,6 +156,9 @@ public static class RealtimeEvents
 
     /// <summary>Raised when a customer messages the workspace.</summary>
     public const string InboundMessage = "inboundMessage";
+
+    /// <summary>A conversation's assignment changed.</summary>
+    public const string ConversationAssigned = "conversationAssigned";
 
     /// <summary>A manual payment was submitted or decided.</summary>
     public const string PaymentRequestUpdated = "paymentRequestUpdated";

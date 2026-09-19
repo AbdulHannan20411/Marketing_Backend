@@ -22,6 +22,9 @@ public sealed class AuthenticationServiceTests
     private static readonly long UserId = 1001;
     private static readonly long TenantId = 2001;
 
+    private readonly Marketing.Application.Services.Security.ISessionTracker _sessions =
+        NSubstitute.Substitute.For<Marketing.Application.Services.Security.ISessionTracker>();
+
     private readonly IUserRepository _users = Substitute.For<IUserRepository>();
     private readonly IRefreshTokenRepository _refreshTokens = Substitute.For<IRefreshTokenRepository>();
     private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
@@ -83,6 +86,7 @@ public sealed class AuthenticationServiceTests
         return new AuthenticationService(
             _users,
             _refreshTokens,
+            _sessions,
             _unitOfWork,
             _passwordHasher,
             _tokenService,

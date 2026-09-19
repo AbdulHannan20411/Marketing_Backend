@@ -80,6 +80,10 @@ public sealed record OnboardingStepResponse(
 /// </param>
 /// <param name="WebhookHealthy">Whether Meta's webhook is delivering.</param>
 /// <param name="TemplateNamespaceAlias">Template namespace alias.</param>
+/// <param name="AccountId">
+/// The number this describes, <c>wa_…</c>, so a client that has just connected one can select it.
+/// Null only on the placeholder returned when the workspace has no number.
+/// </param>
 public sealed record WhatsAppConnectionResponse(
     ConnectionStatus Status,
     string DisplayPhoneNumber,
@@ -94,7 +98,8 @@ public sealed record WhatsAppConnectionResponse(
     DateTimeOffset? TokenExpiresAt,
     ConnectionOnboardingResponse Onboarding,
     bool WebhookHealthy,
-    string TemplateNamespaceAlias)
+    string TemplateNamespaceAlias,
+    string? AccountId = null)
 {
     /// <summary>
     /// Returns this connection with an already-lapsed credential reported as errored.

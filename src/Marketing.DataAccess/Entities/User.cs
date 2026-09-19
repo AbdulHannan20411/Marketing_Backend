@@ -25,6 +25,12 @@ public sealed class User : BaseEntity, ITenantScoped
     /// <summary>Full name shown in the UI and written to audit entries.</summary>
     public required string DisplayName { get; set; }
 
+    /// <summary>
+    /// The number this person works on by default, when they have access to several. Null falls back
+    /// to the workspace default.
+    /// </summary>
+    public long? DefaultWhatsAppConnectionId { get; set; }
+
     /// <summary>Opaque password hash produced by <c>IPasswordHasher</c>.</summary>
     public required string PasswordHash { get; set; }
 

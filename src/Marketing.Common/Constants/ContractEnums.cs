@@ -206,6 +206,23 @@ public static class ContractEnums
         Error,
     }
 
+    /// <summary>What one person may do on one WhatsApp number.</summary>
+    /// <remarks>
+    /// The second of two layers: the global permissions say what kind of thing someone may do, this
+    /// says on which number. Both must allow it.
+    /// </remarks>
+    public enum WhatsAppAccessLevel
+    {
+        /// <summary>See its conversations and templates.</summary>
+        View,
+
+        /// <summary>Reply in its conversations, and assign them.</summary>
+        Reply,
+
+        /// <summary>Send campaigns from it.</summary>
+        Broadcast,
+    }
+
     /// <summary>Delivery state of a queued email.</summary>
     public enum OutboxEmailStatus
     {
@@ -608,6 +625,7 @@ public static class ContractEnums
         SubscriptionExpiring,
 
         /// <summary>The month's automatic replies have been used up.</summary>
+        [JsonStringEnumMemberName("ai.replies.exhausted")]
         AiRepliesExhausted,
 
         /// <summary>The Meta connection dropped.</summary>
@@ -665,6 +683,14 @@ public static class ContractEnums
         /// <summary>A submitted payment was rejected.</summary>
         [JsonStringEnumMemberName("payment.rejected")]
         PaymentRejected,
+
+        /// <summary>The account signed in from a device it has not used before.</summary>
+        [JsonStringEnumMemberName("security.new_login")]
+        SecurityNewLogin,
+
+        /// <summary>Something about an account's sign-ins looks like it is being shared.</summary>
+        [JsonStringEnumMemberName("security.alert")]
+        SecurityAlert,
     }
 
     // -------------------------------------------------------------------------------------
@@ -1051,5 +1077,50 @@ public static class ContractEnums
 
         /// <summary>A document, supplied per send.</summary>
         Document,
+    }
+
+    /// <summary>Something about an account's sign-ins worth remembering.</summary>
+    public enum SecurityEventKind
+    {
+        /// <summary>Signed in from a device the account had not used before.</summary>
+        NewDevice,
+
+        /// <summary>Signed in from a city or country the account had not used before.</summary>
+        NewLocation,
+
+        /// <summary>Several wrong passwords in a short time.</summary>
+        FailedLogins,
+
+        /// <summary>
+        /// A sign-in elsewhere ended this session. With one session per account, this is what sharing
+        /// looks like: every person using the login keeps signing the others out.
+        /// </summary>
+        SessionDisplaced,
+
+        /// <summary>The account has used more devices recently than the workspace allows.</summary>
+        DeviceLimitExceeded,
+
+        /// <summary>The account's risk rose to high.</summary>
+        HighRisk,
+
+        /// <summary>An administrator ended a session by hand.</summary>
+        SessionRevoked,
+    }
+
+    /// <summary>How likely an account is to be shared, for a Super Admin to investigate.</summary>
+    /// <remarks>
+    /// Deliberately never shown to the customer as a verdict. It is a reason to look, not an
+    /// accusation: two offices and a phone can look exactly like three people.
+    /// </remarks>
+    public enum RiskLevel
+    {
+        /// <summary>Nothing unusual.</summary>
+        Low,
+
+        /// <summary>Worth a look.</summary>
+        Medium,
+
+        /// <summary>Strong signs of sharing.</summary>
+        High,
     }
 }

@@ -35,13 +35,77 @@ public sealed class WhatsAppConnectionRepository : Repository<WhatsAppConnection
             .FirstOrDefaultAsync(cancellationToken);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The workspace's default number - which is what every caller written before there were several
+    /// meant by "the connection". Ordered so that a workspace whose default flag is somehow missing
+    /// still gets a sensible answer: a connected number before a disconnected one, oldest first.
+    /// </remarks>
     public Task<WhatsAppConnection?> FindForTenantAsync(
         long tenantId,
         CancellationToken cancellationToken = default) =>
         Set
             .IgnoreQueryFilters()
             .Where(connection => !connection.IsDeleted && connection.TenantId == tenantId)
+            .OrderByDescending(connection => connection.IsDefault)
+            .ThenBy(connection => connection.Status == ConnectionStatus.Disconnected)
+            .ThenBy(connection => connection.Id)
             .FirstOrDefaultAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<WhatsAppConnection>> FindAllForTenantAsync(
+        long tenantId,
+        CancellationToken cancellationToken = default) =>
+        await Set
+            .IgnoreQueryFilters()
+            .Where(connection => !connection.IsDeleted && connection.TenantId == tenantId)
+            .OrderByDescending(connection => connection.IsDefault)
+            .ThenBy(connection => connection.Id)
+            .ToListAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public Task<WhatsAppConnection?> FindByIdForTenantAsync(
+        long tenantId,
+        long connectionId,
+        CancellationToken cancellationToken = default) =>
+        Set
+            .IgnoreQueryFilters()
+            .Where(connection => !connection.IsDeleted
+                                 && connection.TenantId == tenantId
+                                 && connection.Id == connectionId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> IsWabaInUseElsewhereAsync(
+        string wabaId,
+        long excludingId,
+        CancellationToken cancellationToken = default) =>
+        Set
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                connection => !connection.IsDeleted
+                              && connection.Id != excludingId
+                              && connection.WabaId == wabaId
+                              && connection.Status != ConnectionStatus.Disconnected,
+                cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<long, string>> LabelsForTenantAsync(
+        long tenantId,
+        CancellationToken cancellationToken = default) =>
+        await Set
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(connection => connection.TenantId == tenantId)
+            .ToDictionaryAsync(connection => connection.Id, connection => connection.Label, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<WhatsAppConnection?> FindForRecordAsync(
+        long tenantId,
+        long? connectionId,
+        CancellationToken cancellationToken = default) =>
+        connectionId is { } id
+            ? FindByIdForTenantAsync(tenantId, id, cancellationToken)
+            : FindForTenantAsync(tenantId, cancellationToken);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<long>> FindTenantsAwaitingOnboardingAsync(

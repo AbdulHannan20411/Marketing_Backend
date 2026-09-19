@@ -159,15 +159,18 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
             return;
         }
 
-        var connection = await _connections.FindForTenantAsync(
+        // The campaign's own number, never the default: a Sales campaign must not go out from
+        // Support because someone changed the default while it was scheduled.
+        var connection = await _connections.FindForRecordAsync(
             _tenantContext.RequireTenantId(),
+            campaign.WhatsAppConnectionId,
             cancellationToken);
 
         if (connection is not { Status: ConnectionStatus.Connected, PhoneNumberId: { Length: > 0 } phoneNumberId })
         {
             await AbandonAsync(
                 campaign,
-                "WhatsApp is not connected. Reconnect the account and start the campaign again.",
+                $"{connection?.Label ?? "WhatsApp"} is not connected. Reconnect the number and start the campaign again.",
                 cancellationToken);
 
             return;
@@ -242,6 +245,13 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
             cancellationToken.ThrowIfCancellationRequested();
 
             await SendAsync(campaign, message, phoneNumberId, accessToken, template, cancellationToken);
+
+            if (message.Status == CampaignMessageStatus.Sent)
+            {
+                // Health: the number is demonstrably sending.
+                connection.LastMessageSentAt = message.SentOn;
+                connection.ApiStatus = "ok";
+            }
         }
 
         // Written once for the whole batch. Saving per message would triple the round trips to the
@@ -364,13 +374,14 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
     /// <summary>Why this campaign cannot send right now, or null when it can.</summary>
     private async Task<string?> FindBlockingReasonAsync(Campaign campaign, CancellationToken cancellationToken)
     {
-        var connection = await _connections.FindForTenantAsync(
+        var connection = await _connections.FindForRecordAsync(
             _tenantContext.RequireTenantId(),
+            campaign.WhatsAppConnectionId,
             cancellationToken);
 
         if (connection is not { Status: ConnectionStatus.Connected, PhoneNumberId: { Length: > 0 } })
         {
-            return "WhatsApp is not connected. Reconnect the account to resume this campaign.";
+            return $"{connection?.Label ?? "WhatsApp"} is not connected. Reconnect the number to resume this campaign.";
         }
 
         if (campaign.MessageTemplateId is not { } templateId)
@@ -754,7 +765,9 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
 
         await _realtime.PublishCampaignProgressAsync(
             tenantId,
-            CampaignMapper.ToResponse(campaign),
+            CampaignMapper.ToResponse(
+                campaign,
+                await _connections.LabelsForTenantAsync(tenantId, cancellationToken)),
             cancellationToken);
     }
 

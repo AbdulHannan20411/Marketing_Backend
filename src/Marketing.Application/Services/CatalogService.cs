@@ -33,8 +33,14 @@ public interface ICatalogService
     /// <summary>Deletes a tag and returns how many contacts carried it.</summary>
     public Task<int> DeleteTagAsync(string tagId, CancellationToken cancellationToken = default);
 
-    /// <summary>Creates a message template on the connected WhatsApp account and submits it to Meta for review.</summary>
-    public Task<MessageTemplateResponse> CreateTemplateAsync(MessageTemplateDraft draft, CancellationToken cancellationToken = default);
+    /// <summary>Creates a message template on a number's business account and submits it to Meta for review.</summary>
+    /// <param name="draft">The template.</param>
+    /// <param name="accountId">The number whose business account it belongs to; the workspace default when null.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<MessageTemplateResponse> CreateTemplateAsync(
+        MessageTemplateDraft draft,
+        string? accountId = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Replaces a message template's content and resubmits it to Meta.</summary>
     public Task<MessageTemplateResponse> UpdateTemplateAsync(string templateId, MessageTemplateDraft draft, CancellationToken cancellationToken = default);
@@ -51,6 +57,7 @@ public sealed class CatalogService : ICatalogService
     private readonly IRepository<MessageTemplate> _templates;
     private readonly IRepository<Campaign> _campaigns;
     private readonly IWhatsAppConnectionRepository _connections;
+    private readonly WhatsApp.IWhatsAppAccessService _access;
     private readonly ISecretProtector _protector;
     private readonly IWhatsAppGateway _gateway;
     private readonly IQueryExecutor _queries;
@@ -64,6 +71,7 @@ public sealed class CatalogService : ICatalogService
         IRepository<MessageTemplate> templates,
         IRepository<Campaign> campaigns,
         IWhatsAppConnectionRepository connections,
+        WhatsApp.IWhatsAppAccessService access,
         ISecretProtector protector,
         IWhatsAppGateway gateway,
         IQueryExecutor queries,
@@ -75,6 +83,7 @@ public sealed class CatalogService : ICatalogService
         _templates = templates;
         _campaigns = campaigns;
         _connections = connections;
+        _access = access;
         _protector = protector;
         _gateway = gateway;
         _queries = queries;
@@ -311,13 +320,14 @@ public sealed class CatalogService : ICatalogService
     /// </remarks>
     public async Task<MessageTemplateResponse> CreateTemplateAsync(
         MessageTemplateDraft draft,
+        string? accountId = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(draft);
 
         TemplateDraftRules.Validate(draft);
 
-        var account = await RequireAccountAsync(cancellationToken);
+        var account = await RequireAccountAsync(accountId, wabaId: null, cancellationToken);
         var definition = TemplateDraftRules.ToDefinition(draft);
 
         var existing = await _queries.FirstOrDefaultAsync(
@@ -390,7 +400,9 @@ public sealed class CatalogService : ICatalogService
         var template = await _templates.GetForUpdateAsync(id, cancellationToken)
                        ?? throw new NotFoundException("Template", templateId);
 
-        var account = await RequireAccountAsync(cancellationToken);
+        // The account the template already lives on, so editing one of Support's templates while
+        // Sales is the default resubmits it to Support's account rather than copying it to Sales.
+        var account = await RequireAccountAsync(accountId: null, template.WabaId, cancellationToken);
         var definition = TemplateDraftRules.ToDefinition(draft);
 
         if (template.MetaTemplateId is { Length: > 0 } metaTemplateId
@@ -487,7 +499,7 @@ public sealed class CatalogService : ICatalogService
         }
 
         if (template.MetaTemplateId is { Length: > 0 } metaTemplateId
-            && await FindAccountAsync(cancellationToken) is { } account
+            && await FindAccountAsync(accountId: null, template.WabaId, cancellationToken) is { } account
             && string.Equals(template.WabaId, account.WabaId, StringComparison.Ordinal))
         {
             try
@@ -544,23 +556,49 @@ public sealed class CatalogService : ICatalogService
             $"A template called \"{definition.Name}\" already exists in {definition.Language}. "
             + "Choose another name, or edit that template.");
 
-    /// <summary>The connected WhatsApp account and its credential, or null when none is usable.</summary>
-    private async Task<ConnectedAccount?> FindAccountAsync(CancellationToken cancellationToken)
+    /// <summary>A business account and a credential for it, or null when none is usable.</summary>
+    /// <param name="accountId">A number the caller named, checked for view.</param>
+    /// <param name="wabaId">A business account a template already belongs to, reached through any live number on it.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task<ConnectedAccount?> FindAccountAsync(
+        string? accountId,
+        string? wabaId,
+        CancellationToken cancellationToken)
     {
-        var connection = await _connections.FindForTenantAsync(_tenantContext.RequireTenantId(), cancellationToken);
+        WhatsAppConnection? connection;
+
+        if (accountId is { Length: > 0 })
+        {
+            connection = await _access.ResolveAsync(accountId, WhatsAppAccessLevel.View, cancellationToken);
+        }
+        else if (wabaId is { Length: > 0 })
+        {
+            connection = (await _connections.FindAllForTenantAsync(_tenantContext.RequireTenantId(), cancellationToken))
+                .Where(candidate => candidate.WabaId == wabaId)
+                .OrderByDescending(candidate => candidate.Status == ConnectionStatus.Connected)
+                .FirstOrDefault()
+                ?? await _connections.FindForTenantAsync(_tenantContext.RequireTenantId(), cancellationToken);
+        }
+        else
+        {
+            connection = await _connections.FindForTenantAsync(_tenantContext.RequireTenantId(), cancellationToken);
+        }
 
         return connection is
         {
             Status: not ConnectionStatus.Disconnected,
-            WabaId: { Length: > 0 } wabaId,
+            WabaId: { Length: > 0 } connectedWabaId,
             EncryptedAccessToken: { Length: > 0 } encrypted,
         }
-            ? new ConnectedAccount(wabaId, _protector.Unprotect(encrypted))
+            ? new ConnectedAccount(connectedWabaId, _protector.Unprotect(encrypted))
             : null;
     }
 
-    private async Task<ConnectedAccount> RequireAccountAsync(CancellationToken cancellationToken) =>
-        await FindAccountAsync(cancellationToken)
+    private async Task<ConnectedAccount> RequireAccountAsync(
+        string? accountId,
+        string? wabaId,
+        CancellationToken cancellationToken) =>
+        await FindAccountAsync(accountId, wabaId, cancellationToken)
         ?? throw new BusinessRuleException(
             "whatsapp_not_connected",
             "Connect a WhatsApp account before creating or editing templates. Meta reviews each template "

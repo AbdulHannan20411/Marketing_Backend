@@ -34,13 +34,15 @@ public sealed record GraphCursors(
 /// Daily unique-customer ceiling, as <c>TIER_1K</c> and similar. Meta omits it on numbers it has
 /// not yet tiered.
 /// </param>
+/// <param name="Status">Meta's status for the number: CONNECTED, FLAGGED, RESTRICTED and so on.</param>
 public sealed record WhatsAppPhoneNumber(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("display_phone_number")] string DisplayPhoneNumber,
     [property: JsonPropertyName("verified_name")] string? VerifiedName,
     [property: JsonPropertyName("quality_rating")] string? QualityRating,
     [property: JsonPropertyName("code_verification_status")] string? CodeVerificationStatus,
-    [property: JsonPropertyName("messaging_limit_tier")] string? MessagingTier = null);
+    [property: JsonPropertyName("messaging_limit_tier")] string? MessagingTier = null,
+    [property: JsonPropertyName("status")] string? Status = null);
 
 /// <summary>A message template as Meta holds it.</summary>
 /// <param name="Id">Template identifier.</param>

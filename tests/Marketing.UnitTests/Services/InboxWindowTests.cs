@@ -34,6 +34,16 @@ public sealed class InboxWindowTests
     private readonly IWhatsAppGateway _gateway = Substitute.For<IWhatsAppGateway>();
     private readonly IMediaService _mediaService = Substitute.For<IMediaService>();
     private readonly ISecretProtector _protector = Substitute.For<ISecretProtector>();
+    private readonly IWhatsAppAccessService _access = Substitute.For<IWhatsAppAccessService>();
+    private readonly WhatsAppConnection _support = new()
+    {
+        Id = 55,
+        Label = "Support",
+        TenantId = TenantId,
+        Status = ConnectionStatus.Connected,
+        PhoneNumberId = "support-number",
+        EncryptedAccessToken = "sealed",
+    };
     private readonly List<ConversationMessage> _added = [];
 
     private readonly Conversation _conversation = new()
@@ -43,6 +53,7 @@ public sealed class InboxWindowTests
         WaId = WaId,
         ContactName = "Amara Okafor",
         WindowExpiresAt = Now.AddHours(3),
+        WhatsAppConnectionId = 55,
     };
 
     public InboxWindowTests()
@@ -61,6 +72,22 @@ public sealed class InboxWindowTests
 
         _protector.Unprotect("sealed").Returns("token");
 
+        // The thread belongs to Support; the workspace default above is a different number.
+        _connections.FindForRecordAsync(TenantId, 55, Arg.Any<CancellationToken>()).Returns(_support);
+
+        _access.GetCallerScopeAsync(Arg.Any<CancellationToken>()).Returns(WhatsAppAccessScope.Unrestricted);
+        _access.LabelsAsync(Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, string> { [55] = "Support" });
+        _access.When(access => access.Demand(
+                Arg.Any<WhatsAppAccessScope>(), Arg.Any<long>(), Arg.Any<string>(), Arg.Any<WhatsAppAccessLevel>()))
+            .Do(call =>
+            {
+                if (!call.Arg<WhatsAppAccessScope>()!.Allows(call.ArgAt<long>(1), call.Arg<WhatsAppAccessLevel>()))
+                {
+                    throw new ForbiddenException("whatsapp_account_forbidden", "No.");
+                }
+            });
+
         _gateway.SendTextAsync(
                 Arg.Any<string>(),
                 Arg.Any<string>(),
@@ -78,14 +105,55 @@ public sealed class InboxWindowTests
             _conversations,
             _messages,
             _media,
+            Substitute.For<IRepository<User>>(),
             _connections,
             _queries,
             _unitOfWork,
             _gateway,
             _mediaService,
+            _access,
+            Substitute.For<IRealtimeNotifier>(),
             _protector,
+            Substitute.For<ICurrentUser>(),
             new StubTenantContext { TenantId = TenantId },
             new FixedDateTimeProvider(Now));
+
+    private static WhatsAppAccessScope Employee(bool canReply) =>
+        WhatsAppAccessScope.From(
+        [
+            new WhatsAppAccountAccess { UserId = 7, WhatsAppConnectionId = 55, CanView = true, CanReply = canReply },
+        ]);
+
+    [Fact]
+    public async Task A_reply_goes_out_from_the_number_the_customer_wrote_to_not_the_default()
+    {
+        await CreateService().SendAsync("cnv_9001", Reply(), TestContext.Current.CancellationToken);
+
+        await _gateway.Received(1).SendTextAsync(
+            "support-number", WaId, Arg.Any<string>(), "token", Arg.Any<CancellationToken>());
+        _support.LastMessageSentAt.Should().Be(Now);
+    }
+
+    [Fact]
+    public async Task Someone_who_may_only_view_the_number_cannot_reply_on_it()
+    {
+        _access.GetCallerScopeAsync(Arg.Any<CancellationToken>()).Returns(Employee(canReply: false));
+
+        var send = () => CreateService().SendAsync("cnv_9001", Reply(), TestContext.Current.CancellationToken);
+
+        (await send.Should().ThrowAsync<ForbiddenException>()).Which.ErrorCode.Should().Be("whatsapp_account_forbidden");
+        _added.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_thread_on_a_number_the_caller_cannot_see_does_not_exist_for_them()
+    {
+        _access.GetCallerScopeAsync(Arg.Any<CancellationToken>()).Returns(WhatsAppAccessScope.From([]));
+
+        var read = () => CreateService().GetMessagesAsync("cnv_9001", 1, 50, TestContext.Current.CancellationToken);
+
+        await read.Should().ThrowAsync<NotFoundException>();
+    }
 
     private static SendConversationMessageRequest Reply(string body = "Receipt is on its way.") =>
         new("cnv_9001", ConversationMessageKind.Text, body, null);
@@ -139,7 +207,8 @@ public sealed class InboxWindowTests
     [Fact]
     public async Task Nothing_is_sent_without_a_connected_account()
     {
-        _connections.FindForTenantAsync(TenantId, Arg.Any<CancellationToken>()).Returns((WhatsAppConnection?)null);
+        _support.Status = ConnectionStatus.Disconnected;
+        _support.EncryptedAccessToken = null;
 
         var send = () => CreateService().SendAsync("cnv_9001", Reply(), TestContext.Current.CancellationToken);
 

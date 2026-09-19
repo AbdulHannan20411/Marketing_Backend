@@ -565,6 +565,10 @@ namespace Marketing.DataAccess.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("time_zone");
 
+                    b.Property<long?>("WhatsAppConnectionId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("whats_app_connection_id");
+
                     b.HasKey("Id")
                         .HasName("pk_campaigns");
 
@@ -584,6 +588,9 @@ namespace Marketing.DataAccess.Migrations
 
                     b.HasIndex("TenantId", "Id")
                         .HasDatabaseName("ix_campaigns_tenant_id_id");
+
+                    b.HasIndex("TenantId", "WhatsAppConnectionId")
+                        .HasDatabaseName("ix_campaigns_tenant_id_whats_app_connection_id");
 
                     b.HasIndex("TenantId", "Status", "CreatedOn")
                         .HasDatabaseName("ix_campaigns_tenant_id_status_created_on");
@@ -1681,6 +1688,10 @@ namespace Marketing.DataAccess.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
 
+                    b.Property<long?>("AssignedToUserId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("assigned_to_user_id");
+
                     b.Property<long?>("ContactId")
                         .HasColumnType("bigint")
                         .HasColumnName("contact_id");
@@ -1751,6 +1762,10 @@ namespace Marketing.DataAccess.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("wa_id");
 
+                    b.Property<long?>("WhatsAppConnectionId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("whats_app_connection_id");
+
                     b.Property<DateTimeOffset?>("WindowExpiresAt")
                         .HasColumnType("timestamptz")
                         .HasColumnName("window_expires_at");
@@ -1762,6 +1777,9 @@ namespace Marketing.DataAccess.Migrations
                         .HasDatabaseName("ix_conversations_is_deleted")
                         .HasFilter("is_deleted = false");
 
+                    b.HasIndex("TenantId", "AssignedToUserId")
+                        .HasDatabaseName("ix_conversations_tenant_id_assigned_to_user_id");
+
                     b.HasIndex("TenantId", "Id")
                         .HasDatabaseName("ix_conversations_tenant_id_id");
 
@@ -1769,9 +1787,9 @@ namespace Marketing.DataAccess.Migrations
                         .IsDescending(false, true)
                         .HasDatabaseName("ix_conversations_tenant_id_last_message_at");
 
-                    b.HasIndex("TenantId", "WaId")
+                    b.HasIndex("TenantId", "WhatsAppConnectionId", "WaId")
                         .IsUnique()
-                        .HasDatabaseName("ix_conversations_tenant_id_wa_id")
+                        .HasDatabaseName("ix_conversations_tenant_id_whats_app_connection_id_wa_id")
                         .HasFilter("is_deleted = false");
 
                     b.ToTable("conversations", (string)null);
@@ -2726,9 +2744,9 @@ namespace Marketing.DataAccess.Migrations
                     b.HasIndex("TenantId", "Status")
                         .HasDatabaseName("ix_message_templates_tenant_id_status");
 
-                    b.HasIndex("TenantId", "Name", "Language")
+                    b.HasIndex("TenantId", "WabaId", "Name", "Language")
                         .IsUnique()
-                        .HasDatabaseName("ix_message_templates_tenant_id_name_language")
+                        .HasDatabaseName("ix_message_templates_tenant_id_waba_id_name_language")
                         .HasFilter("is_deleted = false");
 
                     b.ToTable("message_templates", (string)null);
@@ -3713,6 +3731,9 @@ namespace Marketing.DataAccess.Migrations
                         .HasDatabaseName("ix_refresh_tokens_is_deleted")
                         .HasFilter("is_deleted = false");
 
+                    b.HasIndex("SessionId")
+                        .HasDatabaseName("ix_refresh_tokens_session_id");
+
                     b.HasIndex("TokenHash")
                         .IsUnique()
                         .HasDatabaseName("ix_refresh_tokens_token_hash");
@@ -3914,6 +3935,110 @@ namespace Marketing.DataAccess.Migrations
                         .HasFilter("is_deleted = false");
 
                     b.ToTable("roles", (string)null);
+                });
+
+            modelBuilder.Entity("Marketing.DataAccess.Entities.SecurityEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("CreatedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTimeOffset>("CreatedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_on");
+
+                    b.Property<long?>("DeletedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<DateTimeOffset?>("DeletedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("deleted_on");
+
+                    b.Property<string>("Detail")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("detail");
+
+                    b.Property<string>("DeviceLabel")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("device_label");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(45)
+                        .HasColumnType("character varying(45)")
+                        .HasColumnName("ip_address");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Location")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("location");
+
+                    b.Property<long?>("ModifiedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("modified_by");
+
+                    b.Property<DateTimeOffset?>("ModifiedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("modified_on");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid?>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<long?>("TenantId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_security_events");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("ix_security_events_is_deleted")
+                        .HasFilter("is_deleted = false");
+
+                    b.HasIndex("TenantId", "Id")
+                        .HasDatabaseName("ix_security_events_tenant_id_id");
+
+                    b.HasIndex("UserId", "Kind", "OccurredAt")
+                        .HasDatabaseName("ix_security_events_user_id_kind_occurred_at");
+
+                    b.ToTable("security_events", (string)null);
                 });
 
             modelBuilder.Entity("Marketing.DataAccess.Entities.SubscriptionPlan", b =>
@@ -4407,6 +4532,10 @@ namespace Marketing.DataAccess.Migrations
                         .HasColumnType("timestamptz")
                         .HasColumnName("created_on");
 
+                    b.Property<long?>("DefaultWhatsAppConnectionId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("default_whats_app_connection_id");
+
                     b.Property<long?>("DeletedBy")
                         .HasColumnType("bigint")
                         .HasColumnName("deleted_by");
@@ -4694,6 +4823,153 @@ namespace Marketing.DataAccess.Migrations
                     b.ToTable("user_roles", (string)null);
                 });
 
+            modelBuilder.Entity("Marketing.DataAccess.Entities.UserSession", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Browser")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("browser");
+
+                    b.Property<long>("CreatedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTimeOffset>("CreatedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_on");
+
+                    b.Property<long?>("DeletedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<DateTimeOffset?>("DeletedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("deleted_on");
+
+                    b.Property<string>("DeviceId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("device_id");
+
+                    b.Property<string>("DeviceLabel")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("device_label");
+
+                    b.Property<string>("DeviceType")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("device_type");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(45)
+                        .HasColumnType("character varying(45)")
+                        .HasColumnName("ip_address");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTimeOffset>("LastActivityAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("last_activity_at");
+
+                    b.Property<string>("LastIpAddress")
+                        .HasMaxLength(45)
+                        .HasColumnType("character varying(45)")
+                        .HasColumnName("last_ip_address");
+
+                    b.Property<string>("Location")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("location");
+
+                    b.Property<long?>("ModifiedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("modified_by");
+
+                    b.Property<DateTimeOffset?>("ModifiedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("modified_on");
+
+                    b.Property<string>("OperatingSystem")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("operating_system");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("revoked_at");
+
+                    b.Property<long?>("RevokedByUserId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("revoked_by_user_id");
+
+                    b.Property<string>("RevokedReason")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("revoked_reason");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<long?>("TenantId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("user_agent");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_user_sessions");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("ix_user_sessions_is_deleted")
+                        .HasFilter("is_deleted = false");
+
+                    b.HasIndex("SessionId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_user_sessions_session_id");
+
+                    b.HasIndex("TenantId", "Id")
+                        .HasDatabaseName("ix_user_sessions_tenant_id_id");
+
+                    b.HasIndex("TenantId", "LastActivityAt")
+                        .HasDatabaseName("ix_user_sessions_tenant_id_last_activity_at");
+
+                    b.HasIndex("UserId", "LastActivityAt")
+                        .HasDatabaseName("ix_user_sessions_user_id_last_activity_at");
+
+                    b.ToTable("user_sessions", (string)null);
+                });
+
             modelBuilder.Entity("Marketing.DataAccess.Entities.UserToken", b =>
                 {
                     b.Property<long>("Id")
@@ -4793,6 +5069,96 @@ namespace Marketing.DataAccess.Migrations
                     b.ToTable("user_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("Marketing.DataAccess.Entities.WhatsAppAccountAccess", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
+
+                    b.Property<bool>("CanBroadcast")
+                        .HasColumnType("boolean")
+                        .HasColumnName("can_broadcast");
+
+                    b.Property<bool>("CanReply")
+                        .HasColumnType("boolean")
+                        .HasColumnName("can_reply");
+
+                    b.Property<bool>("CanView")
+                        .HasColumnType("boolean")
+                        .HasColumnName("can_view");
+
+                    b.Property<long>("CreatedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTimeOffset>("CreatedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_on");
+
+                    b.Property<long?>("DeletedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<DateTimeOffset?>("DeletedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("deleted_on");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<long?>("ModifiedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("modified_by");
+
+                    b.Property<DateTimeOffset?>("ModifiedOn")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("modified_on");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<long?>("TenantId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("user_id");
+
+                    b.Property<long>("WhatsAppConnectionId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("whats_app_connection_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_whatsapp_account_access");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("ix_whatsapp_account_access_is_deleted")
+                        .HasFilter("is_deleted = false");
+
+                    b.HasIndex("WhatsAppConnectionId")
+                        .HasDatabaseName("ix_whatsapp_account_access_whats_app_connection_id");
+
+                    b.HasIndex("TenantId", "Id")
+                        .HasDatabaseName("ix_whatsapp_account_access_tenant_id_id");
+
+                    b.HasIndex("UserId", "WhatsAppConnectionId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_whatsapp_account_access_user_id_whats_app_connection_id")
+                        .HasFilter("is_deleted = false");
+
+                    b.ToTable("whatsapp_account_access", (string)null);
+                });
+
             modelBuilder.Entity("Marketing.DataAccess.Entities.WhatsAppConnection", b =>
                 {
                     b.Property<long>("Id")
@@ -4801,6 +5167,17 @@ namespace Marketing.DataAccess.Migrations
                         .HasColumnName("id");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AccountStatus")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("account_status");
+
+                    b.Property<string>("ApiStatus")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("api_status");
 
                     b.Property<string>("BusinessCategory")
                         .IsRequired()
@@ -4845,11 +5222,38 @@ namespace Marketing.DataAccess.Migrations
                         .HasColumnType("character varying(2048)")
                         .HasColumnName("encrypted_access_token");
 
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_default");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false)
                         .HasColumnName("is_deleted");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("label");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("last_error");
+
+                    b.Property<DateTimeOffset?>("LastMessageReceivedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("last_message_received_at");
+
+                    b.Property<DateTimeOffset?>("LastMessageSentAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("last_message_sent_at");
+
+                    b.Property<DateTimeOffset?>("LastWebhookAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("last_webhook_at");
 
                     b.Property<int>("MessagesLast24h")
                         .HasColumnType("integer")
@@ -4877,6 +5281,11 @@ namespace Marketing.DataAccess.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
                         .HasColumnName("phone_number_id");
+
+                    b.Property<string>("PhoneNumberStatus")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("phone_number_status");
 
                     b.Property<string>("QualityRating")
                         .IsRequired()
@@ -4945,8 +5354,8 @@ namespace Marketing.DataAccess.Migrations
 
                     b.HasIndex("TenantId")
                         .IsUnique()
-                        .HasDatabaseName("ix_whatsapp_connections_tenant_id")
-                        .HasFilter("is_deleted = false");
+                        .HasDatabaseName("ix_whatsapp_connections_tenant_id_default")
+                        .HasFilter("is_default = true AND is_deleted = false");
 
                     b.HasIndex("TenantId", "Id")
                         .HasDatabaseName("ix_whatsapp_connections_tenant_id_id");

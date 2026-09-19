@@ -42,8 +42,11 @@ public interface IAnalyticsService
 public interface ICampaignService
 {
     /// <summary>Returns every campaign, newest first.</summary>
+    /// <param name="accountId">Only campaigns sent from this number; all when null or <c>all</c>.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public Task<IReadOnlyList<CampaignResponse>> GetCampaignsAsync(CancellationToken cancellationToken = default);
+    public Task<IReadOnlyList<CampaignResponse>> GetCampaignsAsync(
+        string? accountId = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Returns one campaign.</summary>
     /// <param name="campaignId">Opaque campaign identifier.</param>

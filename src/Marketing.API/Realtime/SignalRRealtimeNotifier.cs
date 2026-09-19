@@ -55,14 +55,17 @@ public sealed partial class SignalRRealtimeNotifier : IRealtimeNotifier
     /// <inheritdoc />
     /// <inheritdoc />
     public Task PublishInboundMessageAsync(
-        long tenantId,
+        IReadOnlyCollection<long> userIds,
         InboundMessageEvent message,
         CancellationToken cancellationToken = default) =>
-        SendAsync(
-            RealtimeHub.TenantGroup(tenantId),
-            RealtimeEvents.InboundMessage,
-            message,
-            cancellationToken);
+        SendToUsersAsync(userIds, RealtimeEvents.InboundMessage, message, cancellationToken);
+
+    /// <inheritdoc />
+    public Task PublishConversationAssignedAsync(
+        IReadOnlyCollection<long> userIds,
+        Application.DTOs.WhatsApp.ConversationResponse conversation,
+        CancellationToken cancellationToken = default) =>
+        SendToUsersAsync(userIds, RealtimeEvents.ConversationAssigned, conversation, cancellationToken);
 
     public Task PublishImportProgressAsync(
         long tenantId,
@@ -98,6 +101,30 @@ public sealed partial class SignalRRealtimeNotifier : IRealtimeNotifier
     /// dropped WebSocket roll back a successful campaign send would be absurd.
     /// </para>
     /// </summary>
+    /// <summary>Pushes to each person's own group, and to nobody else.</summary>
+    private async Task SendToUsersAsync<TPayload>(
+        IReadOnlyCollection<long> userIds,
+        string method,
+        TPayload payload,
+        CancellationToken cancellationToken)
+    {
+        if (userIds.Count == 0)
+        {
+            return;
+        }
+
+        var groups = userIds.Select(RealtimeHub.UserGroup).ToList();
+
+        try
+        {
+            await _hub.Clients.Groups(groups).SendAsync(method, payload, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LogPushFailed(exception, method, $"{groups.Count} users");
+        }
+    }
+
     private async Task SendAsync<TPayload>(
         string group,
         string method,

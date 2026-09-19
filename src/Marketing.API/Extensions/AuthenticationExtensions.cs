@@ -79,6 +79,32 @@ public static class AuthenticationExtensions
                         return Task.CompletedTask;
                     },
 
+                    OnTokenValidated = async context =>
+                    {
+                        // A valid signature is not a live session. Signing in elsewhere, an
+                        // administrator ending a device, a password change - each ends the session's
+                        // refresh tokens, and without this check its access token would go on working
+                        // until it expired. Cached per session, so this is not a query per request.
+                        if (!Guid.TryParse(
+                                context.Principal?.FindFirst(AppConstants.Claims.SessionId)?.Value,
+                                out var sessionId))
+                        {
+                            // Tokens minted before sessions carried an id. They expire on their own.
+                            return;
+                        }
+
+                        var sessions = context.HttpContext.RequestServices
+                            .GetRequiredService<Application.Services.Security.ISessionTracker>();
+
+                        if (!await sessions.IsActiveAsync(sessionId, context.HttpContext.RequestAborted))
+                        {
+                            // Named, so the client can say "you were signed out because this account
+                            // signed in somewhere else" instead of a bare "please sign in again".
+                            context.Response.Headers[AppConstants.Headers.SessionRevoked] = "true";
+                            context.Fail("session_revoked");
+                        }
+                    },
+
                     OnAuthenticationFailed = context =>
                     {
                         if (context.Exception is SecurityTokenExpiredException)

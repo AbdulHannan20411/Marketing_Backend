@@ -22,6 +22,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
 {
     private readonly IUserRepository _userRepository;
     private readonly IRefreshTokenRepository _refreshTokenRepository;
+    private readonly Security.ISessionTracker _sessions;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IPasswordHasher _passwordHasher;
     private readonly ITokenService _tokenService;
@@ -51,6 +52,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
     public AuthenticationService(
         IUserRepository userRepository,
         IRefreshTokenRepository refreshTokenRepository,
+        Security.ISessionTracker sessions,
         IUnitOfWork unitOfWork,
         IPasswordHasher passwordHasher,
         ITokenService tokenService,
@@ -69,6 +71,7 @@ public sealed partial class AuthenticationService : IAuthenticationService
 
         _userRepository = userRepository;
         _refreshTokenRepository = refreshTokenRepository;
+        _sessions = sessions;
         _unitOfWork = unitOfWork;
         _passwordHasher = passwordHasher;
         _tokenService = tokenService;
@@ -139,12 +142,19 @@ public sealed partial class AuthenticationService : IAuthenticationService
         user.LockoutEndsOn = null;
         user.LastLoginOn = utcNow;
 
-        var response = IssueSession(user, Guid.NewGuid());
+        var sessionId = Guid.NewGuid();
+        var response = IssueSession(user, sessionId);
 
-        await EnforceSessionLimitAsync(user.Id, utcNow, cancellationToken);
+        var displaced = await EnforceSessionLimitAsync(user.Id, utcNow, cancellationToken);
+        var facts = await _sessions.StartAsync(user, sessionId, displaced, cancellationToken);
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         LogSignInSucceeded(user.Id, _requestContext.CorrelationId);
+
+        // After the save, so an alert can never describe a sign-in that did not happen, and outside
+        // the sign-in's own success: the tracker swallows its failures rather than failing this.
+        await _sessions.AnnounceAsync(user, facts, cancellationToken);
 
         return response;
     }
@@ -771,26 +781,47 @@ public sealed partial class AuthenticationService : IAuthenticationService
             LogAccountLockedOut(user.Id, user.LockoutEndsOn, _policy.MaxFailedLoginAttempts);
         }
 
+        await _sessions.RecordFailedLoginAsync(user, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>
     /// Revokes the oldest sessions once a user exceeds the configured concurrent-session budget.
     /// </summary>
-    private async Task EnforceSessionLimitAsync(long userId, DateTimeOffset utcNow, CancellationToken cancellationToken)
+    /// <remarks>
+    /// The new session is not saved yet, so it is not among <c>active</c>: room is left for it by
+    /// keeping one fewer of the existing sessions than the limit. Counting it the other way meant a
+    /// limit of one kept the old session and the new one both - the opposite of one at a time.
+    /// <para>
+    /// Newest kept, oldest ended: the person signing in now is present, and whoever they are pushing
+    /// off is not. With a limit of one, sharing a login becomes self-defeating, and each displacement
+    /// is recorded as the evidence it is.
+    /// </para>
+    /// </remarks>
+    /// <returns>The sessions that were ended.</returns>
+    private async Task<IReadOnlyCollection<Guid>> EnforceSessionLimitAsync(
+        long userId,
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken)
     {
         var active = await _refreshTokenRepository.GetActiveSessionsAsync(userId, utcNow, cancellationToken);
+        var keep = Math.Max(0, _policy.MaxConcurrentSessions - 1);
 
-        if (active.Count <= _policy.MaxConcurrentSessions)
+        if (active.Count <= keep)
         {
-            return;
+            return [];
         }
 
-        foreach (var token in active.Skip(_policy.MaxConcurrentSessions))
+        var displaced = new HashSet<Guid>();
+
+        foreach (var token in active.Skip(keep))
         {
             token.RevokedOn = utcNow;
-            token.RevokedReason = "Concurrent session limit exceeded.";
+            token.RevokedReason = "Signed in on another device.";
+            displaced.Add(token.SessionId);
         }
+
+        return displaced;
     }
 
     /// <summary>

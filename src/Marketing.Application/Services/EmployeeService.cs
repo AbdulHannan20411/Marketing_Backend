@@ -1,4 +1,6 @@
+using Marketing.Application.DTOs.WhatsApp;
 using Marketing.Application.DTOs.Workspace;
+using Marketing.Application.Services.WhatsApp;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Constants;
@@ -32,6 +34,8 @@ public sealed class EmployeeService : IEmployeeService
     private readonly IAccountActivationService _activation;
     private readonly ICurrentUser _currentUser;
     private readonly IPlanGuard _planGuard;
+    private readonly IRepository<WhatsAppAccountAccess> _whatsAppAccess;
+    private readonly IWhatsAppConnectionRepository _whatsAppConnections;
 
     /// <summary>Initialises a new instance.</summary>
     public EmployeeService(
@@ -51,8 +55,12 @@ public sealed class EmployeeService : IEmployeeService
         IDateTimeProvider clock,
         IAccountActivationService activation,
         ICurrentUser currentUser,
-        IPlanGuard planGuard)
+        IPlanGuard planGuard,
+        IRepository<WhatsAppAccountAccess> whatsAppAccess,
+        IWhatsAppConnectionRepository whatsAppConnections)
     {
+        _whatsAppAccess = whatsAppAccess;
+        _whatsAppConnections = whatsAppConnections;
         _users = users;
         _overrides = overrides;
         _permissionSets = permissionSets;
@@ -90,10 +98,15 @@ public sealed class EmployeeService : IEmployeeService
                     user.PermissionOverrides.Where(entry => !entry.IsDeleted)
                         .Select(entry => new OverrideRow(entry.Permission, entry.IsGranted)).ToList(),
                     user.LastLoginOn,
-                    user.CreatedOn)),
+                    user.CreatedOn,
+                    user.DefaultWhatsAppConnectionId)),
             cancellationToken);
 
-        return [.. rows.Select(Map)];
+        // One query for everyone's rows rather than one per person.
+        var access = (await _queries.ToListAsync(_whatsAppAccess.Query(), cancellationToken))
+            .ToLookup(row => row.UserId);
+
+        return [.. rows.Select(row => Map(row, access[row.Id]))];
     }
 
     /// <inheritdoc />
@@ -151,6 +164,17 @@ public sealed class EmployeeService : IEmployeeService
             cancellationToken);
 
         await EnsureGrantableAsync(requested, cancellationToken);
+
+        var isAdmin = Roles.Normalise(role.Name).Equals(Roles.Normalise(Roles.Admin), StringComparison.Ordinal);
+        var whatsAppAccess = request.WhatsAppAccess is { Count: > 0 } || request.DefaultWhatsAppAccountId is not null
+            ? await ValidateWhatsAppAccessAsync(
+                request.WhatsAppAccess,
+                request.DefaultWhatsAppAccountId,
+                isAdmin,
+                "whatsAppAccess",
+                "defaultWhatsAppAccountId",
+                cancellationToken)
+            : null;
 
         var employee = new User
         {
@@ -218,8 +242,180 @@ public sealed class EmployeeService : IEmployeeService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        if (whatsAppAccess is { } validated)
+        {
+            await ApplyWhatsAppAccessAsync(employee, validated, cancellationToken);
+        }
+
         return await LoadOneAsync(employee.Id, cancellationToken);
     }
+
+    /// <inheritdoc />
+    public async Task<EmployeeResponse> UpdateWhatsAppAccessAsync(
+        string employeeId,
+        UpdateWhatsAppAccessRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var id = PublicId.Parse(PublicId.Employee, employeeId, "employee");
+
+        var employee = await _users.FindWithRolesAsync(id, cancellationToken)
+                       ?? throw new NotFoundException("Employee", employeeId);
+
+        var isAdmin = employee.UserRoles.Any(assignment =>
+            Roles.Normalise(assignment.Role.Name) is var name
+            && (name == Roles.Normalise(Roles.Admin) || name == Roles.Normalise(Roles.SuperAdmin)));
+
+        var validated = await ValidateWhatsAppAccessAsync(
+            request.Access,
+            request.DefaultAccountId,
+            isAdmin,
+            "access",
+            "defaultAccountId",
+            cancellationToken);
+
+        var tracked = await _users.GetForUpdateAsync(id, cancellationToken)
+                      ?? throw new NotFoundException("Employee", employeeId);
+
+        await ApplyWhatsAppAccessAsync(tracked, validated, cancellationToken);
+
+        return await LoadOneAsync(id, cancellationToken);
+    }
+
+    /// <summary>
+    /// Checks an access set against the rules and the workspace's numbers, before anything is written.
+    /// </summary>
+    private async Task<ValidatedWhatsAppAccess> ValidateWhatsAppAccessAsync(
+        IReadOnlyList<WhatsAppAccessEntry>? entries,
+        string? defaultAccountId,
+        bool isAdmin,
+        string accessField,
+        string defaultField,
+        CancellationToken cancellationToken)
+    {
+        // An administrator's access comes from their role. Rows would be a saved matrix that
+        // changes nothing, which is worse than refusing.
+        if (isAdmin)
+        {
+            throw new BusinessRuleException(
+                "role_derived_permissions",
+                "Admins have access to every WhatsApp number through their role; it cannot be set per number.");
+        }
+
+        var numbers = (await _whatsAppConnections.FindAllForTenantAsync(_tenantContext.RequireTenantId(), cancellationToken))
+            .ToDictionary(connection => connection.Id);
+
+        var errors = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        var grants = new Dictionary<long, WhatsAppAccessLevel[]>();
+
+        for (var index = 0; index < (entries?.Count ?? 0); index++)
+        {
+            var entry = entries![index];
+            var field = $"{accessField}[{index}]";
+
+            if (!PublicId.TryParse(PublicId.WhatsAppAccount, entry.AccountId, out var accountId)
+                || !numbers.ContainsKey(accountId))
+            {
+                errors[$"{field}.accountId"] = ["That WhatsApp number does not belong to this workspace."];
+                continue;
+            }
+
+            if (!grants.TryAdd(accountId, [.. (entry.Permissions ?? []).Distinct()]))
+            {
+                errors[$"{field}.accountId"] = [$"{numbers[accountId].Label} is listed more than once."];
+                continue;
+            }
+
+            var levels = grants[accountId];
+
+            if (levels.Length == 0)
+            {
+                errors[$"{field}.permissions"] = [$"Choose at least one permission on {numbers[accountId].Label}, or remove it."];
+            }
+            else if (!levels.Contains(WhatsAppAccessLevel.View))
+            {
+                // Refused rather than silently added: someone who ticked "reply" alone should be
+                // told that it needs view, not find they granted more than they chose.
+                errors[$"{field}.permissions"] = [$"Reply and broadcast on {numbers[accountId].Label} also need view."];
+            }
+        }
+
+        long? defaultId = null;
+
+        if (defaultAccountId is { Length: > 0 })
+        {
+            if (PublicId.TryParse(PublicId.WhatsAppAccount, defaultAccountId, out var parsed) && grants.ContainsKey(parsed))
+            {
+                defaultId = parsed;
+            }
+            else
+            {
+                errors[defaultField] = ["The default number must be one of the numbers they can access."];
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            throw new ValidationException(errors);
+        }
+
+        return new ValidatedWhatsAppAccess(grants, defaultId);
+    }
+
+    /// <summary>
+    /// Replaces a person's access rows with a validated set.
+    /// </summary>
+    /// <remarks>
+    /// Rows for a number kept are updated in place rather than deleted and re-added: the one-row-per-
+    /// person-and-number index is checked statement by statement, and a delete and an insert for the
+    /// same pair in one batch can reach it in the wrong order.
+    /// </remarks>
+    private async Task ApplyWhatsAppAccessAsync(
+        User employee,
+        ValidatedWhatsAppAccess validated,
+        CancellationToken cancellationToken)
+    {
+        var existing = await _queries.ToListAsync(
+            _whatsAppAccess.Query(asNoTracking: false).Where(row => row.UserId == employee.Id),
+            cancellationToken);
+
+        foreach (var row in existing.Where(row => !validated.Grants.ContainsKey(row.WhatsAppConnectionId)))
+        {
+            _whatsAppAccess.Remove(row);
+        }
+
+        foreach (var (accountId, levels) in validated.Grants)
+        {
+            var row = existing.FirstOrDefault(candidate => candidate.WhatsAppConnectionId == accountId);
+
+            if (row is null)
+            {
+                row = new WhatsAppAccountAccess
+                {
+                    TenantId = employee.TenantId,
+                    UserId = employee.Id,
+                    WhatsAppConnectionId = accountId,
+                };
+
+                _whatsAppAccess.Add(row);
+            }
+
+            row.CanView = levels.Contains(WhatsAppAccessLevel.View);
+            row.CanReply = levels.Contains(WhatsAppAccessLevel.Reply);
+            row.CanBroadcast = levels.Contains(WhatsAppAccessLevel.Broadcast);
+        }
+
+        employee.DefaultWhatsAppConnectionId = validated.DefaultAccountId;
+
+        // No stamp rotation: per-number access is read from the database on every request, never
+        // carried in the token, so it applies from the next request without signing anyone out.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    private sealed record ValidatedWhatsAppAccess(
+        IReadOnlyDictionary<long, WhatsAppAccessLevel[]> Grants,
+        long? DefaultAccountId);
 
     /// <inheritdoc />
     public async Task<EmployeeResponse> UpdatePermissionsAsync(
@@ -709,7 +905,7 @@ public sealed class EmployeeService : IEmployeeService
                ?? throw new NotFoundException("Employee", publicId);
     }
 
-    private static EmployeeResponse Map(EmployeeRow row)
+    private static EmployeeResponse Map(EmployeeRow row, IEnumerable<WhatsAppAccountAccess> access)
     {
         var overrides = row.Overrides
             .Select(entry => new UserPermissionOverride { Permission = entry.Permission, IsGranted = entry.IsGranted })
@@ -730,7 +926,14 @@ public sealed class EmployeeService : IEmployeeService
             },
             EffectivePermissions.Resolve(row.RoleNames, overrides),
             row.LastLoginOn,
-            row.CreatedOn);
+            row.CreatedOn,
+            [.. access
+                .Where(grant => grant.CanView)
+                .OrderBy(grant => grant.WhatsAppConnectionId)
+                .Select(grant => new WhatsAppAccessEntry(
+                    PublicId.From(PublicId.WhatsAppAccount, grant.WhatsAppConnectionId),
+                    WhatsAppAccessScope.From([grant]).PermissionsOn(grant.WhatsAppConnectionId)))],
+            PublicId.FromNullable(PublicId.WhatsAppAccount, row.DefaultWhatsAppConnectionId));
     }
 
     private sealed record OverrideRow(string Permission, bool IsGranted);
@@ -744,7 +947,8 @@ public sealed class EmployeeService : IEmployeeService
         List<string> RoleNames,
         List<OverrideRow> Overrides,
         DateTimeOffset? LastLoginOn,
-        DateTimeOffset CreatedOn);
+        DateTimeOffset CreatedOn,
+        long? DefaultWhatsAppConnectionId);
 
     /// <summary>
     /// The signed-in person, for attribution on mail this action causes.

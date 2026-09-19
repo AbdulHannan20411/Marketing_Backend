@@ -33,12 +33,15 @@ public sealed class InboundMessageServiceTests
     private readonly IMediaService _media = Substitute.For<IMediaService>();
     private readonly ISecretProtector _protector = Substitute.For<ISecretProtector>();
     private readonly IRealtimeNotifier _realtime = Substitute.For<IRealtimeNotifier>();
+    private readonly IWhatsAppAccessService _access = Substitute.For<IWhatsAppAccessService>();
 
     private readonly List<Conversation> _addedConversations = [];
     private readonly List<ConversationMessage> _addedMessages = [];
 
     private readonly WhatsAppConnection _connection = new()
     {
+        Id = 31,
+        Label = "Sales",
         TenantId = TenantId,
         Status = ConnectionStatus.Connected,
         PhoneNumberId = "1290479527487598",
@@ -48,6 +51,9 @@ public sealed class InboundMessageServiceTests
     public InboundMessageServiceTests()
     {
         _protector.Unprotect("sealed").Returns("token");
+
+        // Two people may read this number; nobody else is told.
+        _access.UsersWhoMayViewAsync(31, Arg.Any<CancellationToken>()).Returns([7L, 9L]);
 
         // No message stored under this id yet, no thread for the number, and the number is nobody's
         // saved contact: the first-contact case.
@@ -75,6 +81,7 @@ public sealed class InboundMessageServiceTests
             _protector,
             _realtime,
             new FixedDateTimeProvider(Now),
+            _access,
             NullLogger<InboundMessageService>.Instance);
 
     private static WebhookValue Value(WebhookInboundMessage message, string? profileName = "Amara Okafor") =>
@@ -214,8 +221,22 @@ public sealed class InboundMessageServiceTests
         await CreateService().ApplyAsync(Value(TextMessage()), _connection, TestContext.Current.CancellationToken);
 
         await _realtime.Received(1).PublishInboundMessageAsync(
-            TenantId,
-            Arg.Is<InboundMessageEvent>(evt => evt != null && evt.UnreadCount == 1 && evt.Preview == "Could you send the receipt?"),
+            Arg.Is<IReadOnlyCollection<long>>(users => users != null && users.SequenceEqual(new[] { 7L, 9L })),
+            Arg.Is<InboundMessageEvent>(evt =>
+                evt != null
+                && evt.UnreadCount == 1
+                && evt.Preview == "Could you send the receipt?"
+                && evt.AccountId == "wa_31"
+                && evt.AccountLabel == "Sales"),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task The_thread_belongs_to_the_number_the_customer_wrote_to()
+    {
+        await CreateService().ApplyAsync(Value(TextMessage()), _connection, TestContext.Current.CancellationToken);
+
+        _addedConversations.Should().ContainSingle().Which.WhatsAppConnectionId.Should().Be(31);
+        _connection.LastMessageReceivedAt.Should().NotBeNull();
     }
 }

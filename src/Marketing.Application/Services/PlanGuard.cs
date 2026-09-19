@@ -52,6 +52,10 @@ public interface IPlanGuard
     /// </remarks>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<IReadOnlyCollection<string>> EnabledModulesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>The resolved tenant's plan, or null when no subscription applies.</summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<SubscriptionPlan?> CurrentPlanAsync(CancellationToken cancellationToken = default);
 }
 
 /// <inheritdoc cref="IPlanGuard" />
@@ -146,6 +150,10 @@ public sealed class PlanGuard : IPlanGuard
     }
 
     /// <summary>Loads the tenant's plan once per request, or null when none applies.</summary>
+    /// <inheritdoc />
+    public Task<SubscriptionPlan?> CurrentPlanAsync(CancellationToken cancellationToken = default) =>
+        ResolvePlanAsync(cancellationToken);
+
     private async Task<SubscriptionPlan?> ResolvePlanAsync(CancellationToken cancellationToken)
     {
         if (_planResolved)

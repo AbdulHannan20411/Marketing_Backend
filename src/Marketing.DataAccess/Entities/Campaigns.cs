@@ -15,6 +15,12 @@ public sealed class Campaign : BaseEntity, IRequiresTenant
     /// <summary>Template used.</summary>
     public long? MessageTemplateId { get; set; }
 
+    /// <summary>
+    /// The number the campaign sends from. Null only for campaigns created before a workspace could
+    /// have more than one; those send from the default.
+    /// </summary>
+    public long? WhatsAppConnectionId { get; set; }
+
     /// <summary>Lifecycle state.</summary>
     public CampaignStatus Status { get; set; } = CampaignStatus.Draft;
 

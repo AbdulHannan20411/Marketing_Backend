@@ -86,12 +86,22 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<Services.Workspace.IWorkspaceDeactivationService,
             Services.Workspace.WorkspaceDeactivationService>();
         services.AddScoped<ISubscriptionExpiryReminderService, SubscriptionExpiryReminderService>();
+        services.AddScoped<Services.WhatsApp.IWhatsAppAccessService, Services.WhatsApp.WhatsAppAccessService>();
+        services.AddScoped<Services.WhatsApp.IWhatsAppAccountService, Services.WhatsApp.WhatsAppAccountService>();
         services.AddScoped<Services.WhatsApp.IMediaService, Services.WhatsApp.MediaService>();
         services.AddScoped<Services.WhatsApp.IInboxService, Services.WhatsApp.InboxService>();
         services.AddScoped<Services.WhatsApp.IInboundMessageService, Services.WhatsApp.InboundMessageService>();
         services.AddScoped<Services.WhatsApp.IAutoReplyAllowance, Services.WhatsApp.AutoReplyAllowanceReader>();
         services.AddScoped<Services.WhatsApp.IAutoReplyService, Services.WhatsApp.AutoReplyService>();
         services.AddScoped<Services.WhatsApp.IAutoReplyDispatchService, Services.WhatsApp.AutoReplyDispatchService>();
+
+        // Session security. The memory cache backs the per-request liveness check, which would
+        // otherwise be a query on every authenticated call.
+        services.AddMemoryCache();
+        services.AddScoped<Services.Security.IAccountRiskEvaluator, Services.Security.AccountRiskEvaluator>();
+        services.AddScoped<Services.Security.ISecurityAlertService, Services.Security.SecurityAlertService>();
+        services.AddScoped<Services.Security.ISessionTracker, Services.Security.SessionTracker>();
+        services.AddScoped<Services.Security.ISecurityOverviewService, Services.Security.SecurityOverviewService>();
         services.AddScoped<ICampaignWriteService, CampaignWriteService>();
         services.AddScoped<IAdminAccountService, AdminAccountService>();
         services.AddScoped<IWhatsAppConnectionService, WhatsAppConnectionService>();

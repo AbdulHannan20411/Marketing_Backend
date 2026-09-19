@@ -123,6 +123,37 @@ public sealed class EmployeesController : ApiControllerBase
             "Permissions updated.");
     }
 
+    /// <summary>Replaces an employee's access to the workspace's WhatsApp numbers.</summary>
+    /// <remarks>
+    /// The second permission layer: the global permissions say what kind of thing they may do, this
+    /// says on which number. Both must allow an action. Administrators have every number by role and
+    /// cannot be given rows.
+    /// </remarks>
+    /// <param name="id">Employee identifier.</param>
+    /// <param name="request">The complete access set and their default number.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The updated employee.</response>
+    /// <response code="409">They are an administrator (<c>role_derived_permissions</c>).</response>
+    /// <response code="422">The set is inconsistent - reply without view, an unknown number, a default outside it.</response>
+    [HttpPut("{id}/whatsapp-access")]
+    [RequirePermission(Permissions.Settings.Employees)]
+    [ProducesResponseType(typeof(ApiResponse<EmployeeResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UpdateWhatsAppAccessAsync(
+        string id,
+        [FromBody] Application.DTOs.WhatsApp.UpdateWhatsAppAccessRequest request,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(
+            await _employees.UpdateWhatsAppAccessAsync(id, request, cancellationToken),
+            "WhatsApp access updated.");
+    }
+
     /// <summary>Changes an employee's role.</summary>
     /// <remarks>
     /// Their security stamp is rotated, so the new role applies on their next request rather than

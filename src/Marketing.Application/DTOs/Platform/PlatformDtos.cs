@@ -18,6 +18,10 @@ namespace Marketing.Application.DTOs.Platform;
 /// <param name="MessagesThisMonth">Messages sent this calendar month.</param>
 /// <param name="LastActiveAt">Instant anyone in the organisation was last active.</param>
 /// <param name="CreatedAt">Instant the account was created.</param>
+/// <param name="TenantId">
+/// The organisation's id, <c>tnt_…</c> - what the platform's workspace routes take, such as
+/// <c>/superadmin/security/tenants/{tenantId}</c>. Platform staff only ever see this list.
+/// </param>
 public sealed record AdminAccount(
     string Id,
     string Name,
@@ -33,7 +37,8 @@ public sealed record AdminAccount(
     int CustomerCount,
     int MessagesThisMonth,
     DateTimeOffset LastActiveAt,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string? TenantId = null);
 
 /// <summary>One day on the platform trend chart.</summary>
 /// <param name="Date">Date only.</param>

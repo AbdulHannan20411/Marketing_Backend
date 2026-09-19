@@ -61,6 +61,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
     private readonly ISecretProtector _protector;
     private readonly IRealtimeNotifier _realtime;
     private readonly IDateTimeProvider _clock;
+    private readonly IWhatsAppAccessService _access;
     private readonly ILogger<InboundMessageService> _logger;
 
     /// <summary>Initialises a new instance.</summary>
@@ -74,8 +75,10 @@ public sealed partial class InboundMessageService : IInboundMessageService
         ISecretProtector protector,
         IRealtimeNotifier realtime,
         IDateTimeProvider clock,
+        IWhatsAppAccessService access,
         ILogger<InboundMessageService> logger)
     {
+        _access = access;
         _conversations = conversations;
         _messages = messages;
         _contacts = contacts;
@@ -126,7 +129,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
 
             try
             {
-                await StoreAsync(value, message, metaMessageId, from, tenantId, accessToken, cancellationToken);
+                await StoreAsync(value, message, metaMessageId, from, connection, tenantId, accessToken, cancellationToken);
 
                 applied++;
             }
@@ -209,12 +212,14 @@ public sealed partial class InboundMessageService : IInboundMessageService
         WebhookInboundMessage message,
         string metaMessageId,
         string from,
+        WhatsAppConnection connection,
         long tenantId,
         string? accessToken,
         CancellationToken cancellationToken)
     {
         var occurredAt = ParseTimestamp(message.Timestamp) ?? _clock.UtcNow;
-        var conversation = await FindOrCreateConversationAsync(from, ProfileName(value, from), tenantId, cancellationToken);
+        var conversation = await FindOrCreateConversationAsync(
+            from, ProfileName(value, from), connection.Id, tenantId, cancellationToken);
         var described = Describe(message);
 
         MediaAsset? media = null;
@@ -248,22 +253,35 @@ public sealed partial class InboundMessageService : IInboundMessageService
         conversation.LastMessagePreview = Preview(described);
         conversation.LastMessageAt = occurredAt;
 
+        // Health: a customer can reach this number.
+        if (connection.LastMessageReceivedAt is null || connection.LastMessageReceivedAt < occurredAt)
+        {
+            connection.LastMessageReceivedAt = occurredAt;
+        }
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        await PublishAsync(tenantId, conversation, described, occurredAt, cancellationToken);
+        await PublishAsync(connection, conversation, described, occurredAt, cancellationToken);
     }
 
-    /// <summary>The thread for a customer's number, created on first contact.</summary>
+    /// <summary>The thread between one customer and one of the workspace's numbers, created on first contact.</summary>
+    /// <remarks>
+    /// Per number, not per customer. A customer who writes to Sales and to Support has two
+    /// conversations, each with its own 24-hour window - which is how Meta counts them too - and each
+    /// visible only to the people who may see that number.
+    /// </remarks>
     private async Task<Conversation> FindOrCreateConversationAsync(
         string waId,
         string? profileName,
+        long connectionId,
         long tenantId,
         CancellationToken cancellationToken)
     {
         var normalised = PhoneNumbers.Normalise(waId);
 
         var existing = await _queries.FirstOrDefaultAsync(
-            _conversations.Query(asNoTracking: false).Where(conversation => conversation.WaId == normalised),
+            _conversations.Query(asNoTracking: false).Where(conversation =>
+                conversation.WaId == normalised && conversation.WhatsAppConnectionId == connectionId),
             cancellationToken);
 
         if (existing is not null)
@@ -286,6 +304,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
         var conversation = new Conversation
         {
             TenantId = tenantId,
+            WhatsAppConnectionId = connectionId,
             WaId = normalised,
             ContactId = contact?.Id,
             ContactName = contact?.FullName ?? profileName ?? PhoneNumbers.ToDisplayForm(normalised),
@@ -303,7 +322,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
 
     /// <summary>Tells the open inbox that something arrived, so it need not poll.</summary>
     private async Task PublishAsync(
-        long tenantId,
+        WhatsAppConnection connection,
         Conversation conversation,
         DescribedMessage described,
         DateTimeOffset occurredAt,
@@ -311,8 +330,10 @@ public sealed partial class InboundMessageService : IInboundMessageService
     {
         try
         {
+            // To each person who may read this number, never to the workspace as a whole: an
+            // employee without access to it must not receive its customers' messages by push.
             await _realtime.PublishInboundMessageAsync(
-                tenantId,
+                await _access.UsersWhoMayViewAsync(connection.Id, cancellationToken),
                 new InboundMessageEvent(
                     PublicId.From(PublicId.Conversation, conversation.Id),
                     conversation.ContactName,
@@ -320,7 +341,9 @@ public sealed partial class InboundMessageService : IInboundMessageService
                     Preview(described),
                     conversation.UnreadCount,
                     conversation.WindowExpiresAt,
-                    occurredAt),
+                    occurredAt,
+                    PublicId.From(PublicId.WhatsAppAccount, connection.Id),
+                    connection.Label),
                 cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

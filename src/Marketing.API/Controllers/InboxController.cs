@@ -130,6 +130,30 @@ public sealed class InboxController : ApiControllerBase
         return Success(await _inbox.SendAsync(id, request, cancellationToken));
     }
 
+    /// <summary>Assigns a conversation to someone who may see its number, or unassigns it.</summary>
+    /// <param name="id">Conversation identifier.</param>
+    /// <param name="request">The employee, or null to unassign.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The conversation as it now stands.</response>
+    /// <response code="403">The caller may not reply on this number (<c>whatsapp_account_forbidden</c>).</response>
+    /// <response code="422">The assignee cannot see this number.</response>
+    [HttpPost("{id}/assign")]
+    [RequirePermission(Permissions.WhatsApp.InboxReply)]
+    [ProducesResponseType(typeof(ApiResponse<ConversationResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> AssignAsync(
+        string id,
+        [FromBody] AssignConversationRequest request,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        return Success(await _inbox.AssignAsync(id, request, cancellationToken));
+    }
+
     /// <summary>Marks a conversation as read.</summary>
     /// <param name="id">Public conversation identifier.</param>
     /// <param name="adminId">Super Admin scoping.</param>

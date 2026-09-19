@@ -36,6 +36,18 @@ public sealed class Conversation : BaseEntity, IRequiresTenant
     public int UnreadCount { get; set; }
 
     /// <summary>
+    /// The number the customer wrote to. Replies always go out from it, never from the default.
+    /// </summary>
+    /// <remarks>
+    /// Nullable only for threads that predate numbers being separate; the migration fills them in
+    /// with the workspace's first number.
+    /// </remarks>
+    public long? WhatsAppConnectionId { get; set; }
+
+    /// <summary>The agent who has taken this conversation, if anyone has.</summary>
+    public long? AssignedToUserId { get; set; }
+
+    /// <summary>
     /// When free-form replies stop being allowed: the last inbound message plus 24 hours. Null when
     /// no window has ever opened.
     /// </summary>

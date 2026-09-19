@@ -97,6 +97,12 @@ public static class PublicId
     /// <summary>Media asset identifier prefix.</summary>
     public const string Media = "med";
 
+    /// <summary>Signed-in session identifier prefix.</summary>
+    public const string Session = "ses";
+
+    /// <summary>Prefix for a workspace's WhatsApp numbers.</summary>
+    public const string WhatsAppAccount = "wa";
+
     private const char Separator = '_';
 
     /// <summary>Formats a key as its public identifier.</summary>

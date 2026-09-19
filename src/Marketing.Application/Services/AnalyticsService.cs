@@ -221,14 +221,17 @@ public sealed class CampaignService : ICampaignService
     private readonly IRepository<CampaignRun> _runs;
     private readonly IRepository<CampaignMessage> _messages;
     private readonly IQueryExecutor _queries;
+    private readonly WhatsApp.IWhatsAppAccessService _access;
 
     /// <summary>Initialises a new instance.</summary>
     public CampaignService(
         IRepository<Campaign> campaigns,
         IRepository<CampaignRun> runs,
         IRepository<CampaignMessage> messages,
-        IQueryExecutor queries)
+        IQueryExecutor queries,
+        WhatsApp.IWhatsAppAccessService access)
     {
+        _access = access;
         _campaigns = campaigns;
         _runs = runs;
         _messages = messages;
@@ -247,7 +250,7 @@ public sealed class CampaignService : ICampaignService
             cancellationToken)
             ?? throw new NotFoundException("Campaign", campaignId);
 
-        return CampaignMapper.ToResponse(campaign);
+        return CampaignMapper.ToResponse(campaign, await _access.LabelsAsync(cancellationToken));
     }
 
     /// <inheritdoc />
@@ -308,8 +311,19 @@ public sealed class CampaignService : ICampaignService
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<CampaignResponse>> GetCampaignsAsync(
+        string? accountId = null,
         CancellationToken cancellationToken = default)
     {
+        var query = _campaigns.Query();
+
+        if (!string.IsNullOrWhiteSpace(accountId)
+            && !string.Equals(accountId, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            var id = PublicId.Parse(PublicId.WhatsAppAccount, accountId, "WhatsApp account");
+
+            query = query.Where(campaign => campaign.WhatsAppConnectionId == id);
+        }
+
         // Unpaged, matching the contract: the client filters and paginates in memory today. If a
         // tenant is likely to exceed a couple of hundred campaigns this becomes a PagedResult,
         // which is a breaking change and so belongs before launch rather than after.
@@ -319,9 +333,11 @@ public sealed class CampaignService : ICampaignService
         // place for a new field to be forgotten - which reads as a value that is present on the
         // detail screen and missing in the list.
         var rows = await _queries.ToListAsync(
-            _campaigns.Query().OrderByDescending(campaign => campaign.CreatedOn),
+            query.OrderByDescending(campaign => campaign.CreatedOn),
             cancellationToken);
 
-        return [.. rows.Select(CampaignMapper.ToResponse)];
+        var labels = await _access.LabelsAsync(cancellationToken);
+
+        return [.. rows.Select(campaign => CampaignMapper.ToResponse(campaign, labels))];
     }
 }

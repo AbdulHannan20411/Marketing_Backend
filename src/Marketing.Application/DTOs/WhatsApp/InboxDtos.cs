@@ -14,6 +14,10 @@ namespace Marketing.Application.DTOs.WhatsApp;
 /// When free-form replies stop being allowed, or null once they already have. The client counts down
 /// to this and closes its composer when it passes.
 /// </param>
+/// <param name="AccountId">The number the customer wrote to, <c>wa_…</c>; replies go out from it.</param>
+/// <param name="AccountLabel">What the workspace calls that number, denormalised for the list.</param>
+/// <param name="AwaitingReply">Whether the last message is the customer's.</param>
+/// <param name="AssignedTo">Who is handling it, or null.</param>
 public sealed record ConversationResponse(
     string Id,
     string? ContactId,
@@ -22,7 +26,20 @@ public sealed record ConversationResponse(
     string LastMessagePreview,
     DateTimeOffset? LastMessageAt,
     int UnreadCount,
-    DateTimeOffset? WindowExpiresAt);
+    DateTimeOffset? WindowExpiresAt,
+    string? AccountId = null,
+    string? AccountLabel = null,
+    bool AwaitingReply = false,
+    ConversationAssigneeResponse? AssignedTo = null);
+
+/// <summary>Who a conversation is assigned to.</summary>
+/// <param name="Id">Employee id, <c>emp_…</c>.</param>
+/// <param name="Name">Display name.</param>
+public sealed record ConversationAssigneeResponse(string Id, string Name);
+
+/// <summary>Assigns a conversation, or clears its assignment.</summary>
+/// <param name="UserId">Employee id, <c>emp_…</c>, or null to unassign.</param>
+public sealed record AssignConversationRequest(string? UserId);
 
 /// <summary>One message in a thread.</summary>
 /// <param name="Id">Public identifier.</param>
@@ -49,7 +66,22 @@ public sealed record ConversationMessageResponse(
 /// <param name="Page">One-based page number.</param>
 /// <param name="PageSize">Rows per page.</param>
 /// <param name="Search">Matches contact name or phone number.</param>
-public sealed record ConversationQuery(int Page = 1, int PageSize = 25, string? Search = null);
+/// <param name="AccountId">Only this number; every number the caller may view when absent or <c>all</c>.</param>
+/// <param name="Status"><c>all</c>, <c>unread</c>, <c>awaiting_reply</c> or <c>replied</c>.</param>
+/// <param name="AssignedTo"><c>all</c>, <c>me</c>, <c>unassigned</c> or an employee id.</param>
+/// <param name="MessageType">Kind of the last message: <c>all</c>, <c>text</c>, <c>media</c> or <c>template</c>.</param>
+public sealed record ConversationQuery(
+    int Page = 1,
+    int PageSize = 25,
+    string? Search = null,
+    string? AccountId = null,
+    string? Status = null,
+    string? AssignedTo = null,
+    string? MessageType = null)
+{
+    /// <summary>The literal every filter uses for "no filter".</summary>
+    public const string All = "all";
+}
 
 /// <summary>An agent's reply, sent inside the 24-hour window.</summary>
 /// <param name="ConversationId">

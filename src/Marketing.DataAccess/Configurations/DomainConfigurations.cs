@@ -150,9 +150,21 @@ public sealed class WhatsAppConnectionConfiguration : BaseEntityConfiguration<Wh
             steps.Property(step => step.Message).HasMaxLength(500);
         });
 
+        builder.Property(connection => connection.Label).IsRequired().HasMaxLength(40);
+        builder.Property(connection => connection.ApiStatus).IsRequired().HasMaxLength(16);
+        builder.Property(connection => connection.PhoneNumberStatus).HasMaxLength(32);
+        builder.Property(connection => connection.AccountStatus).HasMaxLength(32);
+        builder.Property(connection => connection.LastError).HasMaxLength(300);
+
+        // Many numbers per workspace now, so the workspace alone no longer identifies a row.
+        builder.HasIndex(connection => connection.TenantId);
+
+        // At most one default per workspace. Two would make "the default number" depend on whichever
+        // row the planner returned first, which is exactly the ambiguity a default exists to remove.
         builder.HasIndex(connection => connection.TenantId)
             .IsUnique()
-            .HasFilter("is_deleted = false");
+            .HasFilter("is_default = true AND is_deleted = false")
+            .HasDatabaseName("ix_whatsapp_connections_tenant_id_default");
 
         // A number belongs to one tenant at a time. Inbound webhooks carry no tenant and are routed
         // solely by this identifier, so two live rows sharing one number would hand a tenant's
@@ -192,7 +204,10 @@ public sealed class MessageTemplateConfiguration : BaseEntityConfiguration<Messa
         builder.Property(template => template.Buttons).HasColumnType("text[]").IsRequired();
 
         // Meta allows one template per name and language.
-        builder.HasIndex(template => new { template.TenantId, template.Name, template.Language })
+        // Meta allows one template per name and language on each business account - and a workspace
+        // with two accounts may have an "order_update" on both. Scoped to the account, or syncing the
+        // second would overwrite the first.
+        builder.HasIndex(template => new { template.TenantId, template.WabaId, template.Name, template.Language })
             .IsUnique()
             .HasFilter("is_deleted = false");
 
@@ -244,6 +259,9 @@ public sealed class CampaignConfiguration : BaseEntityConfiguration<Campaign>
         builder.Property(campaign => campaign.RecurrenceJson).HasColumnType("jsonb");
 
         builder.HasIndex(campaign => new { campaign.TenantId, campaign.Status, campaign.CreatedOn });
+
+        // The campaigns list filters by number.
+        builder.HasIndex(campaign => new { campaign.TenantId, campaign.WhatsAppConnectionId });
 
         // The dispatcher's poll: campaigns due to start or due to resume, across every tenant.
         // Status first because it is the selective column - most rows are drafts or completed.
@@ -881,9 +899,14 @@ public sealed class ConversationConfiguration : BaseEntityConfiguration<Conversa
 
         // One thread per customer number. A second row would split a conversation in half, and the
         // webhook - which finds a thread by number alone - would append to whichever it found first.
-        builder.HasIndex(conversation => new { conversation.TenantId, conversation.WaId })
+        // A customer who writes to Sales and to Support has two conversations, one per number: each
+        // is answered from the number it was written to, by whoever may see that number.
+        builder.HasIndex(conversation => new { conversation.TenantId, conversation.WhatsAppConnectionId, conversation.WaId })
             .IsUnique()
             .HasFilter("is_deleted = false");
+
+        // "Assigned to me" is a filter every agent uses.
+        builder.HasIndex(conversation => new { conversation.TenantId, conversation.AssignedToUserId });
 
         // The inbox lists newest activity first within a workspace.
         builder.HasIndex(conversation => new { conversation.TenantId, conversation.LastMessageAt })
@@ -970,5 +993,72 @@ public sealed class AutoReplySettingsConfiguration : BaseEntityConfiguration<Aut
         builder.HasIndex(settings => settings.TenantId)
             .IsUnique()
             .HasFilter("is_deleted = false");
+    }
+}
+
+
+/// <summary>Maps <see cref="UserSession"/>.</summary>
+public sealed class UserSessionConfiguration : BaseEntityConfiguration<UserSession>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<UserSession> builder)
+    {
+        builder.ToTable("user_sessions");
+
+        builder.Property(session => session.DeviceId).IsRequired().HasMaxLength(64);
+        builder.Property(session => session.DeviceLabel).HasMaxLength(80);
+        builder.Property(session => session.Browser).HasMaxLength(40);
+        builder.Property(session => session.OperatingSystem).HasMaxLength(40);
+        builder.Property(session => session.DeviceType).HasMaxLength(16);
+        builder.Property(session => session.IpAddress).HasMaxLength(45);
+        builder.Property(session => session.LastIpAddress).HasMaxLength(45);
+        builder.Property(session => session.Location).HasMaxLength(120);
+        builder.Property(session => session.UserAgent).HasMaxLength(512);
+        builder.Property(session => session.RevokedReason).HasMaxLength(64);
+
+        // Looked up on every authenticated request, so it has to be the cheapest query there is.
+        builder.HasIndex(session => session.SessionId).IsUnique();
+
+        // A person's devices, and a workspace's live sessions, are the two screens built on this.
+        builder.HasIndex(session => new { session.UserId, session.LastActivityAt });
+        builder.HasIndex(session => new { session.TenantId, session.LastActivityAt });
+    }
+}
+
+/// <summary>Maps <see cref="SecurityEvent"/>.</summary>
+public sealed class SecurityEventConfiguration : BaseEntityConfiguration<SecurityEvent>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<SecurityEvent> builder)
+    {
+        builder.ToTable("security_events");
+
+        builder.Property(securityEvent => securityEvent.Kind).IsRequired().HasMaxLength(32).HasConversion<string>();
+        builder.Property(securityEvent => securityEvent.IpAddress).HasMaxLength(45);
+        builder.Property(securityEvent => securityEvent.Location).HasMaxLength(120);
+        builder.Property(securityEvent => securityEvent.DeviceLabel).HasMaxLength(80);
+        builder.Property(securityEvent => securityEvent.Detail).HasMaxLength(500);
+
+        // The risk score asks "what happened to this person lately", by kind.
+        builder.HasIndex(securityEvent => new { securityEvent.UserId, securityEvent.Kind, securityEvent.OccurredAt });
+    }
+}
+
+
+/// <summary>Maps <see cref="WhatsAppAccountAccess"/>.</summary>
+public sealed class WhatsAppAccountAccessConfiguration : BaseEntityConfiguration<WhatsAppAccountAccess>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<WhatsAppAccountAccess> builder)
+    {
+        builder.ToTable("whatsapp_account_access");
+
+        // One row per employee per number. A second would leave two answers to "may Ali reply on
+        // Support", and whichever was read first would decide.
+        builder.HasIndex(access => new { access.UserId, access.WhatsAppConnectionId })
+            .IsUnique()
+            .HasFilter("is_deleted = false");
+
+        builder.HasIndex(access => access.WhatsAppConnectionId);
     }
 }

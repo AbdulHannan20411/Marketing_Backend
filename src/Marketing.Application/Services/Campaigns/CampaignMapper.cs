@@ -63,9 +63,11 @@ public static class CampaignMapper
 
     /// <summary>Maps a campaign to its wire shape.</summary>
     /// <param name="campaign">The campaign.</param>
-    public static CampaignResponse ToResponse(Campaign campaign)
+    /// <param name="accountLabels">The workspace's number labels, keyed by connection.</param>
+    public static CampaignResponse ToResponse(Campaign campaign, IReadOnlyDictionary<long, string> accountLabels)
     {
         ArgumentNullException.ThrowIfNull(campaign);
+        ArgumentNullException.ThrowIfNull(accountLabels);
 
         var recurrence = ReadRecurrence(campaign.RecurrenceJson);
 
@@ -100,7 +102,11 @@ public static class CampaignMapper
             recurrence is null ? campaign.CompletedAt : null,
             campaign.CreatedByName,
             campaign.CreatedOn,
-            campaign.ModifiedOn);
+            campaign.ModifiedOn,
+            PublicId.FromNullable(PublicId.WhatsAppAccount, campaign.WhatsAppConnectionId),
+            campaign.WhatsAppConnectionId is { } accountId && accountLabels.TryGetValue(accountId, out var label)
+                ? label
+                : null);
     }
 
     /// <summary>Maps one firing to its wire shape.</summary>

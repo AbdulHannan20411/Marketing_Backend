@@ -78,14 +78,15 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
         var number = await _client.GetPhoneNumberAsync(
             phoneNumberId,
             accessToken is null ? null : Bearer(accessToken),
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         return new MetaPhoneNumber(
             number.Id,
             number.DisplayPhoneNumber,
             number.VerifiedName,
             number.QualityRating,
-            number.MessagingTier);
+            number.MessagingTier,
+            number.Status);
     }
 
     /// <inheritdoc />
@@ -143,6 +144,13 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
     }
 
     /// <inheritdoc />
+    public async Task UnsubscribeFromWebhooksAsync(
+        string wabaId,
+        string accessToken,
+        CancellationToken cancellationToken = default) =>
+        await _client.UnsubscribeAppAsync(wabaId, Bearer(accessToken), cancellationToken);
+
+    /// <inheritdoc />
     public async Task RegisterPhoneNumberAsync(
         string phoneNumberId,
         string pin,
@@ -172,7 +180,8 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
         var account = await _client.GetBusinessAccountAsync(
             wabaId, Bearer(accessToken), cancellationToken: cancellationToken);
 
-        return new MetaBusinessAccount(account.Id ?? wabaId, account.Name, account.TemplateNamespace);
+        return new MetaBusinessAccount(
+            account.Id ?? wabaId, account.Name, account.TemplateNamespace, account.ReviewStatus);
     }
 
     /// <inheritdoc />
