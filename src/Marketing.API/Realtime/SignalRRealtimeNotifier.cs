@@ -9,6 +9,16 @@ namespace Marketing.API.Realtime;
 /// <summary>SignalR implementation of <see cref="IRealtimeNotifier"/>.</summary>
 public sealed partial class SignalRRealtimeNotifier : IRealtimeNotifier
 {
+    /// <summary>
+    /// How long a push may take before the caller stops waiting for it.
+    /// </summary>
+    /// <remarks>
+    /// A push is a courtesy: the data is already saved, and every screen fetches it anyway. Waiting
+    /// on it puts the backplane's health inside the user's save button, which is how a campaign save
+    /// once took forty seconds against an unreachable Redis.
+    /// </remarks>
+    private static readonly TimeSpan PushBudget = TimeSpan.FromMilliseconds(750);
+
     private readonly IHubContext<RealtimeHub> _hub;
     private readonly ILogger<SignalRRealtimeNotifier> _logger;
 
@@ -114,14 +124,23 @@ public sealed partial class SignalRRealtimeNotifier : IRealtimeNotifier
         }
 
         var groups = userIds.Select(RealtimeHub.UserGroup).ToList();
+        var description = $"{groups.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)} users";
+
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        budget.CancelAfter(PushBudget);
 
         try
         {
-            await _hub.Clients.Groups(groups).SendAsync(method, payload, cancellationToken);
+            await _hub.Clients.Groups(groups).SendAsync(method, payload, budget.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            LogPushTimedOut(method, description);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            LogPushFailed(exception, method, $"{groups.Count} users");
+            LogPushFailed(exception, method, description);
         }
     }
 
@@ -131,15 +150,30 @@ public sealed partial class SignalRRealtimeNotifier : IRealtimeNotifier
         TPayload payload,
         CancellationToken cancellationToken)
     {
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        budget.CancelAfter(PushBudget);
+
         try
         {
-            await _hub.Clients.Group(group).SendAsync(method, payload, cancellationToken);
+            await _hub.Clients.Group(group).SendAsync(method, payload, budget.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // The caller's own work is done and saved. Clients see this on their next fetch.
+            LogPushTimedOut(method, group);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             LogPushFailed(exception, method, group);
         }
     }
+
+    [LoggerMessage(
+        EventId = 4102,
+        Level = LogLevel.Warning,
+        Message = "Realtime push of {Method} to {Group} took too long and was abandoned; clients will see it on their next fetch.")]
+    private partial void LogPushTimedOut(string method, string group);
 
     [LoggerMessage(
         EventId = 4101,
