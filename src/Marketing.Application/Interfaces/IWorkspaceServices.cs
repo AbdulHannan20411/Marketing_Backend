@@ -1,4 +1,6 @@
 using Marketing.Application.DTOs.Workspace;
+using Marketing.Common.Requests;
+using Marketing.Common.Responses;
 
 namespace Marketing.Application.Interfaces;
 
@@ -7,6 +9,13 @@ public interface IEmployeeService
 {
     /// <summary>Returns every employee with their effective permissions.</summary>
     public Task<IReadOnlyList<EmployeeResponse>> GetEmployeesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Returns one page of employees, searched by name or email.</summary>
+    /// <param name="query">Paging and search.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<PagedResult<EmployeeResponse>> GetEmployeesAsync(
+        OptionalPageRequest query,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Returns every permission set.</summary>
     public Task<IReadOnlyList<PermissionSetResponse>> GetPermissionSetsAsync(
@@ -100,6 +109,13 @@ public interface INotificationService
 {
     /// <summary>Returns the caller's notifications, newest first.</summary>
     public Task<IReadOnlyList<AppNotification>> GetAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Returns one page of the caller's notifications, newest first, with the bell counts.</summary>
+    /// <param name="query">Paging and filters.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<NotificationFeed> GetPageAsync(
+        NotificationQuery query,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Marks one notification read and returns the full updated list.</summary>
     public Task<IReadOnlyList<AppNotification>> MarkReadAsync(

@@ -7,6 +7,7 @@ using Marketing.Common.Exceptions;
 using Marketing.Common.Helpers;
 using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;
+using Microsoft.Extensions.Caching.Memory;
 using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Application.Services;
@@ -32,6 +33,7 @@ public sealed class BillingService : IBillingService
     private readonly IUnitOfWork _unitOfWork;
     private readonly IPaymentGateway _gateway;
     private readonly ITenantContext _tenantContext;
+    private readonly IMemoryCache _memory;
     private readonly IDateTimeProvider _clock;
 
     /// <summary>Initialises a new instance.</summary>
@@ -54,7 +56,8 @@ public sealed class BillingService : IBillingService
         IUnitOfWork unitOfWork,
         IPaymentGateway gateway,
         ITenantContext tenantContext,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        IMemoryCache memory)
     {
         _subscriptions = subscriptions;
         _plans = plans;
@@ -75,6 +78,7 @@ public sealed class BillingService : IBillingService
         _gateway = gateway;
         _tenantContext = tenantContext;
         _clock = clock;
+        _memory = memory;
     }
 
     /// <inheritdoc />
@@ -91,13 +95,23 @@ public sealed class BillingService : IBillingService
     /// <inheritdoc />
     public async Task<EntitlementsSnapshot> GetEntitlementsAsync(CancellationToken cancellationToken = default)
     {
+        var key = EntitlementsKey(_tenantContext.TenantId);
+
+        // Every screen reads this, several of them on open, and each read is eight queries - the
+        // subscription, the plan and six counts. The numbers are gauges, not decisions: a contact
+        // added ten seconds ago showing next time is fine, while a plan change clears this at once.
+        if (key is not null && _memory.TryGetValue<EntitlementsSnapshot>(key, out var remembered) && remembered is not null)
+        {
+            return remembered;
+        }
+
         var (subscription, plan) = await LoadSubscriptionAsync(cancellationToken);
         var mapped = MapPlan(plan);
 
         // Built from the plan and the subscription's state, never from MapSubscription: that
         // carries Amount, Currency, BillingCycle, NextRenewalAt and AutoRenew, and the whole point
         // of this endpoint is that it can be read by somebody with no billing permission.
-        return new EntitlementsSnapshot(
+        var snapshot = new EntitlementsSnapshot(
             mapped.Id,
             mapped.Name,
             subscription.Status,
@@ -106,7 +120,31 @@ public sealed class BillingService : IBillingService
             mapped.Modules,
             mapped.Limits,
             await BuildUsageAsync(plan, subscription, cancellationToken));
+
+        if (key is not null)
+        {
+            _memory.Set(key, snapshot, EntitlementsLifetime);
+        }
+
+        return snapshot;
     }
+
+    /// <summary>How long a workspace's entitlements are reused before they are read again.</summary>
+    private static readonly TimeSpan EntitlementsLifetime = TimeSpan.FromSeconds(10);
+
+    /// <summary>Where a workspace's entitlements are remembered, or null when there is no workspace.</summary>
+    private static string? EntitlementsKey(long? tenantId) =>
+        tenantId is { } id ? $"entitlements:{id.ToString(System.Globalization.CultureInfo.InvariantCulture)}" : null;
+
+    /// <summary>
+    /// Drops the remembered entitlements, so the next read shows what just changed.
+    /// </summary>
+    /// <remarks>
+    /// Called wherever the plan or the subscription's state moves. A limit the customer just paid
+    /// for has to apply now, not in ten seconds.
+    /// </remarks>
+    private void ForgetEntitlements() =>
+        _memory.Remove(EntitlementsKey(_tenantContext.TenantId) ?? string.Empty);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<SubscriptionPlanResponse>> GetPurchasablePlansAsync(
@@ -236,6 +274,8 @@ public sealed class BillingService : IBillingService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        ForgetEntitlements();
+
         return new SubscriptionSnapshot(
             MapSubscription(subscription, target),
             MapPlan(target),
@@ -269,6 +309,8 @@ public sealed class BillingService : IBillingService
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        ForgetEntitlements();
 
         return new SubscriptionSnapshot(
             MapSubscription(subscription, plan),
@@ -323,6 +365,8 @@ public sealed class BillingService : IBillingService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        ForgetEntitlements();
+
         return new SubscriptionSnapshot(
             MapSubscription(subscription, plan),
             MapPlan(plan),
@@ -371,6 +415,8 @@ public sealed class BillingService : IBillingService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        ForgetEntitlements();
+
         return new SubscriptionSnapshot(
             MapSubscription(subscription, plan),
             MapPlan(plan),
@@ -390,6 +436,8 @@ public sealed class BillingService : IBillingService
         subscription.NextRenewalAt = request.Enabled ? subscription.CurrentPeriodEnd : null;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        ForgetEntitlements();
 
         return new SubscriptionSnapshot(
             MapSubscription(subscription, plan),

@@ -2,6 +2,38 @@ using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Application.DTOs.Platform;
 
+/// <summary>
+/// How platform staff ask for the Admin accounts.
+/// </summary>
+/// <remarks>
+/// Paging is opt-in, the same bargain the notifications route strikes: with neither <c>page</c>
+/// nor <c>pageSize</c> the route answers with the plain array it always has. Search and status
+/// apply either way.
+/// </remarks>
+public sealed class AdminAccountQuery
+{
+    /// <summary>Rows the admins table renders per page.</summary>
+    public const int DefaultPageSize = 12;
+
+    /// <summary>Largest page a caller may ask for.</summary>
+    public const int MaxPageSize = 100;
+
+    /// <summary>One-based page number, or null when the caller did not ask for a page.</summary>
+    public int? Page { get; init; }
+
+    /// <summary>Rows per page, or null to use <see cref="DefaultPageSize"/>.</summary>
+    public int? PageSize { get; init; }
+
+    /// <summary>Free text matched against the owner's name, their email and the organisation.</summary>
+    public string? Search { get; init; }
+
+    /// <summary>Account state to filter by, or null for every state.</summary>
+    public TenantAccountStatus? Status { get; init; }
+
+    /// <summary>Whether the caller asked for a page rather than the whole list.</summary>
+    public bool WantsPage => Page.HasValue || PageSize.HasValue;
+}
+
 /// <summary>An Admin account, as the platform screens list it.</summary>
 /// <param name="Id">Opaque identifier, prefixed <c>adm_</c>. This is what <c>?adminId=</c> carries.</param>
 /// <param name="Name">Full name of the account owner.</param>

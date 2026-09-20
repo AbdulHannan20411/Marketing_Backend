@@ -5,6 +5,7 @@ using Marketing.Common.Exceptions;
 using Marketing.Common.Helpers;
 using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;
+using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Application.Services;
 
@@ -53,6 +54,62 @@ public sealed class NotificationService : INotificationService
             cancellationToken);
 
         return [.. rows.Select(Map)];
+    }
+
+    /// <inheritdoc />
+    public async Task<NotificationFeed> GetPageAsync(
+        NotificationQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var userId = _currentUser.UserId;
+        var mine = Scoped(userId);
+
+        var size = Math.Clamp(query.PageSize ?? NotificationQuery.DefaultPageSize, 1, NotificationQuery.MaxPageSize);
+        var page = Math.Max(query.Page ?? 1, 1);
+
+        var matching = mine;
+
+        if (query.UnreadOnly == true)
+        {
+            matching = matching.Where(notification => !notification.Read);
+        }
+
+        if (query.Priority is { } priority)
+        {
+            matching = matching.Where(notification => notification.Priority == priority);
+        }
+
+        var total = await _queries.CountAsync(matching, cancellationToken);
+
+        var rows = await _queries.ToListAsync(
+            matching
+                .OrderByDescending(notification => notification.OccurredOn)
+                .ThenByDescending(notification => notification.Id)
+                .Skip((page - 1) * size)
+                .Take(size),
+            cancellationToken);
+
+        // Over everything addressed to the caller, not over the page and not over the filters: the
+        // bell is a count of unread mail, and it would be wrong the moment someone filtered by
+        // "critical" or turned to page two.
+        var unread = await _queries.CountAsync(
+            mine.Where(notification => !notification.Read),
+            cancellationToken);
+
+        var critical = await _queries.CountAsync(
+            mine.Where(notification => !notification.Read && notification.Priority == NotificationPriority.Critical),
+            cancellationToken);
+
+        return new NotificationFeed(
+            [.. rows.Select(Map)],
+            page,
+            size,
+            total,
+            total == 0 ? 1 : (int)Math.Ceiling(total / (double)size),
+            unread,
+            critical);
     }
 
     /// <inheritdoc />

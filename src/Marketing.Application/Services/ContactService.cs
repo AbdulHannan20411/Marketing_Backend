@@ -173,6 +173,22 @@ public sealed class ContactService : IContactService
     public async Task<IReadOnlyList<ContactGroupResponse>> GetGroupsAsync(
         CancellationToken cancellationToken = default)
     {
+        var all = await GetGroupsAsync(new OptionalPageRequest(), cancellationToken);
+
+        return all.Items;
+    }
+
+    /// <inheritdoc />
+    public async Task<PagedResult<ContactGroupResponse>> GetGroupsAsync(
+        OptionalPageRequest query,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var total = await _queries.CountAsync(_groups.Query(), cancellationToken);
+        var size = query.Size();
+        var page = query.Number;
+
         // Counted in the same query rather than in a second pass, so the number a group reports
         // and the number the contacts list returns for the same filter cannot disagree.
         var projected = _groups.Query()
@@ -187,20 +203,45 @@ public sealed class ContactService : IContactService
                 group.ModifiedOn,
             });
 
+        if (query.WantsPage)
+        {
+            projected = projected.Skip((page - 1) * size).Take(size);
+        }
+
         var rows = await _queries.ToListAsync(projected, cancellationToken);
 
-        return [.. rows.Select(row => new ContactGroupResponse(
-            PublicId.From(PublicId.Group, row.Id),
-            row.Name,
-            row.Description,
-            row.ContactCount,
-            row.CreatedOn,
-            row.ModifiedOn ?? row.CreatedOn))];
+        return new PagedResult<ContactGroupResponse>(
+            [.. rows.Select(row => new ContactGroupResponse(
+                PublicId.From(PublicId.Group, row.Id),
+                row.Name,
+                row.Description,
+                row.ContactCount,
+                row.CreatedOn,
+                row.ModifiedOn ?? row.CreatedOn))],
+            total,
+            page,
+            query.WantsPage ? size : Math.Max(total, 1));
     }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<ContactTagResponse>> GetTagsAsync(CancellationToken cancellationToken = default)
     {
+        var all = await GetTagsAsync(new OptionalPageRequest(), cancellationToken);
+
+        return all.Items;
+    }
+
+    /// <inheritdoc />
+    public async Task<PagedResult<ContactTagResponse>> GetTagsAsync(
+        OptionalPageRequest query,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var total = await _queries.CountAsync(_tags.Query(), cancellationToken);
+        var size = query.Size();
+        var page = query.Number;
+
         var projected = _tags.Query()
             .OrderBy(tag => tag.Name)
             .Select(tag => new
@@ -213,14 +254,23 @@ public sealed class ContactService : IContactService
                 tag.CreatedOn,
             });
 
+        if (query.WantsPage)
+        {
+            projected = projected.Skip((page - 1) * size).Take(size);
+        }
+
         var rows = await _queries.ToListAsync(projected, cancellationToken);
 
-        return [.. rows.Select(row => new ContactTagResponse(
-            PublicId.From(PublicId.Tag, row.Id),
-            row.Name,
-            row.Color,
-            row.ContactCount,
-            row.CreatedOn))];
+        return new PagedResult<ContactTagResponse>(
+            [.. rows.Select(row => new ContactTagResponse(
+                PublicId.From(PublicId.Tag, row.Id),
+                row.Name,
+                row.Color,
+                row.ContactCount,
+                row.CreatedOn))],
+            total,
+            page,
+            query.WantsPage ? size : Math.Max(total, 1));
     }
 
     private async Task<PagedResult<ContactResponse>> PageAsync(

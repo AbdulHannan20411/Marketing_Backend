@@ -117,25 +117,33 @@ public sealed class GroupsController : ApiControllerBase
         _scope = scope;
     }
 
-    /// <summary>Returns every group with a live member count.</summary>
+    /// <summary>Returns groups with a live member count.</summary>
     /// <remarks>
-    /// Unpaged: the screen is a card grid. The count each group reports is the same number
-    /// <c>GET /contacts?groupId=</c> returns as <c>totalItems</c>, because both are computed from
-    /// the same non-deleted membership rows.
+    /// Paging is optional: without <c>page</c> or <c>pageSize</c> this is the plain array the card
+    /// grid has always read, and with either it is a <c>PagedResult</c>. The count each group
+    /// reports is the same number <c>GET /contacts?groupId=</c> returns as <c>totalItems</c>,
+    /// because both are computed from the same non-deleted membership rows.
     /// </remarks>
+    /// <param name="query">Paging. Optional.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <response code="200">The groups.</response>
+    /// <response code="200">The groups, as an array or as a page.</response>
     [HttpGet]
     [RequirePermission(Permissions.Contacts.GroupsManage)]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<ContactGroupResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<ContactGroupResponse>>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAsync(
+        [FromQuery] OptionalPageRequest query,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(query);
+
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
-        return Success(await _contacts.GetGroupsAsync(cancellationToken));
+        var groups = await _contacts.GetGroupsAsync(query, cancellationToken);
+
+        return query.WantsPage ? SuccessPage(groups) : Success(groups.Items);
     }
 
     /// <summary>Returns a page of a group's members.</summary>
@@ -225,20 +233,31 @@ public sealed class TagsController : ApiControllerBase
         _scope = scope;
     }
 
-    /// <summary>Returns every tag with a live contact count.</summary>
+    /// <summary>Returns tags with a live contact count.</summary>
+    /// <remarks>
+    /// Paging is optional, exactly as it is for groups: no <c>page</c> or <c>pageSize</c> means
+    /// the plain array, either of them means a <c>PagedResult</c>.
+    /// </remarks>
+    /// <param name="query">Paging. Optional.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <response code="200">The tags.</response>
+    /// <response code="200">The tags, as an array or as a page.</response>
     [HttpGet]
     [RequirePermission(Permissions.Contacts.TagsManage)]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<ContactTagResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<ContactTagResponse>>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAsync(
+        [FromQuery] OptionalPageRequest query,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(query);
+
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
-        return Success(await _contacts.GetTagsAsync(cancellationToken));
+        var tags = await _contacts.GetTagsAsync(query, cancellationToken);
+
+        return query.WantsPage ? SuccessPage(tags) : Success(tags.Items);
     }
 
     /// <summary>Returns a page of the contacts carrying a tag.</summary>

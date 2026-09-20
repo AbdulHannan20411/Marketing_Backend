@@ -3,6 +3,7 @@ using System.Text;
 using AwesomeAssertions;
 using Marketing.Common.Exceptions;
 using Marketing.Infrastructure.Places;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -56,7 +57,10 @@ public sealed class PlacesGeocodeTests
         var provider = new GooglePlacesProvider(
             new HttpClient(handler),
             Options.Create(new PlacesOptions { ApiKey = apiKey }),
-            NullLogger<GooglePlacesProvider>.Instance);
+            NullLogger<GooglePlacesProvider>.Instance,
+
+            // A cache of its own per provider, so one test never answers another test's call.
+            new MemoryCache(new MemoryCacheOptions()));
 
         return (provider, handler);
     }

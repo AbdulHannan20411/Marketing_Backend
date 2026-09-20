@@ -53,7 +53,21 @@ public interface IContactService
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<IReadOnlyList<ContactGroupResponse>> GetGroupsAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Returns one page of groups, each with a live member count.</summary>
+    /// <param name="query">Paging.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<PagedResult<ContactGroupResponse>> GetGroupsAsync(
+        OptionalPageRequest query,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Returns every tag with a live contact count.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<IReadOnlyList<ContactTagResponse>> GetTagsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Returns one page of tags, each with a live contact count.</summary>
+    /// <param name="query">Paging.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<PagedResult<ContactTagResponse>> GetTagsAsync(
+        OptionalPageRequest query,
+        CancellationToken cancellationToken = default);
 }

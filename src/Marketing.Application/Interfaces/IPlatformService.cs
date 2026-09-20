@@ -16,6 +16,13 @@ public interface IPlatformService
     /// <summary>Returns every Admin account with its organisation's counters.</summary>
     public Task<IReadOnlyList<AdminAccount>> GetAdminAccountsAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Returns one page of Admin accounts, filtered and searched.</summary>
+    /// <param name="query">Paging, search and status filter.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<PagedResult<AdminAccount>> GetAdminAccountsAsync(
+        AdminAccountQuery query,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Returns aggregates across every Admin account.</summary>
     public Task<PlatformOverview> GetOverviewAsync(CancellationToken cancellationToken = default);
 

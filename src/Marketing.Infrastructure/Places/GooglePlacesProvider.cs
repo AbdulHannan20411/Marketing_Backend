@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Marketing.Application.Interfaces;
 using Marketing.Common.Exceptions;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -69,19 +70,33 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+    /// <summary>
+    /// How long an answer from Google is reused.
+    /// </summary>
+    /// <remarks>
+    /// A place's name and address do not change in half an hour, and the same pin is looked up
+    /// again every time the import screen is reopened. Each miss is a paid call that takes one to
+    /// two seconds; each hit costs nothing and returns immediately.
+    /// </remarks>
+    private static readonly TimeSpan AnswerLifetime = TimeSpan.FromMinutes(30);
+
     private readonly HttpClient _client;
     private readonly PlacesOptions _options;
+    private readonly IMemoryCache _cache;
     private readonly ILogger<GooglePlacesProvider> _logger;
 
     /// <summary>Initialises a new instance.</summary>
     /// <param name="client">HTTP client.</param>
     /// <param name="options">Provider settings, including the key.</param>
     /// <param name="logger">Logger.</param>
+    /// <param name="cache">Remembers what Google answered, so the same pin is not paid for twice.</param>
     public GooglePlacesProvider(
         HttpClient client,
         IOptions<PlacesOptions> options,
-        ILogger<GooglePlacesProvider> logger)
+        ILogger<GooglePlacesProvider> logger,
+        IMemoryCache cache)
     {
+        _cache = cache;
         ArgumentNullException.ThrowIfNull(options);
 
         _client = client;
@@ -99,6 +114,13 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
     {
         EnsureConfigured();
 
+        var key = $"places:text:{query.Trim().ToLowerInvariant()}";
+
+        if (_cache.TryGetValue<IReadOnlyList<PlaceSuggestion>>(key, out var remembered) && remembered is not null)
+        {
+            return remembered;
+        }
+
         var request = new HttpRequestMessage(HttpMethod.Post, SearchTextUrl)
         {
             Content = JsonContent.Create(new PlaceLookupRequest(query, SuggestionCount), options: Json),
@@ -108,8 +130,11 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
         request.Headers.Add("X-Goog-FieldMask", PlaceFieldMask);
 
         var payload = await SendAsync<SearchTextResponse>(request, cancellationToken);
+        IReadOnlyList<PlaceSuggestion> suggestions = [.. (payload?.Places ?? []).Select(ToSuggestion)];
 
-        return [.. (payload?.Places ?? []).Select(ToSuggestion)];
+        _cache.Set(key, suggestions, AnswerLifetime);
+
+        return suggestions;
     }
 
     /// <inheritdoc />
@@ -119,6 +144,17 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
         CancellationToken cancellationToken = default)
     {
         EnsureConfigured();
+
+        // Rounded to about a hundred metres, so nudging the pin hits the same answer rather than
+        // paying for another call - the same rounding the search cache already uses.
+        var key = string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"places:reverse:{latitude:F3},{longitude:F3}");
+
+        if (_cache.TryGetValue<PlaceSuggestion>(key, out var remembered))
+        {
+            return remembered;
+        }
 
         var request = new HttpRequestMessage(HttpMethod.Post, SearchNearbyUrl)
         {
@@ -141,8 +177,13 @@ public sealed partial class GooglePlacesProvider : IPlaceProvider
         var payload = await SendAsync<SearchTextResponse>(request, cancellationToken);
         var nearest = payload?.Places is { Count: > 0 } places ? places[0] : null;
 
-        // Null is a normal answer for a pin in open country, not an error.
-        return nearest is null ? null : ToSuggestion(nearest);
+        // Null is a normal answer for a pin in open country, not an error - and worth remembering,
+        // or every pin in a field is looked up again on every drag.
+        var suggestion = nearest is null ? null : ToSuggestion(nearest);
+
+        _cache.Set(key, suggestion, AnswerLifetime);
+
+        return suggestion;
     }
 
     /// <summary>

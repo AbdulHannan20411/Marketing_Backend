@@ -36,6 +36,11 @@ public sealed record RiskSignals(
 /// <param name="Reasons">Each signal that contributed, in plain words.</param>
 public sealed record RiskAssessment(RiskLevel Level, int Score, IReadOnlyList<string> Reasons);
 
+/// <summary>One account's signals and the verdict drawn from them.</summary>
+/// <param name="Signals">What the account's recent sign-ins look like.</param>
+/// <param name="Assessment">The level, score and reasons.</param>
+public sealed record AccountRiskSnapshot(RiskSignals Signals, RiskAssessment Assessment);
+
 /// <summary>Turns sign-in signals into a risk level with its reasons.</summary>
 /// <remarks>
 /// Additive and explainable on purpose. A Super Admin acting on this has to be able to say why an
@@ -140,6 +145,21 @@ public interface IAccountRiskEvaluator
     /// <param name="userId">Account to read.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<RiskSignals> SignalsAsync(long userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Assesses every account in a set of workspaces, in a fixed number of queries.
+    /// </summary>
+    /// <remarks>
+    /// The per-account method costs two queries. Asking it about a platform-wide screen therefore
+    /// costs two queries per person, which is how the security overview came to make one request
+    /// per customer. This reads the same two tables once for the whole set instead.
+    /// </remarks>
+    /// <param name="tenantIds">Workspaces to cover. Empty means no work and no rows.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A snapshot per account that has any recent activity, keyed by user id.</returns>
+    public Task<IReadOnlyDictionary<long, AccountRiskSnapshot>> EvaluateTenantsAsync(
+        IReadOnlyCollection<long> tenantIds,
+        CancellationToken cancellationToken = default);
 }
 
 /// <inheritdoc cref="IAccountRiskEvaluator" />
@@ -175,6 +195,101 @@ public sealed class AccountRiskEvaluator : IAccountRiskEvaluator
     /// <inheritdoc />
     public async Task<RiskAssessment> EvaluateAsync(long userId, CancellationToken cancellationToken = default) =>
         RiskScorer.Score(await SignalsAsync(userId, cancellationToken));
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<long, AccountRiskSnapshot>> EvaluateTenantsAsync(
+        IReadOnlyCollection<long> tenantIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(tenantIds);
+
+        if (tenantIds.Count == 0)
+        {
+            return new Dictionary<long, AccountRiskSnapshot>();
+        }
+
+        var ids = tenantIds.Distinct().ToList();
+
+        var now = _clock.UtcNow;
+        var dayAgo = now.AddDays(-1);
+        var weekAgo = now.AddDays(-7);
+        var windowStart = now.AddDays(-_policy.DeviceWindowDays);
+        var activeSince = now.AddMinutes(-_policy.ActiveWindowMinutes);
+
+        // Two reads for the whole platform page, then the same arithmetic per account as the single
+        // assessment does - deliberately the same shape, so the two cannot drift apart.
+        var sessions = await _queries.ToListAsync(
+            _sessions.Query()
+                .IgnoreQueryFilters()
+                .Where(session =>
+                    !session.IsDeleted
+                    && session.TenantId != null
+                    && ids.Contains(session.TenantId.Value)
+                    && session.LastActivityAt >= windowStart)
+                .Select(session => new
+                {
+                    session.UserId,
+                    session.DeviceId,
+                    session.IpAddress,
+                    session.LastIpAddress,
+                    session.Location,
+                    session.LastActivityAt,
+                    session.RevokedAt,
+                }),
+            cancellationToken);
+
+        var events = await _queries.ToListAsync(
+            _events.Query()
+                .IgnoreQueryFilters()
+                .Where(securityEvent =>
+                    !securityEvent.IsDeleted
+                    && securityEvent.TenantId != null
+                    && ids.Contains(securityEvent.TenantId.Value)
+                    && securityEvent.OccurredAt >= dayAgo
+                    && (securityEvent.Kind == SecurityEventKind.SessionDisplaced
+                        || securityEvent.Kind == SecurityEventKind.FailedLogins
+                        || securityEvent.Kind == SecurityEventKind.NewDevice))
+                .Select(securityEvent => new { securityEvent.UserId, securityEvent.Kind }),
+            cancellationToken);
+
+        var sessionsByUser = sessions.ToLookup(session => session.UserId);
+        var eventsByUser = events.ToLookup(entry => entry.UserId);
+
+        var assessments = new Dictionary<long, AccountRiskSnapshot>();
+
+        foreach (var userId in sessionsByUser.Select(group => group.Key)
+                     .Union(eventsByUser.Select(group => group.Key)))
+        {
+            var own = sessionsByUser[userId].ToList();
+            var kinds = eventsByUser[userId].Select(entry => entry.Kind).ToList();
+
+            var ipsToday = own
+                .Where(session => session.LastActivityAt >= dayAgo)
+                .SelectMany(session => new[] { session.IpAddress, session.LastIpAddress })
+                .Where(ip => ip is { Length: > 0 })
+                .Distinct(StringComparer.Ordinal)
+                .Count();
+
+            var signals = new RiskSignals(
+                DevicesInWindow: own.Select(session => session.DeviceId).Distinct(StringComparer.Ordinal).Count(),
+                DeviceLimit: _policy.MaxDevicesPerUser,
+                DeviceWindowDays: _policy.DeviceWindowDays,
+                ActiveSessions: own.Count(session => session.RevokedAt == null && session.LastActivityAt >= activeSince),
+                DisplacedLast24Hours: kinds.Count(kind => kind == SecurityEventKind.SessionDisplaced),
+                DistinctIpsLast24Hours: ipsToday,
+                DistinctLocationsLast7Days: own
+                    .Where(session => session.LastActivityAt >= weekAgo && session.Location is { Length: > 0 })
+                    .Select(session => session.Location)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count(),
+                FailedLoginsLast24Hours: kinds.Count(kind => kind == SecurityEventKind.FailedLogins),
+                NewDeviceLast24Hours: kinds.Contains(SecurityEventKind.NewDevice));
+
+            assessments[userId] = new AccountRiskSnapshot(signals, RiskScorer.Score(signals));
+        }
+
+        return assessments;
+    }
 
     /// <inheritdoc />
     public async Task<RiskSignals> SignalsAsync(long userId, CancellationToken cancellationToken = default)

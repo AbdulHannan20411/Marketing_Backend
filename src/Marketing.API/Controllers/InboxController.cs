@@ -71,10 +71,12 @@ public sealed class InboxController : ApiControllerBase
         return Success(await _inbox.GetAsync(id, cancellationToken));
     }
 
-    /// <summary>Reads a conversation's messages, oldest first.</summary>
+    /// <summary>Reads a page of a conversation's messages, oldest first within the page.</summary>
     /// <param name="id">Public conversation identifier.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="pageSize">Rows per page.</param>
+    /// <param name="latest">Page from the newest message rather than the oldest.</param>
+    /// <param name="before">Public message id to read backwards from, exclusive.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">A page of messages.</response>
@@ -87,6 +89,8 @@ public sealed class InboxController : ApiControllerBase
         string id,
         [FromQuery] int page,
         [FromQuery] int pageSize,
+        [FromQuery] bool latest,
+        [FromQuery] string? before,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
@@ -96,6 +100,8 @@ public sealed class InboxController : ApiControllerBase
             id,
             page <= 0 ? 1 : page,
             pageSize <= 0 ? 50 : pageSize,
+            latest,
+            before,
             cancellationToken));
     }
 

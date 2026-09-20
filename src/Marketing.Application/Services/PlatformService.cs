@@ -1,5 +1,6 @@
 using Marketing.Application.DTOs.Platform;
 using Marketing.Application.Interfaces;
+using Marketing.Business.Extensions;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Constants;
 using Marketing.Common.Helpers;
@@ -57,13 +58,49 @@ public sealed class PlatformService : IPlatformService
     public async Task<IReadOnlyList<AdminAccount>> GetAdminAccountsAsync(
         CancellationToken cancellationToken = default)
     {
+        var all = await GetAdminAccountsAsync(new AdminAccountQuery(), cancellationToken);
+
+        return all.Items;
+    }
+
+    /// <inheritdoc />
+    public async Task<PagedResult<AdminAccount>> GetAdminAccountsAsync(
+        AdminAccountQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
         // Only platform staff reach this, and their tenant filter is bypassed, so these queries
         // legitimately span every tenant.
-        var admins = await _queries.ToListAsync(
-            _users.Query()
-                .Where(user => user.TenantId != null
-                               && user.UserRoles.Any(userRole =>
-                                   !userRole.IsDeleted && userRole.Role.Name == Roles.Admin))
+        var matching = _users.Query()
+            .Where(user => user.TenantId != null
+                           && user.UserRoles.Any(userRole =>
+                               !userRole.IsDeleted && userRole.Role.Name == Roles.Admin))
+            .WhereMatchesAdminSearch(query.Search);
+
+        if (query.Status is { } wanted)
+        {
+            // Filtered on the stored state rather than on the mapped one, because the mapping is a
+            // C# switch the database knows nothing about: "suspended" is everything that is neither
+            // active nor pending, which is why it is written as an exclusion.
+            matching = wanted switch
+            {
+                TenantAccountStatus.Active => matching.Where(user =>
+                    user.Tenant!.Status == AppConstants.TenantStatus.Active),
+                TenantAccountStatus.Trialing => matching.Where(user =>
+                    user.Tenant!.Status == AppConstants.TenantStatus.Pending),
+                _ => matching.Where(user =>
+                    user.Tenant!.Status != AppConstants.TenantStatus.Active
+                    && user.Tenant.Status != AppConstants.TenantStatus.Pending),
+            };
+        }
+
+        var total = await _queries.CountAsync(matching, cancellationToken);
+
+        var size = Math.Clamp(query.PageSize ?? AdminAccountQuery.DefaultPageSize, 1, AdminAccountQuery.MaxPageSize);
+        var page = Math.Max(query.Page ?? 1, 1);
+
+        var rows = matching
                 .OrderBy(user => user.DisplayName)
                 .Select(user => new AdminRow(
                     user.Id,
@@ -75,12 +112,20 @@ public sealed class PlatformService : IPlatformService
                     user.Tenant.Status,
                     user.Tenant.MessagesThisMonth,
                     user.Tenant.LastActiveOn,
-                    user.CreatedOn)),
-            cancellationToken);
+                    user.CreatedOn));
+
+        // Only the page is counted up below, so a platform with a thousand customers does the same
+        // amount of work to draw twelve rows as a platform with twelve.
+        if (query.WantsPage)
+        {
+            rows = rows.Skip((page - 1) * size).Take(size);
+        }
+
+        var admins = await _queries.ToListAsync(rows, cancellationToken);
 
         if (admins.Count == 0)
         {
-            return [];
+            return new PagedResult<AdminAccount>([], total, page, size);
         }
 
         var tenantIds = admins.Select(admin => admin.TenantId).Distinct().ToList();
@@ -103,7 +148,7 @@ public sealed class PlatformService : IPlatformService
                 }),
             cancellationToken);
 
-        return [.. admins.Select(admin => new AdminAccount(
+        var accounts = admins.Select(admin => new AdminAccount(
             PublicId.From(PublicId.AdminAccount, admin.Id),
             admin.DisplayName,
             Initials.From(admin.DisplayName),
@@ -123,7 +168,15 @@ public sealed class PlatformService : IPlatformService
             admin.MessagesThisMonth,
             admin.LastActiveOn ?? admin.CreatedOn,
             admin.CreatedOn,
-            PublicId.From(PublicId.Tenant, admin.TenantId)))];
+            PublicId.From(PublicId.Tenant, admin.TenantId)));
+
+        // Unpaged callers keep the whole list in one "page", so the counters stay honest rather
+        // than claiming there are pages the caller never asked about.
+        return new PagedResult<AdminAccount>(
+            [.. accounts],
+            total,
+            page,
+            query.WantsPage ? size : Math.Max(total, 1));
     }
 
     /// <inheritdoc />

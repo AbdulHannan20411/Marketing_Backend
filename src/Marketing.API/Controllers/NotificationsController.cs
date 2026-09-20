@@ -1,6 +1,7 @@
 using Asp.Versioning;
 using Marketing.Application.DTOs.Workspace;
 using Marketing.Application.Interfaces;
+using Marketing.Common.Constants;
 using Marketing.Common.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -34,17 +35,60 @@ public sealed class NotificationsController : ApiControllerBase
         _notifications = notifications;
     }
 
-    /// <summary>Returns the caller's most recent notifications, newest first.</summary>
+    /// <summary>Returns the caller's notifications, newest first.</summary>
     /// <remarks>
-    /// A bare list rather than a page. The set is capped server-side and backs a dropdown and a
-    /// notification centre, neither of which paginates; a paged history would be its own endpoint.
+    /// Two shapes from one route, chosen by whether the caller asked for a page:
+    /// <list type="bullet">
+    /// <item>no <c>page</c> and no <c>pageSize</c> - the plain array this route has always
+    /// returned, capped server-side, which the dropdown and the notification centre still use;</item>
+    /// <item>either of them - a <c>PagedResult</c>-shaped answer carrying two extra counters,
+    /// <c>unreadCount</c> and <c>criticalCount</c>.</item>
+    /// </list>
+    /// Those two counters are taken over everything addressed to the caller, ignoring the page and
+    /// the filters, because the bell means "unread", not "unread on this page".
+    /// <para>
+    /// The filters apply to both shapes, so narrowing the list does not force a caller to page it.
+    /// </para>
     /// </remarks>
+    /// <param name="query">Paging and filters. All optional.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <response code="200">The notifications.</response>
+    /// <response code="200">The notifications, as an array or as a page.</response>
     [HttpGet]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<AppNotification>>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetAsync(CancellationToken cancellationToken) =>
-        Success(await _notifications.GetAsync(cancellationToken));
+    [ProducesResponseType(typeof(ApiResponse<NotificationFeed>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAsync(
+        [FromQuery] NotificationQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        if (query.WantsPage)
+        {
+            var feed = await _notifications.GetPageAsync(query, cancellationToken);
+
+            Response.Headers[AppConstants.Headers.TotalCount] =
+                feed.TotalItems.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            return Success(feed);
+        }
+
+        if (query.UnreadOnly == true || query.Priority is not null)
+        {
+            // Filtered but unpaged: the same rows, in the shape the caller already handles.
+            var filtered = await _notifications.GetPageAsync(
+                new NotificationQuery
+                {
+                    PageSize = NotificationQuery.MaxPageSize,
+                    UnreadOnly = query.UnreadOnly,
+                    Priority = query.Priority,
+                },
+                cancellationToken);
+
+            return Success(filtered.Items);
+        }
+
+        return Success(await _notifications.GetAsync(cancellationToken));
+    }
 
     /// <summary>Marks one notification read.</summary>
     /// <remarks>

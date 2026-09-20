@@ -3,6 +3,8 @@ using Marketing.Application.DTOs.Security;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Exceptions;
 using Marketing.Common.Helpers;
+using Marketing.Common.Requests;
+using Marketing.Common.Responses;
 using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;
 using Microsoft.EntityFrameworkCore;
@@ -23,6 +25,20 @@ public interface ISecurityOverviewService
         long tenantId,
         bool includeRisk,
         long? viewerUserId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Every workspace's security posture, riskiest first, one page at a time.
+    /// </summary>
+    /// <remarks>
+    /// Exists so the platform screen is one request rather than one per customer. Risk is evaluated
+    /// in bulk, and the ordering is computed across the whole platform, so page one really is the
+    /// page that matters rather than the first ten workspaces alphabetically.
+    /// </remarks>
+    /// <param name="query">Paging.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<PagedResult<OrganizationSecuritySummary>> GetPlatformSummaryAsync(
+        SecuritySummaryQuery query,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -253,6 +269,104 @@ public sealed class SecurityOverviewService : ISecurityOverviewService
             sessions.Select(session => session.DeviceId).Distinct(StringComparer.Ordinal).Count(),
             _policy.DeviceWindowDays,
             [.. ordered]);
+    }
+
+    /// <inheritdoc />
+    public async Task<PagedResult<OrganizationSecuritySummary>> GetPlatformSummaryAsync(
+        SecuritySummaryQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var now = _clock.UtcNow;
+        var windowStart = now.AddDays(-_policy.DeviceWindowDays);
+        var activeSince = now.AddMinutes(-_policy.ActiveWindowMinutes);
+
+        // Only platform staff reach this route, so the tenant filters are bypassed on purpose.
+        var workspaces = await _queries.ToListAsync(
+            _tenants.Query().IgnoreQueryFilters()
+                .Where(tenant => !tenant.IsDeleted)
+                .Select(tenant => new { tenant.Id, tenant.Name }),
+            cancellationToken);
+
+        if (workspaces.Count == 0)
+        {
+            return PagedResults.Empty<OrganizationSecuritySummary>(query.Page, query.PageSize);
+        }
+
+        var tenantIds = workspaces.Select(workspace => workspace.Id).ToList();
+
+        var people = await _queries.ToListAsync(
+            _users.Query().IgnoreQueryFilters()
+                .Where(user => !user.IsDeleted && user.TenantId != null && tenantIds.Contains(user.TenantId.Value))
+                .Select(user => new
+                {
+                    user.Id,
+                    TenantId = user.TenantId!.Value,
+                    user.Status,
+                    IsPlatformStaff = user.UserRoles.Any(userRole =>
+                        !userRole.IsDeleted && userRole.Role.Name == Common.Constants.Roles.SuperAdmin),
+                }),
+            cancellationToken);
+
+        // Platform staff are exempt from these checks everywhere else; counting them here would
+        // put our own sign-ins into a customer's numbers.
+        people = [.. people.Where(person => !person.IsPlatformStaff)];
+
+        var sessions = await _queries.ToListAsync(
+            _sessions.Query().IgnoreQueryFilters()
+                .Where(session =>
+                    !session.IsDeleted
+                    && session.TenantId != null
+                    && tenantIds.Contains(session.TenantId.Value)
+                    && session.RevokedAt == null
+                    && session.LastActivityAt >= activeSince
+                    && session.LastActivityAt >= windowStart)
+                .Select(session => new { TenantId = session.TenantId!.Value, session.UserId }),
+            cancellationToken);
+
+        var risk = await _risk.EvaluateTenantsAsync(tenantIds, cancellationToken);
+
+        var peopleByTenant = people.ToLookup(person => person.TenantId);
+        var sessionsByTenant = sessions.ToLookup(session => session.TenantId);
+
+        var rows = workspaces.Select(workspace =>
+        {
+            var members = peopleByTenant[workspace.Id].ToList();
+
+            var assessed = members
+                .Select(member => risk.GetValueOrDefault(member.Id))
+                .Where(snapshot => snapshot is not null)
+                .Select(snapshot => snapshot!)
+                .ToList();
+
+            return new OrganizationSecuritySummary(
+                PublicId.From(PublicId.Tenant, workspace.Id),
+                workspace.Name,
+                members.Count(member => member.Status == Common.Constants.AppConstants.UserStatus.Active),
+                sessionsByTenant[workspace.Id].Count(),
+                assessed.Count(snapshot => snapshot.Assessment.Level == RiskLevel.High),
+                assessed.Count(snapshot => snapshot.Assessment.Level == RiskLevel.Medium),
+                assessed.Count(snapshot =>
+                    snapshot.Signals.DevicesInWindow > snapshot.Signals.DeviceLimit
+                    || snapshot.Signals.DisplacedLast24Hours > 0));
+        });
+
+        // Ordered across every workspace before the page is cut, which is the whole point: page one
+        // is the ten customers worth looking at, not the ten whose names sort first.
+        var ordered = rows
+            .OrderByDescending(row => row.HighRisk)
+            .ThenByDescending(row => row.MediumRisk)
+            .ThenByDescending(row => row.NeedsAttention)
+            .ThenByDescending(row => row.ActiveSessions)
+            .ThenBy(row => row.OrganizationName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new PagedResult<OrganizationSecuritySummary>(
+            [.. ordered.Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)],
+            ordered.Count,
+            query.Page,
+            query.PageSize);
     }
 
     /// <inheritdoc />

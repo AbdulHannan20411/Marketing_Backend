@@ -3,6 +3,7 @@ using Marketing.API.Filters;
 using Marketing.Application.DTOs.Workspace;
 using Marketing.Application.Interfaces;
 using Marketing.Common.Constants;
+using Marketing.Common.Requests;
 using Marketing.Common.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -34,20 +35,31 @@ public sealed class EmployeesController : ApiControllerBase
         _scope = scope;
     }
 
-    /// <summary>Returns everyone in the workspace with their effective permissions.</summary>
+    /// <summary>Returns the workspace's people with their effective permissions.</summary>
+    /// <remarks>
+    /// Without <c>page</c> or <c>pageSize</c> this is the plain array it has always been; with
+    /// either it is a <c>PagedResult</c>. <c>search</c> matches name and email and applies to both.
+    /// </remarks>
+    /// <param name="query">Paging and search. All optional.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <response code="200">The employees.</response>
+    /// <response code="200">The employees, as an array or as a page.</response>
     [HttpGet]
     [RequirePermission(Permissions.Settings.Employees)]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<EmployeeResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<EmployeeResponse>>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAsync(
+        [FromQuery] OptionalPageRequest query,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(query);
+
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
-        return Success(await _employees.GetEmployeesAsync(cancellationToken));
+        var employees = await _employees.GetEmployeesAsync(query, cancellationToken);
+
+        return query.WantsPage ? SuccessPage(employees) : Success(employees.Items);
     }
 
     /// <summary>Invites an employee.</summary>

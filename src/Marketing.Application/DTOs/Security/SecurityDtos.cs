@@ -1,3 +1,4 @@
+using Marketing.Common.Requests;
 using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Application.DTOs.Security;
@@ -71,6 +72,45 @@ public sealed record EmployeeSecurityResponse(
 /// Recorded in the audit trail next to the server's own assessment, never trusted for anything else.
 /// </param>
 public sealed record SuspendAccountRequest(string? Reason, string? AlertLevel);
+
+/// <summary>How platform staff ask for the security summary.</summary>
+/// <remarks>
+/// Always paged, unlike the lists that grew paging later: this endpoint is new, so there is no
+/// unpaged shape anyone depends on, and the rows are expensive enough to be worth a ceiling.
+/// </remarks>
+public sealed class SecuritySummaryQuery : PageRequest
+{
+    /// <summary>Rows the security screen renders per page.</summary>
+    public const int TablePageSize = 10;
+
+    /// <summary>Initialises a new instance with the security screen's page size.</summary>
+    public SecuritySummaryQuery() => SetDefaultPageSize(TablePageSize);
+}
+
+/// <summary>One workspace's security posture, as the platform list shows it.</summary>
+/// <remarks>
+/// The counters answer "which customer should I look at first". Whether an individual is the
+/// problem is a question for <c>GET /superadmin/security/tenants/{tenantId}</c>, which is why no
+/// person is named here.
+/// </remarks>
+/// <param name="TenantId">Public tenant identifier, <c>tnt_…</c>.</param>
+/// <param name="OrganizationName">Workspace name.</param>
+/// <param name="People">Active members, platform staff excluded.</param>
+/// <param name="ActiveSessions">Sessions alive right now across everyone in the workspace.</param>
+/// <param name="HighRisk">Members scored high.</param>
+/// <param name="MediumRisk">Members scored medium.</param>
+/// <param name="NeedsAttention">
+/// Members over the device limit or displaced from a session in the last 24 hours - the two signals
+/// that mean a login is being shared, whatever the total score came to.
+/// </param>
+public sealed record OrganizationSecuritySummary(
+    string TenantId,
+    string OrganizationName,
+    int People,
+    int ActiveSessions,
+    int HighRisk,
+    int MediumRisk,
+    int NeedsAttention);
 
 /// <summary>A workspace's seats against how its logins are actually being used.</summary>
 /// <param name="OrganizationId">Public tenant identifier.</param>

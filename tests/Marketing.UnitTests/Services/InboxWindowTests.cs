@@ -150,7 +150,8 @@ public sealed class InboxWindowTests
     {
         _access.GetCallerScopeAsync(Arg.Any<CancellationToken>()).Returns(WhatsAppAccessScope.From([]));
 
-        var read = () => CreateService().GetMessagesAsync("cnv_9001", 1, 50, TestContext.Current.CancellationToken);
+        var read = () => CreateService().GetMessagesAsync(
+            "cnv_9001", 1, 50, cancellationToken: TestContext.Current.CancellationToken);
 
         await read.Should().ThrowAsync<NotFoundException>();
     }

@@ -59,6 +59,10 @@ public static class RealtimeExtensions
             });
         }
 
+        // Pushes are queued by the notifier and sent by the background service, so no request ever
+        // waits on the hub or its backplane.
+        services.AddSingleton<IRealtimeDispatcher, RealtimeDispatcher>();
+        services.AddHostedService<RealtimeDispatchService>();
         services.AddSingleton<IRealtimeNotifier, SignalRRealtimeNotifier>();
 
         // Groups are keyed by the tenant and user claims, so the default claim-based user id

@@ -207,7 +207,15 @@ public sealed partial class WhatsAppAccountService : IWhatsAppAccountService
 
         try
         {
-            var number = await _gateway.GetPhoneNumberAsync(phoneNumberId, accessToken, cancellationToken);
+            // Both at once: they are independent reads of the same account, and one after the other
+            // made a refresh cost two round trips to Meta rather than one.
+            var numberCall = _gateway.GetPhoneNumberAsync(phoneNumberId, accessToken, cancellationToken);
+
+            var accountCall = connection.WabaId is { Length: > 0 } waba && accessToken is not null
+                ? _gateway.GetBusinessAccountAsync(waba, accessToken, cancellationToken)
+                : null;
+
+            var number = await numberCall;
 
             connection.DisplayPhoneNumber = number.DisplayPhoneNumber;
             connection.VerifiedName = number.VerifiedName ?? connection.VerifiedName;
@@ -217,11 +225,9 @@ public sealed partial class WhatsAppAccountService : IWhatsAppAccountService
             connection.MessagingTier = ParseTier(number.MessagingTier) ?? connection.MessagingTier;
             connection.PhoneNumberStatus = number.Status ?? connection.PhoneNumberStatus;
 
-            if (connection.WabaId is { Length: > 0 } wabaId && accessToken is not null)
+            if (accountCall is not null)
             {
-                var account = await _gateway.GetBusinessAccountAsync(wabaId, accessToken, cancellationToken);
-
-                connection.AccountStatus = account.ReviewStatus ?? connection.AccountStatus;
+                connection.AccountStatus = (await accountCall).ReviewStatus ?? connection.AccountStatus;
             }
 
             // A successful round trip is itself the evidence the connection works, so the status is

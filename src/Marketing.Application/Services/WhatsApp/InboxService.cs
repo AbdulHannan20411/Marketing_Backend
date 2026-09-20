@@ -26,15 +26,35 @@ public interface IInboxService
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<ConversationResponse> GetAsync(string conversationId, CancellationToken cancellationToken = default);
 
-    /// <summary>Reads a thread's messages, oldest first.</summary>
+    /// <summary>
+    /// Reads a page of a thread's messages, always oldest-first within the page.
+    /// </summary>
+    /// <remarks>
+    /// Three ways to ask, because a chat is read from the end and paged towards the beginning:
+    /// <list type="bullet">
+    /// <item>by page from the start - the original behaviour, kept for callers that still use it;</item>
+    /// <item><paramref name="latest"/>, where page 1 is the newest messages and page 2 the ones before them;</item>
+    /// <item><paramref name="before"/>, the messages immediately older than one already on screen.</item>
+    /// </list>
+    /// The cursor is the one that survives a message arriving mid-read: page numbers shift by one
+    /// when that happens, so "load earlier" can repeat or skip a message.
+    /// <para>
+    /// In all three the returned <c>page</c> counts back from the newest when the caller asked from
+    /// the end, so <c>page * pageSize &lt; totalItems</c> means there are older messages still.
+    /// </para>
+    /// </remarks>
     /// <param name="conversationId">Public conversation identifier.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="pageSize">Rows per page.</param>
+    /// <param name="latest">Page from the newest message rather than the oldest.</param>
+    /// <param name="before">Public message id to read backwards from, exclusive.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<PagedResult<ConversationMessageResponse>> GetMessagesAsync(
         string conversationId,
         int page,
         int pageSize,
+        bool latest = false,
+        string? before = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>Sends a free-form reply from the number the customer wrote to.</summary>
@@ -225,22 +245,85 @@ public sealed class InboxService : IInboxService
         string conversationId,
         int page,
         int pageSize,
+        bool latest = false,
+        string? before = null,
         CancellationToken cancellationToken = default)
     {
         var conversation = await LoadAsync(conversationId, tracked: false, cancellationToken);
 
-        var messages = await _queries.ToPagedAsync(
-            _messages.Query()
-                .Where(message => message.ConversationId == conversation.Id)
-                // Oldest first, so the thread reads downwards the way a chat does.
-                .OrderBy(message => message.OccurredAt)
-                .ThenBy(message => message.Id)
-                .Include(message => message.Media),
-            page,
-            Math.Min(pageSize, MaximumPageSize),
-            cancellationToken);
+        var size = Math.Clamp(pageSize, 1, MaximumPageSize);
+        var wanted = Math.Max(page, 1);
 
-        return messages.Map(ToResponse);
+        // Whether the caller is paging backwards from the newest message or forwards from the
+        // oldest. The three ways of asking are really these two, plus how the end is found.
+        var fromEnd = latest || before is { Length: > 0 };
+
+        var thread = _messages.Query().Where(message => message.ConversationId == conversation.Id);
+        var total = await _queries.CountAsync(thread, cancellationToken);
+
+        // Where the window ends, counted from the oldest message. Everything else follows from it,
+        // and it is the only part the three ways of asking disagree about.
+        int windowEnd;
+
+        if (before is { Length: > 0 })
+        {
+            var cursorId = PublicId.Parse(PublicId.Message, before, "message");
+
+            var cursor = await _queries.FirstOrDefaultAsync(
+                thread.Where(message => message.Id == cursorId).Select(message => new { message.Id, message.OccurredAt }),
+                cancellationToken)
+                ?? throw new NotFoundException("Message", before);
+
+            // Everything strictly older than the message the caller already has. A message arriving
+            // while they read changes nothing here, which is the reason to prefer this over a page
+            // number: the boundary is a message, not a count.
+            windowEnd = await _queries.CountAsync(
+                thread.Where(message =>
+                    message.OccurredAt < cursor.OccurredAt
+                    || (message.OccurredAt == cursor.OccurredAt && message.Id < cursor.Id)),
+                cancellationToken);
+        }
+        else if (latest)
+        {
+            // Page 1 ends at the newest message, page 2 one page before it.
+            windowEnd = total - ((wanted - 1) * size);
+        }
+        else
+        {
+            // The original behaviour: page 1 starts at the oldest message.
+            windowEnd = Math.Min(total, wanted * size);
+        }
+
+        windowEnd = Math.Clamp(windowEnd, 0, total);
+
+        // Backwards, the window is the `size` messages ending there. Forwards, it starts where the
+        // page number says and ends there, so a page past the end asks for nothing.
+        var skip = fromEnd ? Math.Max(0, windowEnd - size) : (wanted - 1) * size;
+        var take = windowEnd - skip;
+
+        var items = take <= 0
+            ? []
+            : await _queries.ToListAsync(
+                thread
+                    // Oldest first, so the thread reads downwards the way a chat does.
+                    .OrderBy(message => message.OccurredAt)
+                    .ThenBy(message => message.Id)
+                    .Include(message => message.Media)
+                    .Skip(skip)
+                    .Take(take),
+                cancellationToken);
+
+        // Counted from whichever end the caller asked from, so "are there older messages" is the
+        // same sum either way: page * pageSize < totalItems.
+        var reported = fromEnd
+            ? ((total - windowEnd + size - 1) / size) + 1
+            : wanted;
+
+        return new PagedResult<ConversationMessageResponse>(
+            [.. items.Select(ToResponse)],
+            total,
+            Math.Max(reported, 1),
+            size);
     }
 
     /// <inheritdoc />

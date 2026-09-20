@@ -2,11 +2,14 @@ using Marketing.Application.DTOs.WhatsApp;
 using Marketing.Application.DTOs.Workspace;
 using Marketing.Application.Services.WhatsApp;
 using Marketing.Application.Interfaces;
+using Marketing.Business.Extensions;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Constants;
 using Marketing.Common.Exceptions;
 using Marketing.Common.Extensions;
 using Marketing.Common.Helpers;
+using Marketing.Common.Requests;
+using Marketing.Common.Responses;
 using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;
 using static Marketing.Common.Constants.AppConstants;
@@ -84,8 +87,30 @@ public sealed class EmployeeService : IEmployeeService
     public async Task<IReadOnlyList<EmployeeResponse>> GetEmployeesAsync(
         CancellationToken cancellationToken = default)
     {
-        var rows = await _queries.ToListAsync(
-            _users.Query()
+        var all = await GetEmployeesAsync(new OptionalPageRequest(), cancellationToken);
+
+        return all.Items;
+    }
+
+    /// <inheritdoc />
+    public async Task<PagedResult<EmployeeResponse>> GetEmployeesAsync(
+        OptionalPageRequest query,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var matching = _users.Query();
+
+        if (query.Search is { Length: > 0 } search)
+        {
+            matching = matching.WhereNameMatches(search.Trim());
+        }
+
+        var total = await _queries.CountAsync(matching, cancellationToken);
+        var size = query.Size();
+        var page = query.Number;
+
+        var projected = matching
                 .OrderBy(user => user.DisplayName)
                 .Select(user => new EmployeeRow(
                     user.Id,
@@ -99,14 +124,24 @@ public sealed class EmployeeService : IEmployeeService
                         .Select(entry => new OverrideRow(entry.Permission, entry.IsGranted)).ToList(),
                     user.LastLoginOn,
                     user.CreatedOn,
-                    user.DefaultWhatsAppConnectionId)),
-            cancellationToken);
+                    user.DefaultWhatsAppConnectionId));
+
+        if (query.WantsPage)
+        {
+            projected = projected.Skip((page - 1) * size).Take(size);
+        }
+
+        var rows = await _queries.ToListAsync(projected, cancellationToken);
 
         // One query for everyone's rows rather than one per person.
         var access = (await _queries.ToListAsync(_whatsAppAccess.Query(), cancellationToken))
             .ToLookup(row => row.UserId);
 
-        return [.. rows.Select(row => Map(row, access[row.Id]))];
+        return new PagedResult<EmployeeResponse>(
+            [.. rows.Select(row => Map(row, access[row.Id]))],
+            total,
+            page,
+            query.WantsPage ? size : Math.Max(total, 1));
     }
 
     /// <inheritdoc />

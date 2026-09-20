@@ -290,6 +290,21 @@ public sealed class SuperAdminSecurityController : ApiControllerBase
         _currentUser = currentUser;
     }
 
+    /// <summary>Every workspace's security posture, riskiest first.</summary>
+    /// <remarks>
+    /// One request for the whole screen. Before this existed the client listed the customers and
+    /// then asked about each one in turn, which was a request per customer to draw one page.
+    /// </remarks>
+    /// <param name="query">Paging. Defaults to ten workspaces.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">A page of workspaces, riskiest first.</response>
+    [HttpGet("summary")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<OrganizationSecuritySummary>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetSummaryAsync(
+        [FromQuery] SecuritySummaryQuery query,
+        CancellationToken cancellationToken) =>
+        SuccessPage(await _overview.GetPlatformSummaryAsync(query, cancellationToken));
+
     /// <summary>A workspace's seats, sessions, devices and each person's risk.</summary>
     /// <param name="tenantId">Public tenant identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

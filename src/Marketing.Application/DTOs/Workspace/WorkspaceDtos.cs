@@ -50,6 +50,62 @@ public sealed record PermissionSetResponse(
     IReadOnlyList<string> Permissions,
     int AssignedCount);
 
+/// <summary>
+/// How a caller asks for their notifications.
+/// </summary>
+/// <remarks>
+/// Paging is opt-in: with neither <c>page</c> nor <c>pageSize</c> the endpoint answers exactly as
+/// it always has, with a plain array. Filters apply either way, so a client can narrow the list
+/// before it starts paging it.
+/// </remarks>
+public sealed class NotificationQuery
+{
+    /// <summary>Rows the notification centre renders per page.</summary>
+    public const int DefaultPageSize = 20;
+
+    /// <summary>Largest page a caller may ask for.</summary>
+    public const int MaxPageSize = 100;
+
+    /// <summary>One-based page number, or null when the caller did not ask for a page.</summary>
+    public int? Page { get; init; }
+
+    /// <summary>Rows per page, or null to use <see cref="DefaultPageSize"/>.</summary>
+    public int? PageSize { get; init; }
+
+    /// <summary>Whether to return only what the recipient has not read.</summary>
+    public bool? UnreadOnly { get; init; }
+
+    /// <summary>Severity to filter by, or null for every severity.</summary>
+    public NotificationPriority? Priority { get; init; }
+
+    /// <summary>Whether the caller asked for a page rather than the whole list.</summary>
+    public bool WantsPage => Page.HasValue || PageSize.HasValue;
+}
+
+/// <summary>
+/// One page of notifications, with the counts the bell shows.
+/// </summary>
+/// <remarks>
+/// The paging fields are the usual <c>PagedResult</c> ones. The two counts are deliberately not:
+/// they are taken over everything addressed to the caller, ignoring both the page and the filters,
+/// because the bell means "unread", never "unread on this page" or "unread among critical ones".
+/// </remarks>
+/// <param name="Items">Notifications on this page, newest first.</param>
+/// <param name="Page">One-based page number.</param>
+/// <param name="PageSize">Rows per page.</param>
+/// <param name="TotalItems">Matching notifications across every page.</param>
+/// <param name="TotalPages">Number of pages, never below one.</param>
+/// <param name="UnreadCount">Unread notifications, whatever this page holds.</param>
+/// <param name="CriticalCount">Unread notifications of critical severity.</param>
+public sealed record NotificationFeed(
+    IReadOnlyList<AppNotification> Items,
+    int Page,
+    int PageSize,
+    int TotalItems,
+    int TotalPages,
+    int UnreadCount,
+    int CriticalCount);
+
 /// <summary>A notification.</summary>
 /// <param name="Id">Opaque identifier, prefixed <c>ntf_</c>.</param>
 /// <param name="Kind">What it is about.</param>

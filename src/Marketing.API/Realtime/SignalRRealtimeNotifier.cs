@@ -9,23 +9,15 @@ namespace Marketing.API.Realtime;
 /// <summary>SignalR implementation of <see cref="IRealtimeNotifier"/>.</summary>
 public sealed partial class SignalRRealtimeNotifier : IRealtimeNotifier
 {
-    /// <summary>
-    /// How long a push may take before the caller stops waiting for it.
-    /// </summary>
-    /// <remarks>
-    /// A push is a courtesy: the data is already saved, and every screen fetches it anyway. Waiting
-    /// on it puts the backplane's health inside the user's save button, which is how a campaign save
-    /// once took forty seconds against an unreachable Redis.
-    /// </remarks>
-    private static readonly TimeSpan PushBudget = TimeSpan.FromMilliseconds(750);
-
-    private readonly IHubContext<RealtimeHub> _hub;
+    private readonly IRealtimeDispatcher _queue;
     private readonly ILogger<SignalRRealtimeNotifier> _logger;
 
     /// <summary>Initialises a new instance.</summary>
-    public SignalRRealtimeNotifier(IHubContext<RealtimeHub> hub, ILogger<SignalRRealtimeNotifier> logger)
+    /// <param name="queue">Where pushes are left for the background sender.</param>
+    /// <param name="logger">Logger.</param>
+    public SignalRRealtimeNotifier(IRealtimeDispatcher queue, ILogger<SignalRRealtimeNotifier> logger)
     {
-        _hub = hub;
+        _queue = queue;
         _logger = logger;
     }
 
@@ -111,73 +103,59 @@ public sealed partial class SignalRRealtimeNotifier : IRealtimeNotifier
     /// dropped WebSocket roll back a successful campaign send would be absurd.
     /// </para>
     /// </summary>
-    /// <summary>Pushes to each person's own group, and to nobody else.</summary>
-    private async Task SendToUsersAsync<TPayload>(
+    /// <summary>Queues a push to each person's own group, and to nobody else.</summary>
+    private Task SendToUsersAsync<TPayload>(
         IReadOnlyCollection<long> userIds,
         string method,
         TPayload payload,
         CancellationToken cancellationToken)
     {
-        if (userIds.Count == 0)
+        if (userIds.Count == 0 || payload is null)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        var groups = userIds.Select(RealtimeHub.UserGroup).ToList();
-        var description = $"{groups.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)} users";
-
-        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-        budget.CancelAfter(PushBudget);
-
-        try
-        {
-            await _hub.Clients.Groups(groups).SendAsync(method, payload, budget.Token);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            LogPushTimedOut(method, description);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            LogPushFailed(exception, method, description);
-        }
+        return SendAsync([.. userIds.Select(RealtimeHub.UserGroup)], method, payload, cancellationToken);
     }
 
-    private async Task SendAsync<TPayload>(
+    private Task SendAsync<TPayload>(
         string group,
+        string method,
+        TPayload payload,
+        CancellationToken cancellationToken) =>
+        payload is null ? Task.CompletedTask : SendAsync([group], method, payload, cancellationToken);
+
+    /// <summary>
+    /// Leaves the push for the background sender and returns.
+    /// </summary>
+    /// <remarks>
+    /// Synchronous by nature: a channel write. Whatever the backplane is doing, the caller - which
+    /// has already saved the thing being announced - pays nothing for it.
+    /// </remarks>
+    private Task SendAsync<TPayload>(
+        IReadOnlyList<string> groups,
         string method,
         TPayload payload,
         CancellationToken cancellationToken)
     {
-        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (cancellationToken.IsCancellationRequested || payload is null)
+        {
+            return Task.CompletedTask;
+        }
 
-        budget.CancelAfter(PushBudget);
+        if (!_queue.TryEnqueue(new RealtimePush(groups, method, payload)))
+        {
+            // The queue drops the oldest when it is full, so this is close to unreachable; it
+            // matters only as the signal that the sender has stopped keeping up.
+            LogPushDropped(method, groups.Count);
+        }
 
-        try
-        {
-            await _hub.Clients.Group(group).SendAsync(method, payload, budget.Token);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            // The caller's own work is done and saved. Clients see this on their next fetch.
-            LogPushTimedOut(method, group);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            LogPushFailed(exception, method, group);
-        }
+        return Task.CompletedTask;
     }
 
     [LoggerMessage(
-        EventId = 4102,
+        EventId = 4104,
         Level = LogLevel.Warning,
-        Message = "Realtime push of {Method} to {Group} took too long and was abandoned; clients will see it on their next fetch.")]
-    private partial void LogPushTimedOut(string method, string group);
-
-    [LoggerMessage(
-        EventId = 4101,
-        Level = LogLevel.Warning,
-        Message = "Realtime push of {Method} to {Group} failed; clients will see it on their next fetch.")]
-    private partial void LogPushFailed(Exception exception, string method, string group);
+        Message = "Realtime push of {Method} to {GroupCount} group(s) was dropped: the sender is behind.")]
+    private partial void LogPushDropped(string method, int groupCount);
 }

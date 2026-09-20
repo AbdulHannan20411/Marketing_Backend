@@ -68,6 +68,32 @@ public static class SearchQueryExtensions
         return source.Where(template => EF.Functions.ILike(template.Name, $"%{term}%"));
     }
 
+    /// <summary>
+    /// Matches an Admin account on the owner's name, their email or the organisation's name.
+    /// </summary>
+    /// <remarks>
+    /// The organisation is what platform staff actually search by - they know the customer, rarely
+    /// the name of the person who signed up - so it is matched alongside the two user columns.
+    /// </remarks>
+    /// <param name="source">Query being composed.</param>
+    /// <param name="search">Search term. A blank term applies no filter.</param>
+    public static IQueryable<User> WhereMatchesAdminSearch(this IQueryable<User> source, string? search)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            return source;
+        }
+
+        var term = $"%{search.Trim()}%";
+
+        return source.Where(user =>
+            EF.Functions.ILike(user.DisplayName, term)
+            || EF.Functions.ILike(user.Email, term)
+            || (user.Tenant != null && EF.Functions.ILike(user.Tenant.Name, term)));
+    }
+
     /// <summary>Matches a user's display name or email, case-insensitively.</summary>
     public static IQueryable<User> WhereNameMatches(this IQueryable<User> source, string term)
     {

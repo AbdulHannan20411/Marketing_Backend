@@ -23,13 +23,29 @@ public sealed class SuperAdminController : ApiControllerBase
     /// <summary>Initialises a new instance.</summary>
     public SuperAdminController(IPlatformService platform) => _platform = platform;
 
-    /// <summary>Returns every Admin account with its organisation's counters.</summary>
-    /// <response code="200">The admin accounts.</response>
+    /// <summary>Returns Admin accounts with their organisation's counters.</summary>
+    /// <remarks>
+    /// Two shapes from one route: without <c>page</c> or <c>pageSize</c> it answers with the plain
+    /// array it always has, and with either of them it answers with a <c>PagedResult</c>. Search
+    /// and the status filter apply to both, so a caller can narrow the list without paging it.
+    /// </remarks>
+    /// <param name="query">Paging, search and status filter. All optional.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The admin accounts, as an array or as a page.</response>
     [HttpGet("admins")]
     [RequirePermission(Permissions.Platform.Tenants)]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<AdminAccount>>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetAdminsAsync(CancellationToken cancellationToken) =>
-        Success(await _platform.GetAdminAccountsAsync(cancellationToken));
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<AdminAccount>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAdminsAsync(
+        [FromQuery] AdminAccountQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var accounts = await _platform.GetAdminAccountsAsync(query, cancellationToken);
+
+        return query.WantsPage ? SuccessPage(accounts) : Success(accounts.Items);
+    }
 
     /// <summary>Returns aggregates across every Admin account.</summary>
     /// <response code="200">The platform overview.</response>
