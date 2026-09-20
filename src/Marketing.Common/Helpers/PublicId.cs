@@ -103,6 +103,9 @@ public static class PublicId
     /// <summary>Prefix for a workspace's WhatsApp numbers.</summary>
     public const string WhatsAppAccount = "wa";
 
+    /// <summary>Prefix for the example file a media-header template is submitted with.</summary>
+    public const string TemplateHeaderSample = "tsm";
+
     private const char Separator = '_';
 
     /// <summary>Formats a key as its public identifier.</summary>

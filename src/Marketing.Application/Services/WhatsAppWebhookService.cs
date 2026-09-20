@@ -42,6 +42,7 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
     private readonly IRealtimeNotifier _realtime;
     private readonly ITenantContext _tenantContext;
     private readonly IDateTimeProvider _clock;
+    private readonly Campaigns.ICampaignHeaderMedia _headerMedia;
     private readonly ILogger<WhatsAppWebhookService> _logger;
 
     /// <summary>Initialises a new instance.</summary>
@@ -58,6 +59,7 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
         IRealtimeNotifier realtime,
         ITenantContext tenantContext,
         IDateTimeProvider clock,
+        Campaigns.ICampaignHeaderMedia headerMedia,
         ILogger<WhatsAppWebhookService> logger)
     {
         _messages = messages;
@@ -72,6 +74,7 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
         _realtime = realtime;
         _tenantContext = tenantContext;
         _clock = clock;
+        _headerMedia = headerMedia;
         _logger = logger;
     }
 
@@ -522,7 +525,8 @@ public sealed partial class WhatsAppWebhookService : IWhatsAppWebhookService
             tenantId,
             CampaignMapper.ToResponse(
                 campaign,
-                await _connections.LabelsForTenantAsync(tenantId, cancellationToken)),
+                await _connections.LabelsForTenantAsync(tenantId, cancellationToken),
+                await _headerMedia.DescribeAsync(tenantId, [campaign.HeaderMediaId], cancellationToken)),
             cancellationToken);
     }
 

@@ -56,12 +56,17 @@ public interface IWhatsAppCloudApi
     /// <param name="authorization">
     /// Bearer token when the caller holds one, or null to use the stored one.
     /// </param>
+    /// <param name="fields">
+    /// Fields to return. Components are asked for so a sync learns each header's format; Meta's
+    /// default list omits them.
+    /// </param>
     [Get("/{wabaId}/message_templates")]
     public Task<GraphPage<WhatsAppTemplate>> GetTemplatesAsync(
         string wabaId,
         [AliasAs("limit")] int limit = 100,
         [AliasAs("after")] string? after = null,
         [Header("Authorization")] string? authorization = null,
+        [AliasAs("fields")] string fields = "id,name,language,status,category,components",
         CancellationToken cancellationToken = default);
 
     /// <summary>

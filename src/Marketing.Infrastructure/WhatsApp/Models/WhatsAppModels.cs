@@ -50,12 +50,21 @@ public sealed record WhatsAppPhoneNumber(
 /// <param name="Language">BCP 47 language tag.</param>
 /// <param name="Status">Review status: APPROVED, PENDING, REJECTED or PAUSED.</param>
 /// <param name="Category">Template category: MARKETING, UTILITY or AUTHENTICATION.</param>
+/// <param name="Components">Header, body, footer and buttons; read for the header's format.</param>
 public sealed record WhatsAppTemplate(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("language")] string Language,
     [property: JsonPropertyName("status")] string Status,
-    [property: JsonPropertyName("category")] string Category);
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("components")] IReadOnlyList<WhatsAppTemplateComponent>? Components = null);
+
+/// <summary>One component of a template as Meta lists it.</summary>
+/// <param name="Type"><c>HEADER</c>, <c>BODY</c>, <c>FOOTER</c> or <c>BUTTONS</c>.</param>
+/// <param name="Format">For a header: <c>TEXT</c>, <c>IMAGE</c>, <c>VIDEO</c>, <c>DOCUMENT</c> or <c>LOCATION</c>.</param>
+public sealed record WhatsAppTemplateComponent(
+    [property: JsonPropertyName("type")] string? Type,
+    [property: JsonPropertyName("format")] string? Format = null);
 
 /// <summary>Result of a send request.</summary>
 /// <param name="MessagingProduct">Always <c>whatsapp</c>.</param>
@@ -167,14 +176,81 @@ public sealed record TemplateComponent(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("parameters")] IReadOnlyList<TemplateParameter> Parameters);
 
-/// <summary>One template parameter value.</summary>
-/// <param name="Text">The substituted text.</param>
-public sealed record TemplateParameter([property: JsonPropertyName("text")] string Text)
+/// <summary>One template parameter: a text value, or the media a header carries.</summary>
+public sealed record TemplateParameter
 {
-    /// <summary>Always <c>text</c>; media parameters are not used by campaigns yet.</summary>
+    /// <summary>A text value filling a placeholder.</summary>
+    /// <param name="text">The substituted text.</param>
+    public TemplateParameter(string text)
+    {
+        Type = "text";
+        Text = text;
+    }
+
+    private TemplateParameter(string type, TemplateMediaReference media)
+    {
+        Type = type;
+
+        switch (type)
+        {
+            case "image":
+                Image = media;
+                break;
+            case "video":
+                Video = media;
+                break;
+            default:
+                Document = media;
+                break;
+        }
+    }
+
+    /// <summary><c>text</c>, <c>image</c>, <c>video</c> or <c>document</c>.</summary>
     [JsonPropertyName("type")]
-    public string Type { get; } = "text";
+    public string Type { get; }
+
+    /// <summary>The substituted text, for a text parameter.</summary>
+    [JsonPropertyName("text")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Text { get; }
+
+    /// <summary>The image, for an image header.</summary>
+    [JsonPropertyName("image")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TemplateMediaReference? Image { get; }
+
+    /// <summary>The video, for a video header.</summary>
+    [JsonPropertyName("video")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TemplateMediaReference? Video { get; }
+
+    /// <summary>The document, for a document header.</summary>
+    [JsonPropertyName("document")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TemplateMediaReference? Document { get; }
+
+    /// <summary>A header's media, by Meta media id.</summary>
+    /// <param name="kind"><c>image</c>, <c>video</c> or <c>document</c>.</param>
+    /// <param name="mediaId">Meta's id for the file, valid for the sending number.</param>
+    /// <param name="fileName">
+    /// The name the customer sees, for a document. Without it WhatsApp shows "Untitled".
+    /// </param>
+    public static TemplateParameter ForMedia(string kind, string mediaId, string? fileName) => kind switch
+    {
+        "image" or "video" => new TemplateParameter(kind, new TemplateMediaReference(mediaId)),
+        "document" => new TemplateParameter(kind, new TemplateMediaReference(mediaId, fileName)),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "A header carries an image, video or document."),
+    };
 }
+
+/// <summary>Media referred to by Meta's id.</summary>
+/// <param name="Id">Meta's media id.</param>
+/// <param name="FileName">Name shown to the customer, for a document.</param>
+public sealed record TemplateMediaReference(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("filename")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? FileName = null);
 
 /// <summary>
 /// Graph's acknowledgement of a write it has nothing else to say about.

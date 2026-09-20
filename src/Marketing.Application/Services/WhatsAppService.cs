@@ -71,6 +71,7 @@ public sealed class WhatsAppService : IWhatsAppService
 {
     private readonly Services.WhatsApp.IWhatsAppAccessService _access;
     private readonly Services.WhatsApp.IWhatsAppAccountService _accounts;
+    private readonly Services.WhatsApp.ITemplateHeaderSampleService _headerSamples;
     private readonly IRepository<MessageTemplate> _templates;
     private readonly IQueryExecutor _queries;
     private readonly IWhatsAppGateway _gateway;
@@ -83,6 +84,7 @@ public sealed class WhatsAppService : IWhatsAppService
     public WhatsAppService(
         Services.WhatsApp.IWhatsAppAccessService access,
         Services.WhatsApp.IWhatsAppAccountService accounts,
+        Services.WhatsApp.ITemplateHeaderSampleService headerSamples,
         IRepository<MessageTemplate> templates,
         IQueryExecutor queries,
         IWhatsAppGateway gateway,
@@ -93,6 +95,7 @@ public sealed class WhatsAppService : IWhatsAppService
     {
         _access = access;
         _accounts = accounts;
+        _headerSamples = headerSamples;
         _templates = templates;
         _queries = queries;
         _gateway = gateway;
@@ -198,9 +201,13 @@ public sealed class WhatsAppService : IWhatsAppService
                 template.CreatedOn,
                 template.RejectionReason,
                 template.HeaderKind,
+                template.HeaderSampleId,
+                template.BodyExamples,
+                template.HeaderExample,
             });
 
         var page = await _queries.ToPagedAsync(projected, query.Page, query.PageSize, cancellationToken);
+        var samples = await _headerSamples.DescribeAsync(page.Items.Select(row => row.HeaderSampleId), cancellationToken);
 
         return page.Map(row => new MessageTemplateResponse(
             PublicId.From(PublicId.Template, row.Id),
@@ -217,7 +224,10 @@ public sealed class WhatsAppService : IWhatsAppService
             row.TimesUsed,
             row.ModifiedOn ?? row.CreatedOn,
             row.RejectionReason,
-            row.HeaderKind));
+            row.HeaderKind,
+            row.HeaderSampleId is { } sampleId && samples.TryGetValue(sampleId, out var sample) ? sample : null,
+            row.BodyExamples,
+            row.HeaderExample));
     }
 
     /// <inheritdoc />
@@ -286,8 +296,13 @@ public sealed class WhatsAppService : IWhatsAppService
                     template.CreatedOn,
                     template.RejectionReason,
                     template.HeaderKind,
+                    template.HeaderSampleId,
+                    template.BodyExamples,
+                    template.HeaderExample,
                 }),
             cancellationToken);
+
+        var samples = await _headerSamples.DescribeAsync(rows.Select(row => row.HeaderSampleId), cancellationToken);
 
         return [.. rows.Select(row => new MessageTemplateResponse(
             PublicId.From(PublicId.Template, row.Id),
@@ -306,7 +321,10 @@ public sealed class WhatsAppService : IWhatsAppService
             row.TimesUsed,
             row.ModifiedOn ?? row.CreatedOn,
             row.RejectionReason,
-            row.HeaderKind))];
+            row.HeaderKind,
+            row.HeaderSampleId is { } sampleId && samples.TryGetValue(sampleId, out var sample) ? sample : null,
+            row.BodyExamples,
+            row.HeaderExample))];
     }
 
     /// <inheritdoc />
@@ -379,6 +397,18 @@ public sealed class WhatsAppService : IWhatsAppService
             local.Category = Enum.TryParse<TemplateCategory>(template.Category, true, out var category)
                 ? category
                 : local.Category;
+
+            // What Meta says the header is, so a template made in WhatsApp Manager with an image
+            // header asks the campaign for an image like one made here does.
+            local.HeaderKind = template.HeaderFormat?.ToUpperInvariant() switch
+            {
+                "TEXT" => TemplateHeaderKind.Text,
+                "IMAGE" => TemplateHeaderKind.Image,
+                "VIDEO" => TemplateHeaderKind.Video,
+                "DOCUMENT" => TemplateHeaderKind.Document,
+                null => TemplateHeaderKind.None,
+                _ => local.HeaderKind,
+            };
         }
 
         // Templates Meta no longer lists for this account are not deleted - a sync that removed a

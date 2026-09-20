@@ -89,6 +89,8 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<Services.WhatsApp.IWhatsAppAccessService, Services.WhatsApp.WhatsAppAccessService>();
         services.AddScoped<Services.WhatsApp.IWhatsAppAccountService, Services.WhatsApp.WhatsAppAccountService>();
         services.AddScoped<Services.WhatsApp.IMediaService, Services.WhatsApp.MediaService>();
+        services.AddScoped<Services.WhatsApp.ITemplateHeaderSampleService, Services.WhatsApp.TemplateHeaderSampleService>();
+        services.AddScoped<Services.Campaigns.ICampaignHeaderMedia, Services.Campaigns.CampaignHeaderMedia>();
         services.AddScoped<Services.WhatsApp.IInboxService, Services.WhatsApp.InboxService>();
         services.AddScoped<Services.WhatsApp.IInboundMessageService, Services.WhatsApp.InboundMessageService>();
         services.AddScoped<Services.WhatsApp.IAutoReplyAllowance, Services.WhatsApp.AutoReplyAllowanceReader>();

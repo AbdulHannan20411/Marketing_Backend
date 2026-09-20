@@ -64,7 +64,11 @@ public static class CampaignMapper
     /// <summary>Maps a campaign to its wire shape.</summary>
     /// <param name="campaign">The campaign.</param>
     /// <param name="accountLabels">The workspace's number labels, keyed by connection.</param>
-    public static CampaignResponse ToResponse(Campaign campaign, IReadOnlyDictionary<long, string> accountLabels)
+    /// <param name="headerMedia">Header files keyed by media id, from <see cref="ICampaignHeaderMedia.DescribeAsync"/>.</param>
+    public static CampaignResponse ToResponse(
+        Campaign campaign,
+        IReadOnlyDictionary<long, string> accountLabels,
+        IReadOnlyDictionary<long, DTOs.WhatsApp.MediaAssetResponse>? headerMedia = null)
     {
         ArgumentNullException.ThrowIfNull(campaign);
         ArgumentNullException.ThrowIfNull(accountLabels);
@@ -106,6 +110,9 @@ public static class CampaignMapper
             PublicId.FromNullable(PublicId.WhatsAppAccount, campaign.WhatsAppConnectionId),
             campaign.WhatsAppConnectionId is { } accountId && accountLabels.TryGetValue(accountId, out var label)
                 ? label
+                : null,
+            campaign.HeaderMediaId is { } mediaId && headerMedia is not null && headerMedia.TryGetValue(mediaId, out var media)
+                ? media
                 : null);
     }
 

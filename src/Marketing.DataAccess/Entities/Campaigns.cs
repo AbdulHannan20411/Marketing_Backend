@@ -21,6 +21,28 @@ public sealed class Campaign : BaseEntity, IRequiresTenant
     /// </summary>
     public long? WhatsAppConnectionId { get; set; }
 
+    /// <summary>
+    /// The image, video or document sent in the header of every message, when the template has a
+    /// media header. One of the workspace's stored media files.
+    /// </summary>
+    public long? HeaderMediaId { get; set; }
+
+    /// <summary>
+    /// Meta's id for <see cref="HeaderMediaId"/>, uploaded once for a run and reused for every
+    /// recipient in it.
+    /// </summary>
+    /// <remarks>
+    /// Meta's media ids belong to the number that uploaded them and expire after thirty days, so the
+    /// number and the time are kept with it and the file is uploaded again when either no longer fits.
+    /// </remarks>
+    public string? HeaderMetaMediaId { get; set; }
+
+    /// <summary>The number <see cref="HeaderMetaMediaId"/> was uploaded through.</summary>
+    public string? HeaderMetaMediaPhoneNumberId { get; set; }
+
+    /// <summary>When <see cref="HeaderMetaMediaId"/> was uploaded.</summary>
+    public DateTimeOffset? HeaderMetaMediaUploadedAt { get; set; }
+
     /// <summary>Lifecycle state.</summary>
     public CampaignStatus Status { get; set; } = CampaignStatus.Draft;
 

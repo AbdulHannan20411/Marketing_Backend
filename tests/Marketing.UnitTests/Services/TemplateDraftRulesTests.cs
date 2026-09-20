@@ -65,9 +65,85 @@ public sealed class TemplateDraftRulesTests
     [InlineData("image")]
     [InlineData("video")]
     [InlineData("document")]
-    public void Media_headers_are_refused_until_they_can_be_uploaded(string headerKind)
+    public void A_media_header_needs_its_example_file(string headerKind)
     {
-        ErrorsFor(Draft(headerKind: headerKind, headerText: null)).Should().ContainKey("headerKind");
+        ErrorsFor(Draft(headerKind: headerKind, headerText: null)).Should().ContainKey("headerSampleId");
+
+        var withSample = () => TemplateDraftRules.Validate(
+            Draft(headerKind: headerKind, headerText: null) with { HeaderSampleId = "tsm_7" });
+
+        withSample.Should().NotThrow();
+    }
+
+    [Fact]
+    public void An_audio_header_is_refused()
+    {
+        ErrorsFor(Draft(headerKind: "audio", headerText: null)).Should().ContainKey("headerKind");
+    }
+
+    [Fact]
+    public void Real_examples_are_sent_exactly_as_given()
+    {
+        var draft = Draft() with { BodyExamples = ["Ayesha", " ORD-1042 "] };
+
+        TemplateDraftRules.Validate(draft);
+
+        TemplateDraftRules.ToDefinition(draft).BodyExamples.Should().Equal("Ayesha", "ORD-1042");
+    }
+
+    [Fact]
+    public void Without_examples_an_older_client_still_gets_the_labelled_fallback()
+    {
+        TemplateDraftRules.ToDefinition(Draft()).BodyExamples.Should().Equal("Sample 1", "Sample 2");
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    public void The_wrong_number_of_examples_is_refused(int count)
+    {
+        ErrorsFor(Draft() with { BodyExamples = [.. Enumerable.Range(1, count).Select(index => $"Example {index}")] })
+            .Should().ContainKey("bodyExamples");
+    }
+
+    [Theory]
+    [InlineData("two\nlines")]
+    [InlineData("tab\there")]
+    [InlineData("too     many spaces")]
+    [InlineData("")]
+    public void A_malformed_example_is_refused(string bad)
+    {
+        ErrorsFor(Draft() with { BodyExamples = ["Ayesha", bad] }).Should().ContainKey("bodyExamples");
+    }
+
+    [Fact]
+    public void A_header_placeholder_is_allowed_with_its_example_and_refused_without()
+    {
+        var draft = Draft(headerText: "Order {{1}} is on its way") with { HeaderExample = "ORD-1042" };
+
+        TemplateDraftRules.Validate(draft);
+        TemplateDraftRules.ToDefinition(draft).HeaderExample.Should().Be("ORD-1042");
+
+        ErrorsFor(Draft(headerText: "Order {{1}} is on its way")).Should().ContainKey("headerExample");
+    }
+
+    [Theory]
+    [InlineData("Order {{2}}")]
+    [InlineData("{{1}} and {{2}}")]
+    [InlineData("*Sale* today")]
+    [InlineData("Sale \U0001F389")]
+    public void Header_rules_match_metas(string header)
+    {
+        ErrorsFor(Draft(headerText: header) with { HeaderExample = "x" }).Should().ContainKey("headerText");
+    }
+
+    [Theory]
+    [InlineData("{{1}} your order has shipped.")]
+    [InlineData("Your order has shipped, {{1}}")]
+    [InlineData("Hi {{1}}{{2}}, your order has shipped.")]
+    public void A_body_cannot_start_or_end_on_a_placeholder_or_put_two_together(string body)
+    {
+        ErrorsFor(Draft(body: body)).Should().ContainKey("bodyText");
     }
 
     [Fact]

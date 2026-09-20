@@ -347,6 +347,168 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
     private static string Bearer(string accessToken) => $"Bearer {accessToken}";
 
     /// <inheritdoc />
+    public async Task<string> UploadTemplateHeaderSampleAsync(
+        byte[] content,
+        string fileName,
+        string mimeType,
+        string accessToken,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+
+        if (string.IsNullOrWhiteSpace(_options.AppId))
+        {
+            throw UploadFailed("WhatsApp:AppId is not configured, so example files cannot be uploaded to Meta.");
+        }
+
+        // Not the Graph client: the upload session id contains a colon that Refit would escape, and
+        // the second call authenticates with "OAuth", not "Bearer". Both are plain HTTP.
+        using var client = _httpClientFactory.CreateClient(MediaDownloadClient);
+
+        var sessionId = await StartUploadSessionAsync(client, content.LongLength, fileName, mimeType, accessToken, cancellationToken)
+                        ?? (_options.SystemUserAccessToken is { Length: > 0 } systemToken
+                            // The business token may not be allowed to open an upload session against
+                            // this app. The app's own system-user token always is.
+                            ? await StartUploadSessionAsync(client, content.LongLength, fileName, mimeType, systemToken, cancellationToken)
+                            : null)
+                        ?? throw UploadFailed("Meta refused to open an upload session for the example file.");
+
+        var uploadToken = sessionId.Token;
+
+        try
+        {
+            return await SendUploadBytesAsync(client, sessionId.Id, uploadToken, content, 0, cancellationToken);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or ExternalServiceException { IsTransient: true })
+        {
+            // Resumed, not restarted: Meta says how much it already has.
+            LogUploadRetry(exception, fileName);
+
+            var offset = await UploadOffsetAsync(client, sessionId.Id, uploadToken, cancellationToken);
+
+            try
+            {
+                return await SendUploadBytesAsync(client, sessionId.Id, uploadToken, content, offset, cancellationToken);
+            }
+            catch (Exception retry) when (retry is HttpRequestException or ExternalServiceException)
+            {
+                throw UploadFailed(retry.Message);
+            }
+        }
+        catch (ExternalServiceException exception)
+        {
+            throw UploadFailed(exception.Message);
+        }
+    }
+
+    /// <summary>Opens a Resumable Upload session, or returns null when Meta refuses the token.</summary>
+    private async Task<(string Id, string Token)?> StartUploadSessionAsync(
+        HttpClient client,
+        long length,
+        string fileName,
+        string mimeType,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        var uri = $"{GraphRoot()}/{Uri.EscapeDataString(_options.AppId)}/uploads"
+                  + $"?file_name={Uri.EscapeDataString(fileName)}"
+                  + $"&file_length={length.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+                  + $"&file_type={Uri.EscapeDataString(mimeType)}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, uri);
+        request.Headers.TryAddWithoutValidation("Authorization", Bearer(accessToken));
+
+        using var response = await client.SendAsync(request, cancellationToken);
+
+        if ((int)response.StatusCode is 400 or 401 or 403)
+        {
+            LogUploadSessionRefused((int)response.StatusCode);
+
+            return null;
+        }
+
+        var body = await ReadJsonAsync(response, cancellationToken);
+
+        return body.TryGetProperty("id", out var id) && id.GetString() is { Length: > 0 } sessionId
+            ? (sessionId, accessToken)
+            : throw UploadFailed("Meta opened no upload session.");
+    }
+
+    /// <summary>Sends the bytes from an offset and returns the header handle.</summary>
+    private async Task<string> SendUploadBytesAsync(
+        HttpClient client,
+        string sessionId,
+        string accessToken,
+        byte[] content,
+        long offset,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{GraphRoot()}/{sessionId}");
+
+        // "OAuth", as Meta documents for this call, not "Bearer".
+        request.Headers.TryAddWithoutValidation("Authorization", $"OAuth {accessToken}");
+        request.Headers.TryAddWithoutValidation("file_offset", offset.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        request.Content = new ByteArrayContent(content, (int)offset, content.Length - (int)offset);
+        request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        var body = await ReadJsonAsync(response, cancellationToken);
+
+        return body.TryGetProperty("h", out var handle) && handle.GetString() is { Length: > 0 } value
+            ? value
+            : throw new ExternalServiceException("MetaWhatsAppCloudApi", "Meta took the example file but returned no handle.");
+    }
+
+    /// <summary>How many bytes of an interrupted upload Meta already holds.</summary>
+    private async Task<long> UploadOffsetAsync(
+        HttpClient client,
+        string sessionId,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{GraphRoot()}/{sessionId}");
+        request.Headers.TryAddWithoutValidation("Authorization", $"OAuth {accessToken}");
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        var body = await ReadJsonAsync(response, cancellationToken);
+
+        return body.TryGetProperty("file_offset", out var offset) && offset.TryGetInt64(out var value) ? value : 0;
+    }
+
+    private static async Task<System.Text.Json.JsonElement> ReadJsonAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        var text = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new ExternalServiceException(
+                "MetaWhatsAppCloudApi",
+                $"Meta's upload API returned {(int)response.StatusCode}.",
+                innerException: null,
+                isTransient: (int)response.StatusCode >= 500);
+        }
+
+        using var document = System.Text.Json.JsonDocument.Parse(text.Length == 0 ? "{}" : text);
+
+        return document.RootElement.Clone();
+    }
+
+    private string GraphRoot() => $"{_options.BaseUrl.TrimEnd('/')}/{_options.ApiVersion.Trim('/')}";
+
+    /// <summary>The refusal the client shows; the reason is for the log, not the customer.</summary>
+    private RequestRejectedException UploadFailed(string reason)
+    {
+        LogUploadFailed(reason);
+
+        return new RequestRejectedException(
+            System.Net.HttpStatusCode.BadGateway,
+            "meta_upload_failed",
+            "Meta did not accept the example file. Try again, or use a smaller file.");
+    }
+
+    /// <inheritdoc />
     public async Task<MetaTemplateSubmission> CreateTemplateAsync(
         string wabaId,
         MetaTemplateDefinition definition,
@@ -430,14 +592,16 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
                 TemplatePageSize,
                 cursor,
                 accessToken is null ? null : Bearer(accessToken),
-                cancellationToken);
+                cancellationToken: cancellationToken);
 
             templates.AddRange(response.Data.Select(template => new MetaTemplate(
                 template.Id,
                 template.Name,
                 template.Language,
                 template.Status,
-                template.Category)));
+                template.Category,
+                template.Components?.FirstOrDefault(component =>
+                    string.Equals(component.Type, "HEADER", StringComparison.OrdinalIgnoreCase))?.Format)));
 
             cursor = response.Paging?.Cursors?.After;
 
@@ -473,6 +637,7 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
         string templateName,
         string languageCode,
         IReadOnlyList<string> bodyParameters,
+        MetaHeaderMedia? headerMedia = null,
         string? accessToken = null,
         CancellationToken cancellationToken = default)
     {
@@ -481,12 +646,21 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
         // Meta expects the recipient as digits without a leading plus.
         var to = PhoneNumbers.Normalise(recipient);
 
-        var components = bodyParameters.Count == 0
-            ? null
-            : new List<TemplateComponent>
-            {
-                new("body", [.. bodyParameters.Select(value => new TemplateParameter(value))]),
-            };
+        var parts = new List<TemplateComponent>(2);
+
+        if (headerMedia is not null)
+        {
+            parts.Add(new TemplateComponent(
+                "header",
+                [TemplateParameter.ForMedia(headerMedia.Kind, headerMedia.MetaMediaId, headerMedia.FileName)]));
+        }
+
+        if (bodyParameters.Count > 0)
+        {
+            parts.Add(new TemplateComponent("body", [.. bodyParameters.Select(value => new TemplateParameter(value))]));
+        }
+
+        var components = parts.Count == 0 ? null : parts;
 
         var request = new SendTemplateMessageRequest(
             to,
@@ -506,6 +680,24 @@ public sealed partial class MetaWhatsAppGateway : IWhatsAppGateway
                 "MetaWhatsAppCloudApi",
                 "Meta accepted the send request but returned no message id.");
     }
+
+    [LoggerMessage(
+        EventId = 2612,
+        Level = LogLevel.Warning,
+        Message = "Uploading template example file {FileName} to Meta was interrupted; resuming once.")]
+    private partial void LogUploadRetry(Exception exception, string fileName);
+
+    [LoggerMessage(
+        EventId = 2614,
+        Level = LogLevel.Warning,
+        Message = "Uploading a template example file to Meta failed: {Reason}")]
+    private partial void LogUploadFailed(string reason);
+
+    [LoggerMessage(
+        EventId = 2613,
+        Level = LogLevel.Warning,
+        Message = "Meta refused to open an upload session ({StatusCode}).")]
+    private partial void LogUploadSessionRefused(int statusCode);
 
     [LoggerMessage(
         EventId = 2610,

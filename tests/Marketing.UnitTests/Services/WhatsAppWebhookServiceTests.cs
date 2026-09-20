@@ -79,6 +79,7 @@ public sealed class WhatsAppWebhookServiceTests
             _realtime,
             _tenantContext,
             new FixedDateTimeProvider(Now),
+            Substitute.For<Marketing.Application.Services.Campaigns.ICampaignHeaderMedia>(),
             NullLogger<WhatsAppWebhookService>.Instance);
 
     private CampaignMessage GivenMessage(CampaignMessageStatus status)

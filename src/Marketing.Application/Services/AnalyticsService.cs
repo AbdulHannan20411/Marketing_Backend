@@ -222,6 +222,8 @@ public sealed class CampaignService : ICampaignService
     private readonly IRepository<CampaignMessage> _messages;
     private readonly IQueryExecutor _queries;
     private readonly WhatsApp.IWhatsAppAccessService _access;
+    private readonly ICampaignHeaderMedia _headerMedia;
+    private readonly ITenantContext _tenantContext;
 
     /// <summary>Initialises a new instance.</summary>
     public CampaignService(
@@ -229,9 +231,13 @@ public sealed class CampaignService : ICampaignService
         IRepository<CampaignRun> runs,
         IRepository<CampaignMessage> messages,
         IQueryExecutor queries,
-        WhatsApp.IWhatsAppAccessService access)
+        WhatsApp.IWhatsAppAccessService access,
+        ICampaignHeaderMedia headerMedia,
+        ITenantContext tenantContext)
     {
         _access = access;
+        _headerMedia = headerMedia;
+        _tenantContext = tenantContext;
         _campaigns = campaigns;
         _runs = runs;
         _messages = messages;
@@ -250,7 +256,10 @@ public sealed class CampaignService : ICampaignService
             cancellationToken)
             ?? throw new NotFoundException("Campaign", campaignId);
 
-        return CampaignMapper.ToResponse(campaign, await _access.LabelsAsync(cancellationToken));
+        return CampaignMapper.ToResponse(
+            campaign,
+            await _access.LabelsAsync(cancellationToken),
+            await _headerMedia.DescribeAsync(_tenantContext.RequireTenantId(), [campaign.HeaderMediaId], cancellationToken));
     }
 
     /// <inheritdoc />
@@ -337,7 +346,9 @@ public sealed class CampaignService : ICampaignService
             cancellationToken);
 
         var labels = await _access.LabelsAsync(cancellationToken);
+        var media = await _headerMedia.DescribeAsync(
+            _tenantContext.RequireTenantId(), rows.Select(campaign => campaign.HeaderMediaId), cancellationToken);
 
-        return [.. rows.Select(campaign => CampaignMapper.ToResponse(campaign, labels))];
+        return [.. rows.Select(campaign => CampaignMapper.ToResponse(campaign, labels, media))];
     }
 }

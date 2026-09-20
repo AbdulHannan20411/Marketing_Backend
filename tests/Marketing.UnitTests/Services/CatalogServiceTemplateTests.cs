@@ -31,6 +31,8 @@ public sealed class CatalogServiceTemplateTests
     private readonly IWhatsAppGateway _gateway = Substitute.For<IWhatsAppGateway>();
     private readonly IQueryExecutor _queries = Substitute.For<IQueryExecutor>();
     private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
+    private readonly Marketing.Application.Services.WhatsApp.ITemplateHeaderSampleService _headerSamples =
+        Substitute.For<Marketing.Application.Services.WhatsApp.ITemplateHeaderSampleService>();
     private readonly List<MessageTemplate> _added = [];
 
     public CatalogServiceTemplateTests()
@@ -78,6 +80,7 @@ public sealed class CatalogServiceTemplateTests
             Substitute.For<IRepository<Campaign>>(),
             _connections,
             Substitute.For<Marketing.Application.Services.WhatsApp.IWhatsAppAccessService>(),
+            _headerSamples,
             _protector,
             _gateway,
             _queries,

@@ -78,6 +78,7 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
     private readonly IRealtimeNotifier _realtime;
     private readonly ITenantContext _tenantContext;
     private readonly IDateTimeProvider _clock;
+    private readonly Campaigns.ICampaignHeaderMedia _headerMedia;
     private readonly ILogger<CampaignDispatchService> _logger;
 
     /// <summary>Initialises a new instance.</summary>
@@ -97,6 +98,7 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
         IRealtimeNotifier realtime,
         ITenantContext tenantContext,
         IDateTimeProvider clock,
+        Campaigns.ICampaignHeaderMedia headerMedia,
         ILogger<CampaignDispatchService> logger)
     {
         _messages = messages;
@@ -114,6 +116,7 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
         _realtime = realtime;
         _tenantContext = tenantContext;
         _clock = clock;
+        _headerMedia = headerMedia;
         _logger = logger;
     }
 
@@ -224,6 +227,22 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
             return;
         }
 
+        // Uploaded to Meta once for the run and reused for every recipient - Meta's media ids belong
+        // to the sending number and expire, so a cached copy is replaced when either no longer fits.
+        // Stopped here rather than sent without it: Meta refuses a media-header template with no media.
+        MetaHeaderMedia? headerMedia;
+
+        try
+        {
+            headerMedia = await _headerMedia.PrepareForRunAsync(campaign, template, phoneNumberId, accessToken, cancellationToken);
+        }
+        catch (BusinessRuleException exception)
+        {
+            await AbandonAsync(campaign, exception.Message, cancellationToken);
+
+            return;
+        }
+
         await MaterialiseRecipientsAsync(campaign, cancellationToken);
 
         var allowance = await CalculateAllowanceAsync(connection, cancellationToken);
@@ -244,7 +263,7 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            await SendAsync(campaign, message, phoneNumberId, accessToken, template, cancellationToken);
+            await SendAsync(campaign, message, phoneNumberId, accessToken, template, headerMedia, cancellationToken);
 
             if (message.Status == CampaignMessageStatus.Sent)
             {
@@ -562,6 +581,7 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
         string phoneNumberId,
         string? accessToken,
         MessageTemplate template,
+        MetaHeaderMedia? headerMedia,
         CancellationToken cancellationToken)
     {
         message.AttemptCount++;
@@ -576,6 +596,7 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
                 // Empty by design: templates carrying placeholders are refused before the batch
                 // starts, so anything reaching here has nothing to substitute.
                 [],
+                headerMedia,
                 accessToken,
                 cancellationToken);
 
@@ -767,7 +788,8 @@ public sealed partial class CampaignDispatchService : ICampaignDispatchService
             tenantId,
             CampaignMapper.ToResponse(
                 campaign,
-                await _connections.LabelsForTenantAsync(tenantId, cancellationToken)),
+                await _connections.LabelsForTenantAsync(tenantId, cancellationToken),
+                await _headerMedia.DescribeAsync(tenantId, [campaign.HeaderMediaId], cancellationToken)),
             cancellationToken);
     }
 

@@ -45,6 +45,7 @@ public sealed record CampaignMetricsResponse(
 /// <param name="UpdatedAt">Instant it was last modified.</param>
 /// <param name="WhatsAppAccountId">The number it sends from, <c>wa_…</c>.</param>
 /// <param name="WhatsAppAccountLabel">What the workspace calls that number, denormalised for the list.</param>
+/// <param name="HeaderMedia">The file every message carries in its header; null when the template needs none.</param>
 public sealed record CampaignResponse(
     string Id,
     string Name,
@@ -66,7 +67,8 @@ public sealed record CampaignResponse(
     DateTimeOffset CreatedAt,
     DateTimeOffset? UpdatedAt,
     string? WhatsAppAccountId = null,
-    string? WhatsAppAccountLabel = null);
+    string? WhatsAppAccountLabel = null,
+    WhatsApp.MediaAssetResponse? HeaderMedia = null);
 
 /// <summary>Delivery counters for one firing.</summary>
 /// <param name="AudienceSize">Distinct contacts resolved at fire time.</param>

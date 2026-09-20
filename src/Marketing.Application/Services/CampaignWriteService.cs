@@ -82,6 +82,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
     private readonly ITenantContext _tenantContext;
     private readonly IDateTimeProvider _clock;
     private readonly WhatsApp.IWhatsAppAccessService _access;
+    private readonly ICampaignHeaderMedia _headerMedia;
 
     /// <summary>Initialises a new instance.</summary>
     public CampaignWriteService(
@@ -97,9 +98,11 @@ public sealed class CampaignWriteService : ICampaignWriteService
         ICurrentUser currentUser,
         ITenantContext tenantContext,
         IDateTimeProvider clock,
-        WhatsApp.IWhatsAppAccessService access)
+        WhatsApp.IWhatsAppAccessService access,
+        ICampaignHeaderMedia headerMedia)
     {
         _access = access;
+        _headerMedia = headerMedia;
         _campaigns = campaigns;
         _runs = runs;
         _recurrence = recurrence;
@@ -123,12 +126,14 @@ public sealed class CampaignWriteService : ICampaignWriteService
 
         var account = await ResolveAccountAsync(draft.WhatsAppAccountId, cancellationToken);
         var template = await LoadTemplateAsync(draft.TemplateId, account, cancellationToken);
+        var headerMediaId = await _headerMedia.ValidateAsync(template, draft.HeaderMediaId, cancellationToken);
         var tenantId = _tenantContext.RequireTenantId();
 
         var campaign = new Campaign
         {
             TenantId = tenantId,
             WhatsAppConnectionId = account?.Id,
+            HeaderMediaId = headerMediaId,
             Name = draft.Name.Trim(),
             MessageTemplateId = template.Id,
             TemplateName = template.Name,
@@ -171,6 +176,16 @@ public sealed class CampaignWriteService : ICampaignWriteService
             draft.WhatsAppAccountId ?? PublicId.FromNullable(PublicId.WhatsAppAccount, campaign.WhatsAppConnectionId),
             cancellationToken);
         var template = await LoadTemplateAsync(draft.TemplateId, account, cancellationToken);
+        var headerMediaId = await _headerMedia.ValidateAsync(template, draft.HeaderMediaId, cancellationToken);
+
+        if (campaign.HeaderMediaId != headerMediaId)
+        {
+            // A different file means Meta's copy of the old one is no use to the next run.
+            campaign.HeaderMediaId = headerMediaId;
+            campaign.HeaderMetaMediaId = null;
+            campaign.HeaderMetaMediaPhoneNumberId = null;
+            campaign.HeaderMetaMediaUploadedAt = null;
+        }
 
         campaign.WhatsAppConnectionId = account?.Id;
         campaign.Name = draft.Name.Trim();
@@ -218,6 +233,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
         // Scheduling is sending later. Connection is checked again when it fires, not here: a number
         // reconnected before Monday should still send on Monday.
         await DemandBroadcastAsync(campaign, requireConnected: false, cancellationToken);
+        await _headerMedia.EnsureStillValidAsync(campaign, cancellationToken);
 
         // The rule wins when there is one, including a "once" rule: it carries the timezone and a
         // bare instant does not, and the client sends both during the transition.
@@ -262,6 +278,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
         {
             TenantId = source.TenantId,
             WhatsAppConnectionId = source.WhatsAppConnectionId,
+            HeaderMediaId = source.HeaderMediaId,
             Name = $"{source.Name} (copy)",
             Description = source.Description,
             MessageTemplateId = source.MessageTemplateId,
@@ -346,6 +363,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
         }
 
         await DemandBroadcastAsync(campaign, requireConnected: true, cancellationToken);
+        await _headerMedia.EnsureStillValidAsync(campaign, cancellationToken);
 
         // A run already in flight is returned rather than a second one started. This is what makes
         // a double-clicked button safe: the second click gets the first run back, not a second send
@@ -465,6 +483,9 @@ public sealed class CampaignWriteService : ICampaignWriteService
         // Refused here, leaving the campaign unsent, rather than accepted and then failed one
         // recipient at a time by a number that cannot send.
         await DemandBroadcastAsync(campaign, requireConnected: true, cancellationToken);
+
+        // The template may have been replaced since the draft was saved.
+        await _headerMedia.EnsureStillValidAsync(campaign, cancellationToken);
 
         campaign.Status = CampaignStatus.Sending;
         campaign.ScheduledAt ??= _clock.UtcNow;
@@ -637,7 +658,10 @@ public sealed class CampaignWriteService : ICampaignWriteService
     }
 
     private async Task<CampaignResponse> MapAsync(Campaign campaign, CancellationToken cancellationToken) =>
-        CampaignMapper.ToResponse(campaign, await _access.LabelsAsync(cancellationToken));
+        CampaignMapper.ToResponse(
+            campaign,
+            await _access.LabelsAsync(cancellationToken),
+            await _headerMedia.DescribeAsync(_tenantContext.RequireTenantId(), [campaign.HeaderMediaId], cancellationToken));
 
     /// <summary>
     /// The number a campaign will send from, with broadcast demanded on it.

@@ -29,6 +29,14 @@ public sealed record ContactTagDraft(string Name, TagColor Color = TagColor.Neut
 /// <c>none</c>, <c>text</c>, <c>image</c>, <c>video</c> or <c>document</c>. When absent it is read from
 /// whether header text was given.
 /// </param>
+/// <param name="BodyExamples">
+/// One real example per body placeholder, <c>{{1}}</c> first. Meta rejects vague examples, so these
+/// are what it reviews. When absent, as from older clients, each is sent as "Sample n".
+/// </param>
+/// <param name="HeaderExample">The example for a text header's <c>{{1}}</c>; empty when it has none.</param>
+/// <param name="HeaderSampleId">
+/// The uploaded example file, <c>tsm_…</c>. Required for an image, video or document header.
+/// </param>
 public sealed record MessageTemplateDraft(
     string Name,
     TemplateCategory Category,
@@ -38,7 +46,10 @@ public sealed record MessageTemplateDraft(
     string? FooterText,
     IReadOnlyList<string>? Variables = null,
     IReadOnlyList<TemplateButtonDraft>? Buttons = null,
-    string? HeaderKind = null);
+    string? HeaderKind = null,
+    IReadOnlyList<string>? BodyExamples = null,
+    string? HeaderExample = null,
+    string? HeaderSampleId = null);
 
 /// <summary>Request to create or replace a campaign.</summary>
 /// <param name="Name">Campaign name.</param>
@@ -49,13 +60,18 @@ public sealed record MessageTemplateDraft(
 /// <param name="WhatsAppAccountId">
 /// The number that sends it, <c>wa_…</c>. Required once the workspace has more than one.
 /// </param>
+/// <param name="HeaderMediaId">
+/// The image, video or document sent in every message's header, <c>med_…</c> from
+/// <c>POST /whatsapp/media</c>. Required when the template has a media header; refused otherwise.
+/// </param>
 public sealed record CampaignDraft(
     string Name,
     string TemplateId,
     string AudienceLabel = "",
     IReadOnlyList<string>? GroupIds = null,
     string Description = "",
-    string? WhatsAppAccountId = null);
+    string? WhatsAppAccountId = null,
+    string? HeaderMediaId = null);
 
 /// <summary>
 /// Request to schedule a campaign, as a one-off instant or as a repeating rule.

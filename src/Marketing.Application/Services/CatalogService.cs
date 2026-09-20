@@ -58,6 +58,7 @@ public sealed class CatalogService : ICatalogService
     private readonly IRepository<Campaign> _campaigns;
     private readonly IWhatsAppConnectionRepository _connections;
     private readonly WhatsApp.IWhatsAppAccessService _access;
+    private readonly WhatsApp.ITemplateHeaderSampleService _headerSamples;
     private readonly ISecretProtector _protector;
     private readonly IWhatsAppGateway _gateway;
     private readonly IQueryExecutor _queries;
@@ -72,6 +73,7 @@ public sealed class CatalogService : ICatalogService
         IRepository<Campaign> campaigns,
         IWhatsAppConnectionRepository connections,
         WhatsApp.IWhatsAppAccessService access,
+        WhatsApp.ITemplateHeaderSampleService headerSamples,
         ISecretProtector protector,
         IWhatsAppGateway gateway,
         IQueryExecutor queries,
@@ -84,6 +86,7 @@ public sealed class CatalogService : ICatalogService
         _campaigns = campaigns;
         _connections = connections;
         _access = access;
+        _headerSamples = headerSamples;
         _protector = protector;
         _gateway = gateway;
         _queries = queries;
@@ -328,7 +331,7 @@ public sealed class CatalogService : ICatalogService
         TemplateDraftRules.Validate(draft);
 
         var account = await RequireAccountAsync(accountId, wabaId: null, cancellationToken);
-        var definition = TemplateDraftRules.ToDefinition(draft);
+        var (definition, sample) = await PrepareAsync(draft, account, cancellationToken);
 
         var existing = await _queries.FirstOrDefaultAsync(
             _templates.Query(asNoTracking: false).Where(template =>
@@ -376,8 +379,9 @@ public sealed class CatalogService : ICatalogService
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await LinkSampleAsync(template, sample, cancellationToken);
 
-        return Map(template);
+        return await MapAsync(template, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -403,7 +407,7 @@ public sealed class CatalogService : ICatalogService
         // The account the template already lives on, so editing one of Support's templates while
         // Sales is the default resubmits it to Support's account rather than copying it to Sales.
         var account = await RequireAccountAsync(accountId: null, template.WabaId, cancellationToken);
-        var definition = TemplateDraftRules.ToDefinition(draft);
+        var (definition, sample) = await PrepareAsync(draft, account, cancellationToken);
 
         if (template.MetaTemplateId is { Length: > 0 } metaTemplateId
             && string.Equals(template.WabaId, account.WabaId, StringComparison.Ordinal))
@@ -468,8 +472,57 @@ public sealed class CatalogService : ICatalogService
         template.RejectionReason = null;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await LinkSampleAsync(template, sample, cancellationToken);
 
-        return Map(template);
+        return await MapAsync(template, cancellationToken);
+    }
+
+    /// <summary>
+    /// Turns a validated draft into what Meta is sent - uploading a media header's example file
+    /// through the Resumable Upload API first, so the handle Meta reviews is always fresh.
+    /// </summary>
+    private async Task<(MetaTemplateDefinition Definition, TemplateHeaderSample? Sample)> PrepareAsync(
+        MessageTemplateDraft draft,
+        ConnectedAccount account,
+        CancellationToken cancellationToken)
+    {
+        var definition = TemplateDraftRules.ToDefinition(draft);
+        var headerKind = TemplateDraftRules.HeaderKindFor(draft);
+
+        if (headerKind is not (TemplateHeaderKind.Image or TemplateHeaderKind.Video or TemplateHeaderKind.Document))
+        {
+            return (definition, null);
+        }
+
+        var (sample, content) = await _headerSamples.LoadForSubmitAsync(draft.HeaderSampleId!, headerKind, cancellationToken);
+
+        var handle = await _gateway.UploadTemplateHeaderSampleAsync(
+            content,
+            sample.FileName,
+            sample.MimeType,
+            account.AccessToken,
+            cancellationToken);
+
+        return (definition with { HeaderHandle = handle }, sample);
+    }
+
+    /// <summary>Records which example file a template was submitted with, or that it has none.</summary>
+    private async Task LinkSampleAsync(MessageTemplate template, TemplateHeaderSample? sample, CancellationToken cancellationToken)
+    {
+        if (template.HeaderSampleId == sample?.Id && (sample is null || sample.MessageTemplateId == template.Id))
+        {
+            return;
+        }
+
+        template.HeaderSampleId = sample?.Id;
+
+        if (sample is not null)
+        {
+            // Attached, so the clean-up job leaves it alone.
+            sample.MessageTemplateId = template.Id;
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
     /// <inheritdoc />
@@ -538,6 +591,11 @@ public sealed class CatalogService : ICatalogService
         template.HeaderKind = TemplateDraftRules.HeaderKindFor(draft);
         template.BodyText = definition.BodyText;
         template.FooterText = definition.FooterText;
+
+        // Only the ones the editor collected. The "Sample n" fallback for older clients is not an
+        // example anyone chose, and storing it would present it back as though it were.
+        template.BodyExamples = [.. (draft.BodyExamples ?? []).Select(example => example.Trim())];
+        template.HeaderExample = definition.HeaderExample;
 
         // Worked out from the body rather than taken from the client, which does not send them. The
         // campaign sender reads this list to refuse templates whose placeholders it cannot fill.
@@ -655,6 +713,18 @@ public sealed class CatalogService : ICatalogService
 
     /// <summary>A WhatsApp Business Account and the decrypted token that can act on it.</summary>
     private sealed record ConnectedAccount(string WabaId, string AccessToken);
+
+    private async Task<MessageTemplateResponse> MapAsync(MessageTemplate template, CancellationToken cancellationToken)
+    {
+        var samples = await _headerSamples.DescribeAsync([template.HeaderSampleId], cancellationToken);
+
+        return Map(template) with
+        {
+            HeaderSample = template.HeaderSampleId is { } sampleId && samples.TryGetValue(sampleId, out var sample) ? sample : null,
+            BodyExamples = template.BodyExamples,
+            HeaderExample = template.HeaderExample,
+        };
+    }
 
     private static MessageTemplateResponse Map(MessageTemplate template) =>
         new(

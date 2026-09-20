@@ -51,6 +51,13 @@ public sealed class WhatsAppOptions
     [Required(AllowEmptyStrings = false)]
     public string AppSecret { get; init; } = string.Empty;
 
+    /// <summary>
+    /// A system-user token of this app, used only when a business's own token is refused for the
+    /// Resumable Upload of a template's example file. From user-secrets or the environment only -
+    /// never appsettings, never the client.
+    /// </summary>
+    public string? SystemUserAccessToken { get; init; }
+
     /// <summary>Token Meta echoes back when verifying the webhook subscription.</summary>
     [Required(AllowEmptyStrings = false)]
     public string WebhookVerifyToken { get; init; } = string.Empty;

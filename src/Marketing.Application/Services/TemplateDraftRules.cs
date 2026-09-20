@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using Marketing.Application.DTOs.Campaigns;
 using Marketing.Application.Interfaces;
@@ -42,8 +43,13 @@ public static partial class TemplateDraftRules
     /// <summary>Meta's limit on a button's web address.</summary>
     public const int UrlMaxLength = 2000;
 
+    /// <summary>Longest example value Meta is sent.</summary>
+    public const int ExampleMaxLength = 200;
+
     private const string HeaderKindNone = "none";
     private const string HeaderKindText = "text";
+
+    private static readonly string[] MediaHeaderKinds = ["image", "video", "document"];
 
     /// <summary>Throws a validation error listing every rule the draft breaks.</summary>
     /// <param name="draft">The draft to check.</param>
@@ -99,6 +105,8 @@ public static partial class TemplateDraftRules
             case HeaderKindText:
             {
                 var header = draft.HeaderText?.Trim() ?? string.Empty;
+                var headerVariables = PlaceholderNumbers(header);
+                var example = draft.HeaderExample?.Trim() ?? string.Empty;
 
                 if (header.Length == 0)
                 {
@@ -108,20 +116,53 @@ public static partial class TemplateDraftRules
                 {
                     Add("headerText", $"Keep the header to {Invariant(HeaderMaxLength)} characters or fewer.");
                 }
-                else if (Placeholder().IsMatch(header))
+
+                if (header.Contains('\n', StringComparison.Ordinal) || header.Contains('\r', StringComparison.Ordinal))
                 {
-                    Add("headerText", "Placeholders are not supported in the header yet.");
+                    Add("headerText", "Keep the header on one line.");
+                }
+
+                if (HasEmoji(header))
+                {
+                    Add("headerText", "Meta does not allow emoji in the header.");
+                }
+
+                if (header.IndexOfAny(['*', '_', '~', '`']) >= 0)
+                {
+                    Add("headerText", "Meta does not allow bold, italic, strikethrough or code formatting in the header.");
+                }
+
+                if (headerVariables.Count > 1 || headerVariables is [not 1])
+                {
+                    Add("headerText", "The header can have one placeholder at most, and it must be {{1}}.");
+                }
+                else if (headerVariables.Count == 1)
+                {
+                    if (ExampleProblem(example) is { } problem)
+                    {
+                        Add("headerExample", example.Length == 0
+                            ? "Give an example for the header's {{1}} - Meta reviews it."
+                            : problem);
+                    }
+                }
+                else if (example.Length > 0)
+                {
+                    Add("headerExample", "The header has no placeholder, so it needs no example.");
                 }
 
                 break;
             }
 
+            case var kind when MediaHeaderKinds.Contains(kind, StringComparer.OrdinalIgnoreCase):
+                if (string.IsNullOrWhiteSpace(draft.HeaderSampleId))
+                {
+                    Add("headerSampleId", $"Upload an example {kind.ToLowerInvariant()} for the header - Meta reviews it with the template.");
+                }
+
+                break;
+
             default:
-                // A media header needs a sample file uploaded to Meta with the template, which this
-                // endpoint cannot do yet. Refused plainly rather than submitted without one.
-                Add(
-                    "headerKind",
-                    "Image, video and document headers cannot be submitted from here yet. Use a text header or none.");
+                Add("headerKind", "The header can be none, text, image, video or document. Audio is not allowed.");
                 break;
         }
 
@@ -151,6 +192,42 @@ public static partial class TemplateDraftRules
                 {
                     Add("bodyText", "Placeholders must run {{1}} to {{" + Invariant(numbers.Count) + "}} with no gaps.");
                     break;
+                }
+            }
+
+            // Meta refuses both, as "too many variables for the length": a message that opens or
+            // closes on a placeholder, or two placeholders with nothing between them.
+            if (numbers.Count > 0 && !OnlyPlaceholder().IsMatch(body)
+                && (StartsWithPlaceholder().IsMatch(body) || EndsWithPlaceholder().IsMatch(body)))
+            {
+                Add("bodyText", "The body cannot start or end with a placeholder. Add some words around it.");
+            }
+
+            if (AdjacentPlaceholders().IsMatch(body))
+            {
+                Add("bodyText", "Two placeholders cannot sit side by side. Put some words between them.");
+            }
+
+            // Absent means an older client, which gets the labelled fallback. Present means the editor
+            // collected them, and then they have to be right: these are what Meta reviews.
+            if (draft.BodyExamples is { } examples)
+            {
+                if (examples.Count != numbers.Count)
+                {
+                    Add(
+                        "bodyExamples",
+                        $"Give one example for each placeholder: the body has {Invariant(numbers.Count)}, "
+                        + $"and {Invariant(examples.Count)} were sent.");
+                }
+                else
+                {
+                    for (var index = 0; index < examples.Count; index++)
+                    {
+                        if (ExampleProblem(examples[index]?.Trim() ?? string.Empty) is { } problem)
+                        {
+                            Add("bodyExamples", "{{" + Invariant(index + 1) + "}}: " + problem);
+                        }
+                    }
                 }
             }
         }
@@ -183,19 +260,26 @@ public static partial class TemplateDraftRules
 
         var body = draft.BodyText.Trim();
         var variableCount = PlaceholderNumbers(body).Count;
+        var headerKind = HeaderKindOf(draft);
+        var headerText = headerKind == HeaderKindText ? draft.HeaderText?.Trim() : null;
 
         return new MetaTemplateDefinition(
             draft.Name.Trim(),
             draft.Language.Trim(),
             draft.Category.ToString().ToUpperInvariant(),
-            HeaderKindOf(draft) == HeaderKindText ? draft.HeaderText?.Trim() : null,
+            headerText,
             body,
 
-            // Meta wants an example for every placeholder before it will review a template. The editor
-            // does not collect examples, so each is labelled plainly rather than invented.
-            [.. Enumerable.Range(1, variableCount).Select(number => "Sample " + Invariant(number))],
+            // The editor's real examples when it sent them. An older client sends none, and then each
+            // is labelled plainly rather than invented - Meta may reject that as unclear, but it will
+            // not approve a template on the strength of a made-up value either.
+            draft.BodyExamples is { } examples
+                ? [.. examples.Select(example => example.Trim())]
+                : [.. Enumerable.Range(1, variableCount).Select(number => "Sample " + Invariant(number))],
             string.IsNullOrWhiteSpace(draft.FooterText) ? null : draft.FooterText.Trim(),
-            [.. (draft.Buttons ?? []).Select(ToMetaButton)]);
+            [.. (draft.Buttons ?? []).Select(ToMetaButton)],
+            headerText is not null && PlaceholderNumbers(headerText).Count > 0 ? draft.HeaderExample?.Trim() : null,
+            MediaHeaderKinds.Contains(headerKind, StringComparer.OrdinalIgnoreCase) ? headerKind.ToUpperInvariant() : null);
     }
 
     /// <summary>The placeholders a body uses, as <c>{{1}}</c>, <c>{{2}}</c> and so on, in number order.</summary>
@@ -340,6 +424,44 @@ public static partial class TemplateDraftRules
         return string.Equals(kind, HeaderKindText, StringComparison.OrdinalIgnoreCase) ? HeaderKindText : kind;
     }
 
+    /// <summary>What is wrong with one example value, or null when Meta will accept it.</summary>
+    private static string? ExampleProblem(string example)
+    {
+        if (example.Length == 0)
+        {
+            return "Give an example value.";
+        }
+
+        if (example.Length > ExampleMaxLength)
+        {
+            return $"Keep each example to {Invariant(ExampleMaxLength)} characters or fewer.";
+        }
+
+        if (example.Contains('\n', StringComparison.Ordinal) || example.Contains('\r', StringComparison.Ordinal)
+            || example.Contains('\t', StringComparison.Ordinal))
+        {
+            return "Keep each example on one line, without tabs.";
+        }
+
+        return FiveSpaces().IsMatch(example) ? "An example cannot contain five or more spaces in a row." : null;
+    }
+
+    /// <summary>Whether the text carries an emoji or another pictograph Meta refuses in a header.</summary>
+    private static bool HasEmoji(string text)
+    {
+        foreach (var rune in text.EnumerateRunes())
+        {
+            var category = Rune.GetUnicodeCategory(rune);
+
+            if (category is UnicodeCategory.OtherSymbol || rune.Value is >= 0x1F000 or (>= 0x2600 and <= 0x27BF))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool IsWebAddress(string? value) =>
         value?.Trim() is { Length: > 0 and <= UrlMaxLength } trimmed
         && Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
@@ -368,4 +490,16 @@ public static partial class TemplateDraftRules
 
     [GeneratedRegex(@"^\+?[1-9]\d{6,19}$")]
     private static partial Regex PhonePattern();
+
+    [GeneratedRegex(@"^\{\{\s*\d{1,4}\s*\}\}")]
+    private static partial Regex StartsWithPlaceholder();
+
+    [GeneratedRegex(@"\{\{\s*\d{1,4}\s*\}\}$")]
+    private static partial Regex EndsWithPlaceholder();
+
+    [GeneratedRegex(@"\}\}\s*\{\{")]
+    private static partial Regex AdjacentPlaceholders();
+
+    [GeneratedRegex(" {5,}")]
+    private static partial Regex FiveSpaces();
 }

@@ -116,3 +116,27 @@ public static class MediaLimits
         return (separator < 0 ? mimeType : mimeType[..separator]).Trim();
     }
 }
+
+/// <summary>The example file a media-header template is reviewed by.</summary>
+/// <param name="Id">Public id, <c>tsm_…</c>.</param>
+/// <param name="Kind">Image, video or document.</param>
+/// <param name="FileName">The name it was uploaded with.</param>
+/// <param name="MimeType">Media type read from the file's own bytes.</param>
+/// <param name="SizeBytes">Size in bytes.</param>
+/// <param name="Url">Where an authenticated client can preview it.</param>
+/// <param name="UploadedAt">When it was uploaded.</param>
+public sealed record TemplateHeaderSampleResponse(
+    string Id,
+    MediaKind Kind,
+    string FileName,
+    string MimeType,
+    long SizeBytes,
+    string Url,
+    DateTimeOffset UploadedAt);
+
+/// <summary>A header example file being uploaded.</summary>
+/// <param name="Kind">What the caller says it is: <c>image</c>, <c>video</c> or <c>document</c>.</param>
+/// <param name="FileName">Its name.</param>
+/// <param name="SizeBytes">Its size.</param>
+/// <param name="Content">Its bytes.</param>
+public sealed record TemplateHeaderSampleUpload(string? Kind, string FileName, long SizeBytes, Stream Content);

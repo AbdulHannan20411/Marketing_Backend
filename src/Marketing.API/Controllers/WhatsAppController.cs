@@ -302,6 +302,95 @@ public sealed class WhatsAppMediaUploadRequest
     public string? Kind { get; init; }
 }
 
+/// <summary>The example file a media-header template is submitted with.</summary>
+/// <remarks>
+/// Stored here, not uploaded to Meta: the upload to Meta happens when the template is submitted, so
+/// the handle Meta reviews is always fresh.
+/// </remarks>
+[ApiVersion("1.0")]
+[Route("api/v{version:apiVersion}/templates/header-samples")]
+[Authorize]
+[RequireModule(PlanModules.WhatsApp)]
+public sealed class TemplateHeaderSamplesController : ApiControllerBase
+{
+    private readonly Application.Services.WhatsApp.ITemplateHeaderSampleService _samples;
+    private readonly ITenantScopeResolver _scope;
+
+    /// <summary>Initialises a new instance.</summary>
+    public TemplateHeaderSamplesController(
+        Application.Services.WhatsApp.ITemplateHeaderSampleService samples,
+        ITenantScopeResolver scope)
+    {
+        _samples = samples;
+        _scope = scope;
+    }
+
+    /// <summary>Uploads a header example file.</summary>
+    /// <param name="request">The file and its kind.</param>
+    /// <param name="accountId">
+    /// The number the template is for. Accepted for symmetry with template creation; the file is
+    /// stored for the workspace and reaches Meta only when the template is submitted.
+    /// </param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The stored example.</response>
+    /// <response code="413">Larger than Meta allows for that kind (<c>file_too_large</c>).</response>
+    /// <response code="415">Not a JPEG, PNG, MP4, 3GP or PDF, judged by its bytes (<c>unsupported_media_type</c>).</response>
+    /// <response code="422">The file is a different kind from the one declared (<c>kind_mismatch</c>).</response>
+    [HttpPost]
+    [RequirePermission(Permissions.WhatsApp.TemplatesSync)]
+    [RequestSizeLimit(MediaLimits.LargestUploadBytes)]
+    [ProducesResponseType(typeof(ApiResponse<TemplateHeaderSampleResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status415UnsupportedMediaType)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UploadAsync(
+        [FromForm] WhatsAppMediaUploadRequest request,
+        [FromQuery] string? accountId,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        if (request.File is not { Length: > 0 } file)
+        {
+            throw new Common.Exceptions.ValidationException("file", "Choose a file to upload.");
+        }
+
+        await using var content = file.OpenReadStream();
+
+        var sample = await _samples.UploadAsync(
+            new TemplateHeaderSampleUpload(request.Kind, file.FileName, file.Length, content),
+            cancellationToken);
+
+        return Success(sample, "Example file uploaded.");
+    }
+
+    /// <summary>Streams a header example back, for the editor's preview.</summary>
+    /// <param name="id">Sample id, <c>tsm_…</c>.</param>
+    /// <param name="adminId">Super Admin scoping.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The bytes.</response>
+    /// <response code="404">No such example in this workspace.</response>
+    [HttpGet("{id}/content")]
+    [RequirePermission(Permissions.WhatsApp.TemplatesView, Permissions.WhatsApp.TemplatesSync)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetContentAsync(
+        string id,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        var download = await _samples.OpenAsync(id, cancellationToken);
+
+        return File(download.Content, download.ContentType);
+    }
+}
+
 /// <summary>Message templates for the resolved tenant.</summary>
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/templates")]

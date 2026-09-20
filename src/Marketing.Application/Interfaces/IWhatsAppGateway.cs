@@ -70,6 +70,7 @@ public interface IWhatsAppGateway
     /// <param name="templateName">Template name as registered with Meta.</param>
     /// <param name="languageCode">Template language tag.</param>
     /// <param name="bodyParameters">Ordered values filling the body placeholders.</param>
+    /// <param name="headerMedia">The header's image, video or document, for a media-header template.</param>
     /// <param name="accessToken">
     /// Bearer token when the caller holds one, or null to use the stored one. Background jobs pass
     /// it explicitly, having no signed-in user for the handler to resolve a tenant from.
@@ -82,6 +83,7 @@ public interface IWhatsAppGateway
         string templateName,
         string languageCode,
         IReadOnlyList<string> bodyParameters,
+        MetaHeaderMedia? headerMedia = null,
         string? accessToken = null,
         CancellationToken cancellationToken = default);
 
@@ -204,6 +206,26 @@ public interface IWhatsAppGateway
         string accessToken,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Uploads a template's example header file through Meta's Resumable Upload API.
+    /// </summary>
+    /// <remarks>
+    /// Not a normal media upload: a template under review is illustrated by a header handle, which
+    /// only this API produces. Retried once from where Meta says it stopped.
+    /// </remarks>
+    /// <param name="content">The file's bytes.</param>
+    /// <param name="fileName">Its name.</param>
+    /// <param name="mimeType">Its media type.</param>
+    /// <param name="accessToken">The business token the template is being created with.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The header handle, <c>4::…</c>, for <c>example.header_handle</c>.</returns>
+    public Task<string> UploadTemplateHeaderSampleAsync(
+        byte[] content,
+        string fileName,
+        string mimeType,
+        string accessToken,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Uploads a file to Meta so a message can reference it.</summary>
     /// <param name="phoneNumberId">Sending number the file is uploaded against.</param>
     /// <param name="content">The bytes.</param>
@@ -245,6 +267,12 @@ public interface IWhatsAppGateway
 /// <param name="BodyExamples">One example value per body placeholder, in number order.</param>
 /// <param name="FooterText">Footer, or null for none.</param>
 /// <param name="Buttons">Buttons, in display order.</param>
+/// <param name="HeaderExample">Example for a text header's <c>{{1}}</c>, or null when it has none.</param>
+/// <param name="HeaderMediaFormat"><c>IMAGE</c>, <c>VIDEO</c> or <c>DOCUMENT</c> for a media header; null otherwise.</param>
+/// <param name="HeaderHandle">
+/// The handle Meta's Resumable Upload returned for the media header's example file. Set at submit
+/// time, never stored: it is produced fresh for every submission.
+/// </param>
 public sealed record MetaTemplateDefinition(
     string Name,
     string Language,
@@ -253,7 +281,10 @@ public sealed record MetaTemplateDefinition(
     string BodyText,
     IReadOnlyList<string> BodyExamples,
     string? FooterText,
-    IReadOnlyList<MetaTemplateButton> Buttons);
+    IReadOnlyList<MetaTemplateButton> Buttons,
+    string? HeaderExample = null,
+    string? HeaderMediaFormat = null,
+    string? HeaderHandle = null);
 
 /// <summary>A template button, in the form Meta reviews.</summary>
 /// <param name="Type"><c>QUICK_REPLY</c>, <c>URL</c> or <c>PHONE_NUMBER</c>.</param>
@@ -315,9 +346,20 @@ public sealed record MetaPhoneNumber(
 /// <param name="Language">BCP 47 language tag.</param>
 /// <param name="Status">Review status.</param>
 /// <param name="Category">Template category.</param>
+/// <param name="HeaderFormat">
+/// The header's format as Meta lists it - <c>TEXT</c>, <c>IMAGE</c>, <c>VIDEO</c>, <c>DOCUMENT</c> -
+/// or null when the template has no header.
+/// </param>
 public sealed record MetaTemplate(
     string Id,
     string Name,
     string Language,
     string Status,
-    string Category);
+    string Category,
+    string? HeaderFormat = null);
+
+/// <summary>The media a template message carries in its header.</summary>
+/// <param name="Kind"><c>image</c>, <c>video</c> or <c>document</c>.</param>
+/// <param name="MetaMediaId">Meta's id for the file, uploaded through the sending number.</param>
+/// <param name="FileName">The document's name as the customer sees it; ignored for images and video.</param>
+public sealed record MetaHeaderMedia(string Kind, string MetaMediaId, string? FileName);

@@ -53,7 +53,24 @@ public sealed record TemplateDefinitionRequest(
 
         if (definition.HeaderText is { Length: > 0 } header)
         {
-            components.Add(new TemplateDefinitionComponent("HEADER", Format: "TEXT", Text: header));
+            components.Add(new TemplateDefinitionComponent(
+                "HEADER",
+                Format: "TEXT",
+                Text: header,
+                Example: definition.HeaderExample is { Length: > 0 } headerExample
+                    ? new TemplateExample(HeaderText: [headerExample])
+                    : null));
+        }
+        else if (definition.HeaderMediaFormat is { Length: > 0 } format)
+        {
+            // A media header is reviewed from an example file, referred to by the handle Meta's
+            // Resumable Upload returned for it - not by a normal media id.
+            components.Add(new TemplateDefinitionComponent(
+                "HEADER",
+                Format: format,
+                Example: definition.HeaderHandle is { Length: > 0 } handle
+                    ? new TemplateExample(HeaderHandle: [handle])
+                    : null));
         }
 
         components.Add(new TemplateDefinitionComponent(
@@ -61,7 +78,7 @@ public sealed record TemplateDefinitionRequest(
             Text: definition.BodyText,
 
             // Only when there are placeholders to illustrate. A body without any needs no example.
-            Example: definition.BodyExamples.Count > 0 ? new TemplateBodyExample([definition.BodyExamples]) : null));
+            Example: definition.BodyExamples.Count > 0 ? new TemplateExample(BodyText: [definition.BodyExamples]) : null));
 
         if (definition.FooterText is { Length: > 0 } footer)
         {
@@ -96,15 +113,25 @@ public sealed record TemplateDefinitionComponent(
     string? Text = null,
     [property: JsonPropertyName("example")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    TemplateBodyExample? Example = null,
+    TemplateExample? Example = null,
     [property: JsonPropertyName("buttons")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<TemplateDefinitionButton>? Buttons = null);
 
-/// <summary>Example values for a body's placeholders.</summary>
-/// <param name="BodyText">One set of examples, one value per placeholder in number order.</param>
-public sealed record TemplateBodyExample(
-    [property: JsonPropertyName("body_text")] IReadOnlyList<IReadOnlyList<string>> BodyText);
+/// <summary>The examples Meta reviews a component by. Only the one that applies is written.</summary>
+/// <param name="BodyText">For a body: one set of examples, one value per placeholder in number order.</param>
+/// <param name="HeaderText">For a text header: the example for its <c>{{1}}</c>.</param>
+/// <param name="HeaderHandle">For a media header: the Resumable Upload handle of the example file.</param>
+public sealed record TemplateExample(
+    [property: JsonPropertyName("body_text")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<IReadOnlyList<string>>? BodyText = null,
+    [property: JsonPropertyName("header_text")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? HeaderText = null,
+    [property: JsonPropertyName("header_handle")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? HeaderHandle = null);
 
 /// <summary>One button in a template definition.</summary>
 /// <param name="Type"><c>QUICK_REPLY</c>, <c>URL</c> or <c>PHONE_NUMBER</c>.</param>

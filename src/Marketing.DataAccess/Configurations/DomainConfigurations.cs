@@ -202,6 +202,8 @@ public sealed class MessageTemplateConfiguration : BaseEntityConfiguration<Messa
         builder.Property(template => template.RejectionReason).HasMaxLength(500);
         builder.Property(template => template.Variables).HasColumnType("text[]").IsRequired();
         builder.Property(template => template.Buttons).HasColumnType("text[]").IsRequired();
+        builder.Property(template => template.BodyExamples).HasColumnType("text[]").IsRequired();
+        builder.Property(template => template.HeaderExample).HasMaxLength(200);
 
         // Meta allows one template per name and language.
         // Meta allows one template per name and language on each business account - and a workspace
@@ -248,6 +250,8 @@ public sealed class CampaignConfiguration : BaseEntityConfiguration<Campaign>
         builder.Property(campaign => campaign.Status).IsRequired().HasMaxLength(16).HasConversion<string>();
         builder.Property(campaign => campaign.AudienceLabel).HasMaxLength(200);
         builder.Property(campaign => campaign.CreatedByName).HasMaxLength(150);
+        builder.Property(campaign => campaign.HeaderMetaMediaId).HasMaxLength(128);
+        builder.Property(campaign => campaign.HeaderMetaMediaPhoneNumberId).HasMaxLength(64);
 
         // bigint[], not a join table. The audience selection is read and written whole, never
         // queried by element, so a child table would add a join to every read and buy nothing.
@@ -1001,6 +1005,24 @@ public sealed class AutoReplySettingsConfiguration : BaseEntityConfiguration<Aut
     }
 }
 
+
+/// <summary>Maps <see cref="TemplateHeaderSample"/>.</summary>
+public sealed class TemplateHeaderSampleConfiguration : BaseEntityConfiguration<TemplateHeaderSample>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<TemplateHeaderSample> builder)
+    {
+        builder.ToTable("template_header_samples");
+
+        builder.Property(sample => sample.Kind).IsRequired().HasMaxLength(16).HasConversion<string>();
+        builder.Property(sample => sample.FileName).IsRequired().HasMaxLength(255);
+        builder.Property(sample => sample.MimeType).IsRequired().HasMaxLength(100);
+        builder.Property(sample => sample.StoragePath).IsRequired().HasMaxLength(500);
+
+        // The clean-up job looks for samples nobody attached.
+        builder.HasIndex(sample => new { sample.MessageTemplateId, sample.UploadedAt });
+    }
+}
 
 /// <summary>Maps <see cref="AutoReplyKnowledgeEntry"/>.</summary>
 public sealed class AutoReplyKnowledgeEntryConfiguration : BaseEntityConfiguration<AutoReplyKnowledgeEntry>

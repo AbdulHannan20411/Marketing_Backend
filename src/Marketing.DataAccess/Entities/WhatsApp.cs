@@ -249,4 +249,51 @@ public sealed class MessageTemplate : BaseEntity, IRequiresTenant
 
     /// <summary>Why Meta rejected it, when it did.</summary>
     public string? RejectionReason { get; set; }
+
+    /// <summary>
+    /// The example values submitted for the body's placeholders, <c>{{1}}</c> first.
+    /// </summary>
+    /// <remarks>
+    /// Kept so resubmitting a rejected template does not ask for them again. Empty for templates
+    /// created outside this platform, or before examples were collected.
+    /// </remarks>
+    public List<string> BodyExamples { get; set; } = [];
+
+    /// <summary>The example value submitted for a text header's <c>{{1}}</c>, when it has one.</summary>
+    public string? HeaderExample { get; set; }
+
+    /// <summary>The example file an image, video or document header was submitted with.</summary>
+    public long? HeaderSampleId { get; set; }
+}
+
+/// <summary>
+/// The example file a media-header template is submitted to Meta with.
+/// </summary>
+/// <remarks>
+/// Stored here, not at Meta: Meta's header handle is produced at submit time from this copy, so it
+/// is always fresh, and a rejected template can be resubmitted without uploading the file again.
+/// A sample never attached to a template is removed after a day.
+/// </remarks>
+public sealed class TemplateHeaderSample : BaseEntity, IRequiresTenant
+{
+    /// <summary>Image, video or document - what it was checked to be, not what it was called.</summary>
+    public MediaKind Kind { get; set; }
+
+    /// <summary>The name it was uploaded with.</summary>
+    public string FileName { get; set; } = string.Empty;
+
+    /// <summary>Media type read from the file's own bytes.</summary>
+    public string MimeType { get; set; } = string.Empty;
+
+    /// <summary>Size in bytes.</summary>
+    public long SizeBytes { get; set; }
+
+    /// <summary>Where the bytes are stored.</summary>
+    public string StoragePath { get; set; } = string.Empty;
+
+    /// <summary>When it was uploaded.</summary>
+    public DateTimeOffset UploadedAt { get; set; }
+
+    /// <summary>The template it was submitted with, once it has been.</summary>
+    public long? MessageTemplateId { get; set; }
 }

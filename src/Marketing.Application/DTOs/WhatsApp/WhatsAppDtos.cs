@@ -170,6 +170,9 @@ public sealed record WhatsAppConnectionResponse(
 /// than guessing from whether header text came back. <c>None</c> for templates synced from Meta,
 /// which does not report components in its template list.
 /// </param>
+/// <param name="HeaderSample">The example file a media header was submitted with; null otherwise.</param>
+/// <param name="BodyExamples">The example values submitted for the body's placeholders, <c>{{1}}</c> first.</param>
+/// <param name="HeaderExample">The example submitted for a text header's <c>{{1}}</c>.</param>
 public sealed record MessageTemplateResponse(
     string Id,
     string Name,
@@ -185,7 +188,10 @@ public sealed record MessageTemplateResponse(
     int TimesUsed,
     DateTimeOffset UpdatedAt,
     string? RejectionReason,
-    TemplateHeaderKind HeaderKind = TemplateHeaderKind.None);
+    TemplateHeaderKind HeaderKind = TemplateHeaderKind.None,
+    TemplateHeaderSampleResponse? HeaderSample = null,
+    IReadOnlyList<string>? BodyExamples = null,
+    string? HeaderExample = null);
 
 /// <summary>Search, filter and paging for the templates screen.</summary>
 /// <remarks>
