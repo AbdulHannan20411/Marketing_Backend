@@ -110,4 +110,7 @@ public class Repository<TEntity> : IRepository<TEntity>
 
     /// <inheritdoc />
     public void RemoveRange(IEnumerable<TEntity> entities) => Set.RemoveRange(entities);
+
+    /// <inheritdoc />
+    public void Detach(TEntity entity) => Context.Entry(entity).State = EntityState.Detached;
 }

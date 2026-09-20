@@ -1,6 +1,7 @@
 using System.Globalization;
 using Marketing.Application.DTOs.WhatsApp;
 using Marketing.Application.Interfaces;
+using Marketing.Business.Extensions;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Helpers;
 using Marketing.DataAccess.Entities;
@@ -135,10 +136,23 @@ public sealed partial class InboundMessageService : IInboundMessageService
             }
             catch (DbUpdateException exception)
             {
-                // Two deliveries of the same message can race past the check above; the unique index
-                // is what actually settles it. Losing the rest of the batch over that would be worse
-                // than the duplicate it prevented.
-                LogDuplicateInbound(exception, metaMessageId);
+                if (exception.IsUniqueViolation())
+                {
+                    // Two deliveries of the same message can race past the check above; the unique
+                    // index is what actually settles it. Losing the rest of the batch over that
+                    // would be worse than the duplicate it prevented.
+                    LogDuplicateInbound(exception, metaMessageId);
+
+                    continue;
+                }
+
+                // Anything else is this platform's problem, not a redelivery. Said plainly and
+                // rethrown: Meta retries a 5xx, so the customer's message arrives again rather than
+                // being dropped - and the error is in the log under its own name, not disguised as
+                // a duplicate.
+                LogInboundStoreFailed(exception, metaMessageId);
+
+                throw;
             }
         }
 
@@ -218,7 +232,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
         CancellationToken cancellationToken)
     {
         var occurredAt = ParseTimestamp(message.Timestamp) ?? _clock.UtcNow;
-        var conversation = await FindOrCreateConversationAsync(
+        var (conversation, isNewThread) = await FindOrCreateConversationAsync(
             from, ProfileName(value, from), connection.Id, tenantId, cancellationToken);
         var described = Describe(message);
 
@@ -231,10 +245,15 @@ public sealed partial class InboundMessageService : IInboundMessageService
             media = await _media.StoreInboundAsync(reference.Id, reference.FileName, accessToken, cancellationToken);
         }
 
-        _messages.Add(new ConversationMessage
+        var stored = new ConversationMessage
         {
             TenantId = tenantId,
-            ConversationId = conversation.Id,
+
+            // The navigation, never the id. On a first message the conversation above was created
+            // in this same unit of work and its identity is still zero, so assigning the scalar
+            // wrote conversation_id = 0 and PostgreSQL refused the row. Through the navigation,
+            // Entity Framework inserts the conversation first and fills the key in itself.
+            Conversation = conversation,
             MetaMessageId = metaMessageId,
             Direction = MessageDirection.Inbound,
             Kind = described.Kind,
@@ -245,7 +264,9 @@ public sealed partial class InboundMessageService : IInboundMessageService
             // travel through, and Meta sends no receipts for them.
             Status = InboxMessageStatus.Delivered,
             OccurredAt = occurredAt,
-        });
+        };
+
+        _messages.Add(stored);
 
         // The line the whole inbox depends on.
         conversation.WindowExpiresAt = occurredAt.AddHours(WindowHours);
@@ -259,7 +280,25 @@ public sealed partial class InboundMessageService : IInboundMessageService
             connection.LastMessageReceivedAt = occurredAt;
         }
 
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // Rejected rows stay staged, so the webhook's own save would run into them again and
+            // answer Meta with a 500 - which is how one bad row loses a whole batch, and in the end
+            // the subscription. Dropped here, where both rows are certainly in hand, rather than
+            // from the exception's own entry list, which is empty for some failures.
+            _messages.Detach(stored);
+
+            if (isNewThread)
+            {
+                _conversations.Detach(conversation);
+            }
+
+            throw;
+        }
 
         await PublishAsync(connection, conversation, described, occurredAt, cancellationToken);
     }
@@ -270,7 +309,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
     /// conversations, each with its own 24-hour window - which is how Meta counts them too - and each
     /// visible only to the people who may see that number.
     /// </remarks>
-    private async Task<Conversation> FindOrCreateConversationAsync(
+    private async Task<(Conversation Conversation, bool Created)> FindOrCreateConversationAsync(
         string waId,
         string? profileName,
         long connectionId,
@@ -292,7 +331,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
                 existing.ContactName = profileName;
             }
 
-            return existing;
+            return (existing, false);
         }
 
         // Matched, never created. A number that wrote in is not automatically a contact: importing
@@ -312,7 +351,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
 
         _conversations.Add(conversation);
 
-        return conversation;
+        return (conversation, true);
     }
 
     private async Task<bool> ExistsAsync(string metaMessageId, CancellationToken cancellationToken) =>
@@ -429,6 +468,12 @@ public sealed partial class InboundMessageService : IInboundMessageService
         Level = LogLevel.Information,
         Message = "Inbound message {MetaMessageId} was already stored; the redelivery changed nothing.")]
     private partial void LogDuplicateInbound(Exception exception, string metaMessageId);
+
+    [LoggerMessage(
+        EventId = 2742,
+        Level = LogLevel.Error,
+        Message = "Inbound message {MetaMessageId} could not be stored. Meta will redeliver it.")]
+    private partial void LogInboundStoreFailed(Exception exception, string metaMessageId);
 
     [LoggerMessage(
         EventId = 2741,

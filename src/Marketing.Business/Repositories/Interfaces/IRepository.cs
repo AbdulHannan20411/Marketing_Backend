@@ -84,4 +84,15 @@ public interface IRepository<TEntity>
 
     /// <summary>Stages several soft deletes.</summary>
     public void RemoveRange(IEnumerable<TEntity> entities);
+
+    /// <summary>
+    /// Stops tracking an entity, so a staged insert or update is forgotten rather than retried.
+    /// </summary>
+    /// <remarks>
+    /// For the one case that needs it: a row the database refused. Change tracking keeps a failed
+    /// insert staged, so the next save in the same request attempts it again and fails again -
+    /// which is how one rejected row turns an otherwise successful request into an error.
+    /// </remarks>
+    /// <param name="entity">Entity to stop tracking.</param>
+    public void Detach(TEntity entity);
 }

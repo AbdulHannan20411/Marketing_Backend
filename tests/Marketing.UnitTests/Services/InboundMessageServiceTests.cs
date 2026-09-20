@@ -5,6 +5,7 @@ using Marketing.Application.Services.WhatsApp;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using static Marketing.Common.Constants.ContractEnums;
@@ -134,6 +135,68 @@ public sealed class InboundMessageServiceTests
         message.MetaMessageId.Should().Be("wamid.in1");
         message.Status.Should().Be(InboxMessageStatus.Delivered);
         message.OccurredAt.Should().Be(Arrived);
+    }
+
+    [Fact]
+    public async Task A_first_message_points_at_the_conversation_object_not_at_an_id_it_has_not_got_yet()
+    {
+        await CreateService().ApplyAsync(Value(TextMessage()), _connection, TestContext.Current.CancellationToken);
+
+        var conversation = _addedConversations.Should().ContainSingle().Which;
+        var message = _addedMessages.Should().ContainSingle().Which;
+
+        // The whole bug in one assertion. On first contact the conversation is created in this same
+        // unit of work, so its identity is still zero; writing that zero into the message's foreign
+        // key made PostgreSQL refuse the row - 23503 - and every inbound message from a new number
+        // was lost with a 500 that Meta then retried. Through the navigation, Entity Framework
+        // inserts the conversation first and fills the key in itself.
+        message.Conversation.Should().BeSameAs(conversation);
+        conversation.Id.Should().Be(0, "this is exactly the state the old code copied into the key");
+    }
+
+    [Fact]
+    public async Task A_message_on_an_existing_thread_still_lands_on_that_thread()
+    {
+        var existing = new Conversation
+        {
+            Id = 88,
+            TenantId = TenantId,
+            WaId = WaId,
+            ContactName = "Amara Okafor",
+            WhatsAppConnectionId = 31,
+        };
+
+        _queries.FirstOrDefaultAsync(Arg.Any<IQueryable<Conversation>>(), Arg.Any<CancellationToken>())
+            .Returns(existing);
+
+        await CreateService().ApplyAsync(Value(TextMessage()), _connection, TestContext.Current.CancellationToken);
+
+        var message = _addedMessages.Should().ContainSingle().Which;
+
+        _addedConversations.Should().BeEmpty("the thread already exists");
+        message.Conversation.Should().BeSameAs(existing);
+        existing.UnreadCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task A_row_the_database_refuses_is_dropped_rather_than_left_staged()
+    {
+        var refused = new DbUpdateException(
+            "refused",
+            new InvalidOperationException("no matching conversation"));
+
+        _unitOfWork.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns<int>(_ => throw refused);
+
+        var apply = () => CreateService().ApplyAsync(
+            Value(TextMessage()), _connection, TestContext.Current.CancellationToken);
+
+        // Not swallowed as a redelivery: a failure that is not a duplicate is this platform's, and
+        // Meta redelivering a 5xx is what gets the customer's message a second chance.
+        await apply.Should().ThrowAsync<DbUpdateException>();
+
+        // And nothing it staged is left behind for the webhook's own save to trip over.
+        _messages.Received(1).Detach(Arg.Any<ConversationMessage>());
+        _conversations.Received(1).Detach(Arg.Any<Conversation>());
     }
 
     [Fact]
