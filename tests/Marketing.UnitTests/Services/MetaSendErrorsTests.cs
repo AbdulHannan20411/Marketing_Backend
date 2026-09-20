@@ -18,6 +18,20 @@ public sealed class MetaSendErrorsTests
         error.Reason.Should().Contain("test numbers");
     }
 
+    [Fact]
+    public void A_number_awaiting_display_name_approval_says_so_and_stops_trying()
+    {
+        // Meta's own words are "WhatsApp provided number needs display name approval before message
+        // can be sent". Unlisted, the code was treated as a blip: eighteen retries in one morning,
+        // and a report that said "Code 131037" to someone who could have fixed it in WhatsApp
+        // Manager in a minute.
+        var error = MetaSendErrors.Describe(131037);
+
+        error.Should().NotBeNull();
+        error!.Permanent.Should().BeTrue();
+        error.Reason.Should().Contain("display name");
+    }
+
     [Theory]
     [InlineData(80007)]
     [InlineData(130429)]

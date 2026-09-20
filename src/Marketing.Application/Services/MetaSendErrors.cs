@@ -32,6 +32,9 @@ internal static class MetaSendErrors
         [131030] = Permanent(
             "This recipient is not on the test number's allowed list. Add it in the Meta app dashboard."),
         [131031] = Permanent("Meta has locked or restricted this WhatsApp Business Account."),
+        [131037] = Permanent(
+            "Meta has not approved this number's display name yet, so nothing can be sent from it. "
+            + "Check the name under WhatsApp Manager - Phone numbers; approval usually takes a day or two."),
         [131042] = Permanent(
             "Meta could not charge this WhatsApp Business Account. Check its payment method in Meta Business Settings."),
         [131047] = Permanent(

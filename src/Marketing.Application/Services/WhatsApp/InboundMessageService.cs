@@ -232,7 +232,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
         CancellationToken cancellationToken)
     {
         var occurredAt = ParseTimestamp(message.Timestamp) ?? _clock.UtcNow;
-        var (conversation, isNewThread) = await FindOrCreateConversationAsync(
+        var conversation = await FindOrCreateConversationAsync(
             from, ProfileName(value, from), connection.Id, tenantId, cancellationToken);
         var described = Describe(message);
 
@@ -292,10 +292,10 @@ public sealed partial class InboundMessageService : IInboundMessageService
             // from the exception's own entry list, which is empty for some failures.
             _messages.Detach(stored);
 
-            if (isNewThread)
-            {
-                _conversations.Detach(conversation);
-            }
+            // The thread goes too, new or not. Its window, its unread count and its preview were
+            // all moved on for a message that is not there, and on a redelivery that arithmetic
+            // would otherwise be applied twice.
+            _conversations.Detach(conversation);
 
             throw;
         }
@@ -309,7 +309,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
     /// conversations, each with its own 24-hour window - which is how Meta counts them too - and each
     /// visible only to the people who may see that number.
     /// </remarks>
-    private async Task<(Conversation Conversation, bool Created)> FindOrCreateConversationAsync(
+    private async Task<Conversation> FindOrCreateConversationAsync(
         string waId,
         string? profileName,
         long connectionId,
@@ -331,7 +331,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
                 existing.ContactName = profileName;
             }
 
-            return (existing, false);
+            return existing;
         }
 
         // Matched, never created. A number that wrote in is not automatically a contact: importing
@@ -351,7 +351,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
 
         _conversations.Add(conversation);
 
-        return (conversation, true);
+        return conversation;
     }
 
     private async Task<bool> ExistsAsync(string metaMessageId, CancellationToken cancellationToken) =>
