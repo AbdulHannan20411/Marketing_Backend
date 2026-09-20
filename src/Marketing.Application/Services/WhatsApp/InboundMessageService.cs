@@ -1,5 +1,6 @@
 using System.Globalization;
 using Marketing.Application.DTOs.WhatsApp;
+using Marketing.Application.DTOs.Workspace;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Extensions;
 using Marketing.Business.Repositories.Interfaces;
@@ -56,6 +57,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
     private readonly IRepository<Conversation> _conversations;
     private readonly IRepository<ConversationMessage> _messages;
     private readonly IRepository<Contact> _contacts;
+    private readonly IRepository<Notification> _notifications;
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IMediaService _media;
@@ -70,6 +72,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
         IRepository<Conversation> conversations,
         IRepository<ConversationMessage> messages,
         IRepository<Contact> contacts,
+        IRepository<Notification> notifications,
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
         IMediaService media,
@@ -83,6 +86,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
         _conversations = conversations;
         _messages = messages;
         _contacts = contacts;
+        _notifications = notifications;
         _queries = queries;
         _unitOfWork = unitOfWork;
         _media = media;
@@ -301,6 +305,95 @@ public sealed partial class InboundMessageService : IInboundMessageService
         }
 
         await PublishAsync(connection, conversation, described, occurredAt, cancellationToken);
+        await NotifyAsync(connection, conversation, described, cancellationToken);
+    }
+
+    /// <summary>
+    /// Puts a customer's message in the bell of everyone who may read that number.
+    /// </summary>
+    /// <remarks>
+    /// The same audience as the realtime push - the workspace's administrators, plus the employees
+    /// granted that number - because a notification is only useful to someone allowed to open the
+    /// thread it points at.
+    /// <para>
+    /// One per thread, not one per message: written only when the conversation goes from read to
+    /// unread. A customer sending six lines in a row is one conversation needing attention, and six
+    /// bells for it is how people learn to ignore the bell. The next message after an agent opens
+    /// the thread notifies again, because by then it is news once more.
+    /// </para>
+    /// </remarks>
+    private async Task NotifyAsync(
+        WhatsAppConnection connection,
+        Conversation conversation,
+        DescribedMessage described,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (conversation.UnreadCount > 1)
+            {
+                return;
+            }
+
+            var recipients = await _access.UsersWhoMayViewAsync(connection.Id, cancellationToken);
+
+            if (recipients.Count == 0)
+            {
+                return;
+            }
+
+            var who = conversation.ContactName is { Length: > 0 } name
+                ? name
+                : PhoneNumbers.ToDisplayForm(conversation.WaId);
+
+            var written = new List<Notification>(recipients.Count);
+
+            foreach (var userId in recipients)
+            {
+                var notification = new Notification
+                {
+                    TenantId = conversation.TenantId,
+                    UserId = userId,
+                    Kind = NotificationKind.InboxMessageReceived,
+                    Title = $"New message from {who}",
+                    Body = Preview(described),
+                    Priority = NotificationPriority.Info,
+                    Icon = "chat",
+                    ActionLabel = "Open inbox",
+                    ActionRoute = "/inbox",
+                    OccurredOn = _clock.UtcNow,
+                };
+
+                _notifications.Add(notification);
+                written.Add(notification);
+            }
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            foreach (var notification in written)
+            {
+                await _realtime.NotifyUserAsync(
+                    notification.UserId!.Value,
+                    new AppNotification(
+                        PublicId.From(PublicId.Notification, notification.Id),
+                        notification.Kind,
+                        notification.Title,
+                        notification.Body,
+                        notification.Priority,
+                        notification.Icon,
+                        notification.Read,
+                        notification.ActionLabel,
+                        notification.ActionRoute,
+                        notification.OccurredOn),
+                    cancellationToken);
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The message is stored and the thread is on screen either way. A bell nobody rang is
+            // not worth answering Meta with an error over.
+            LogNotifyFailed(exception, conversation.Id);
+        }
     }
 
     /// <summary>The thread between one customer and one of the workspace's numbers, created on first contact.</summary>
@@ -474,6 +567,12 @@ public sealed partial class InboundMessageService : IInboundMessageService
         Level = LogLevel.Error,
         Message = "Inbound message {MetaMessageId} could not be stored. Meta will redeliver it.")]
     private partial void LogInboundStoreFailed(Exception exception, string metaMessageId);
+
+    [LoggerMessage(
+        EventId = 2743,
+        Level = LogLevel.Warning,
+        Message = "Could not raise a notification for conversation {ConversationId}; the inbox still shows the message.")]
+    private partial void LogNotifyFailed(Exception exception, long conversationId);
 
     [LoggerMessage(
         EventId = 2741,

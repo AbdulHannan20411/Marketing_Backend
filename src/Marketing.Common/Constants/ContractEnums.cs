@@ -684,6 +684,10 @@ public static class ContractEnums
         [JsonStringEnumMemberName("payment.rejected")]
         PaymentRejected,
 
+        /// <summary>A customer wrote in. To whoever may read the number they wrote to.</summary>
+        [JsonStringEnumMemberName("inbox.message")]
+        InboxMessageReceived,
+
         /// <summary>The account signed in from a device it has not used before.</summary>
         [JsonStringEnumMemberName("security.new_login")]
         SecurityNewLogin,

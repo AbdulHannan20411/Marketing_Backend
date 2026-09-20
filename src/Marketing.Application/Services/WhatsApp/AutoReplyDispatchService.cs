@@ -107,8 +107,10 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
     {
         if (!_ai.IsConfigured)
         {
-            // No model key on this deployment. Nothing to do, and nothing worth logging every ten
-            // seconds about it.
+            // No model key on this deployment. At Debug, so a run every ten seconds does not fill a
+            // production log - but "why is nothing happening" has an answer when anyone asks it.
+            LogNothingToDo("no model key is configured on this deployment");
+
             return 0;
         }
 
@@ -156,6 +158,12 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
 
         if (settings is not { Enabled: true })
         {
+            LogWorkspaceSkipped(
+                tenantId,
+                settings is null
+                    ? "this workspace has never saved auto-reply settings"
+                    : "automatic replies are switched off for this workspace");
+
             return 0;
         }
 
@@ -163,6 +171,8 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
 
         if (!allowance.HasAiModule)
         {
+            LogPlanWithoutAssistant(tenantId, allowance.PlanName);
+
             return 0;
         }
 
@@ -179,6 +189,8 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
 
         if (senders.Count == 0)
         {
+            LogWorkspaceSkipped(tenantId, "no connected WhatsApp number can send");
+
             return 0;
         }
 
@@ -191,6 +203,10 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
 
         if (due.Count == 0)
         {
+            // The commonest answer by far, and the least obvious: the message was not a greeting,
+            // the delay has not elapsed yet, or this thread has had its replies for today.
+            LogNoOccasionMatched(tenantId, waiting.Count);
+
             return 0;
         }
 
@@ -747,6 +763,30 @@ public sealed partial class AutoReplyDispatchService : IAutoReplyDispatchService
         Level = LogLevel.Information,
         Message = "Automatic reply sent on conversation {ConversationId} for {Trigger}: {Status}.")]
     private partial void LogReplySent(long conversationId, string trigger, InboxMessageStatus status);
+
+    [LoggerMessage(
+        EventId = 2755,
+        Level = LogLevel.Debug,
+        Message = "Automatic replies did nothing this run: {Reason}.")]
+    private partial void LogNothingToDo(string reason);
+
+    [LoggerMessage(
+        EventId = 2756,
+        Level = LogLevel.Debug,
+        Message = "Workspace {TenantId} was skipped by automatic replies: {Reason}.")]
+    private partial void LogWorkspaceSkipped(long tenantId, string reason);
+
+    [LoggerMessage(
+        EventId = 2757,
+        Level = LogLevel.Debug,
+        Message = "Workspace {TenantId} was skipped by automatic replies: the {PlanName} plan does not include the assistant.")]
+    private partial void LogPlanWithoutAssistant(long tenantId, string planName);
+
+    [LoggerMessage(
+        EventId = 2758,
+        Level = LogLevel.Debug,
+        Message = "Workspace {TenantId} was skipped by automatic replies: none of its {Waiting} waiting conversations matched a switched-on occasion.")]
+    private partial void LogNoOccasionMatched(long tenantId, int waiting);
 
     [LoggerMessage(
         EventId = 2751,

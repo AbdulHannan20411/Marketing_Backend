@@ -51,12 +51,16 @@ public static class SerilogConfigurator
         ArgumentNullException.ThrowIfNull(hostConfiguration);
         ArgumentNullException.ThrowIfNull(environment);
 
+        // Defaults first, configuration second, because in Serilog the last word wins. The other
+        // way round - which is how this read for a while - meant the whole `Serilog:MinimumLevel`
+        // section was dead: a deployment could ask for Debug, the code would answer Information,
+        // and the diagnostics someone had just added were filtered out with nothing to say why.
         configuration
-            .ReadFrom.Configuration(hostConfiguration)
             .MinimumLevel.Information()
             .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
             .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)
             .MinimumLevel.Override("System.Net.Http.HttpClient", LogEventLevel.Warning)
+            .ReadFrom.Configuration(hostConfiguration)
             .Enrich.FromLogContext()
             .Enrich.WithMachineName()
             .Enrich.WithEnvironmentName()

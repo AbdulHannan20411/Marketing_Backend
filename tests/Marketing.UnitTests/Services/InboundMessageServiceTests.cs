@@ -29,6 +29,8 @@ public sealed class InboundMessageServiceTests
     private readonly IRepository<Conversation> _conversations = Substitute.For<IRepository<Conversation>>();
     private readonly IRepository<ConversationMessage> _messages = Substitute.For<IRepository<ConversationMessage>>();
     private readonly IRepository<Contact> _contacts = Substitute.For<IRepository<Contact>>();
+    private readonly IRepository<Notification> _notifications = Substitute.For<IRepository<Notification>>();
+    private readonly List<Notification> _raised = [];
     private readonly IQueryExecutor _queries = Substitute.For<IQueryExecutor>();
     private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
     private readonly IMediaService _media = Substitute.For<IMediaService>();
@@ -69,6 +71,9 @@ public sealed class InboundMessageServiceTests
 
         _messages.When(repository => repository.Add(Arg.Any<ConversationMessage>()))
             .Do(call => _addedMessages.Add(call.Arg<ConversationMessage>()!));
+
+        _notifications.When(repository => repository.Add(Arg.Any<Notification>()))
+            .Do(call => _raised.Add(call.Arg<Notification>()!));
     }
 
     private InboundMessageService CreateService() =>
@@ -76,6 +81,7 @@ public sealed class InboundMessageServiceTests
             _conversations,
             _messages,
             _contacts,
+            _notifications,
             _queries,
             _unitOfWork,
             _media,
@@ -135,6 +141,65 @@ public sealed class InboundMessageServiceTests
         message.MetaMessageId.Should().Be("wamid.in1");
         message.Status.Should().Be(InboxMessageStatus.Delivered);
         message.OccurredAt.Should().Be(Arrived);
+    }
+
+    [Fact]
+    public async Task Everyone_who_may_read_the_number_is_told_a_customer_wrote_in()
+    {
+        await CreateService().ApplyAsync(Value(TextMessage()), _connection, TestContext.Current.CancellationToken);
+
+        // The same audience as the realtime push - the workspace's admins and the employees granted
+        // this number. A notification is no use to someone who may not open the thread it points at.
+        _raised.Should().HaveCount(2);
+        _raised.Select(notification => notification.UserId).Should().BeEquivalentTo([7L, 9L]);
+
+        var raised = _raised[0];
+
+        raised.Kind.Should().Be(NotificationKind.InboxMessageReceived);
+        raised.Title.Should().Be("New message from Amara Okafor");
+        raised.Body.Should().Be("Could you send the receipt?");
+        raised.ActionRoute.Should().Be("/inbox");
+        raised.TenantId.Should().Be(TenantId);
+
+        // And pushed, so the bell moves without a refresh.
+        await _realtime.Received(2).NotifyUserAsync(
+            Arg.Any<long>(), Arg.Any<Marketing.Application.DTOs.Workspace.AppNotification>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_thread_already_waiting_does_not_ring_the_bell_again()
+    {
+        // Two unread after this one: somebody was already told about this conversation, and six
+        // bells for one customer typing six lines is how people learn to ignore the bell.
+        _queries.FirstOrDefaultAsync(Arg.Any<IQueryable<Conversation>>(), Arg.Any<CancellationToken>())
+            .Returns(new Conversation
+            {
+                Id = 88,
+                TenantId = TenantId,
+                WaId = WaId,
+                ContactName = "Amara Okafor",
+                WhatsAppConnectionId = 31,
+                UnreadCount = 3,
+            });
+
+        await CreateService().ApplyAsync(Value(TextMessage()), _connection, TestContext.Current.CancellationToken);
+
+        _addedMessages.Should().ContainSingle("the message itself is always stored");
+        _raised.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_notification_that_cannot_be_raised_does_not_cost_the_message()
+    {
+        _access.UsersWhoMayViewAsync(31, Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<long>>(_ => throw new InvalidOperationException("no"));
+
+        var applied = await CreateService().ApplyAsync(
+            Value(TextMessage()), _connection, TestContext.Current.CancellationToken);
+
+        // Meta is answered 200 and the thread shows the message; only the bell is missing.
+        applied.Should().Be(1);
+        _addedMessages.Should().ContainSingle();
     }
 
     [Fact]
