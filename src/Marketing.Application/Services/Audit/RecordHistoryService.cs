@@ -292,12 +292,13 @@ public sealed class RecordHistoryService : IRecordHistoryService
     }
 
     /// <summary>
-    /// Hands the stored change set back exactly as it was written.
+    /// Hands the stored change set back as it was written, with a label where one reads better.
     /// </summary>
     /// <remarks>
-    /// Parsed rather than re-serialised, so nothing is added, renamed or "filled in" on the way
-    /// out: the panel shows the fields that changed and no others, which is only true if this
-    /// method leaves the document alone.
+    /// The values are never touched: no field is added, renamed or filled in, so the panel shows
+    /// the fields that changed and no others. The only thing this adds is <c>label</c>, and only
+    /// for the handful of property names that do not humanise well - everything else is left for
+    /// the client to turn into words.
     /// </remarks>
     private static object Parse(string? changes)
     {
@@ -308,7 +309,9 @@ public sealed class RecordHistoryService : IRecordHistoryService
 
         try
         {
-            return JsonSerializer.Deserialize<JsonElement>(changes);
+            var parsed = JsonSerializer.Deserialize<JsonElement>(changes);
+
+            return parsed.ValueKind == JsonValueKind.Object ? Labelled(parsed) : parsed;
         }
         catch (JsonException)
         {
@@ -316,5 +319,36 @@ public sealed class RecordHistoryService : IRecordHistoryService
             // on a history panel.
             return new Dictionary<string, object>();
         }
+    }
+
+    /// <summary>Copies the change set, adding a label to the fields that have one.</summary>
+    /// <param name="changes">The stored document.</param>
+    private static Dictionary<string, object> Labelled(JsonElement changes)
+    {
+        var labelled = new Dictionary<string, object>(StringComparer.Ordinal);
+
+        foreach (var field in changes.EnumerateObject())
+        {
+            var label = AuditFieldLabels.For(field.Name);
+
+            if (label is null || field.Value.ValueKind != JsonValueKind.Object)
+            {
+                labelled[field.Name] = field.Value;
+                continue;
+            }
+
+            // Rebuilt rather than mutated, and the original members are copied across untouched -
+            // old, new and redacted mean exactly what the interceptor wrote.
+            var withLabel = new Dictionary<string, object>(StringComparer.Ordinal) { ["label"] = label };
+
+            foreach (var member in field.Value.EnumerateObject())
+            {
+                withLabel[member.Name] = member.Value;
+            }
+
+            labelled[field.Name] = withLabel;
+        }
+
+        return labelled;
     }
 }

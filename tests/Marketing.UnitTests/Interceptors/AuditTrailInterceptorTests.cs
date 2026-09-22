@@ -5,6 +5,7 @@ using Marketing.DataAccess.Interceptors;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using static Marketing.Common.Constants.AppConstants;
+using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.UnitTests.Interceptors;
 
@@ -153,6 +154,65 @@ public sealed class AuditTrailInterceptorTests : IDisposable
         // to report. Before this, a delete that skipped the soft-delete rewrite left no trace.
         changes.GetProperty(nameof(User.DisplayName)).GetProperty("old").GetString().Should().Be("Operator");
         changes.GetProperty(nameof(User.DisplayName)).TryGetProperty("new", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void An_enum_is_recorded_as_the_name_the_rest_of_the_api_uses()
+    {
+        var tag = new ContactTag { Id = 9, TenantId = TenantId, Name = "slow", Color = TagColor.Danger };
+
+        _context.Attach(tag);
+
+        tag.Color = TagColor.Info;
+
+        Intercept();
+
+        var changes = Changes(Written().Should().ContainSingle().Which);
+
+        // "4" and "3" told a reader nothing, and the mapping lives in a C# enum they cannot see.
+        // POST /tags takes {"color": "danger"}, so the history says the same word.
+        changes.GetProperty(nameof(ContactTag.Color)).GetProperty("old").GetString().Should().Be("danger");
+        changes.GetProperty(nameof(ContactTag.Color)).GetProperty("new").GetString().Should().Be("info");
+    }
+
+    [Fact]
+    public void Bookkeeping_columns_are_not_recorded_as_fields()
+    {
+        var user = Existing();
+
+        user.DisplayName = "Operator Two";
+        user.ModifiedBy = 77;
+        user.ModifiedOn = Now;
+
+        Intercept();
+
+        var changes = Changes(Written().Should().ContainSingle().Which);
+
+        // Who and when are the audit row's own columns, and the panel puts them in the entry's
+        // heading. Recorded as fields as well, one rename read as "3 fields changed".
+        changes.EnumerateObject().Select(property => property.Name)
+            .Should().BeEquivalentTo([nameof(User.DisplayName)]);
+    }
+
+    [Fact]
+    public void A_soft_delete_survives_its_change_set_being_empty()
+    {
+        var user = Existing();
+
+        // A soft delete sets only bookkeeping columns, and none of those are recorded as fields.
+        // Dropping the row for having no changes would lose the delete itself.
+        user.IsDeleted = true;
+        user.DeletedOn = Now;
+        user.DeletedBy = ActingUserId;
+
+        Intercept();
+
+        var log = Written().Should().ContainSingle().Which;
+
+        log.Action.Should().Be(AuditAction.Deleted);
+
+        // Empty, and kept: the delete is the entry, and its own columns say who and when.
+        log.Changes.Should().Be("{}");
     }
 
     [Fact]

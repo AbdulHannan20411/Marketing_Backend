@@ -131,8 +131,9 @@ public sealed class RecordHistoryTests
     private RecordHistoryService CreateService(long? tenantId = 15) =>
         new(_audit, _records, _users, _queries, _caller, new StubTenantContext { TenantId = tenantId });
 
+    /// <summary>The change set as the client receives it, rather than as it is held in memory.</summary>
     private static JsonElement Changes(RecordHistoryEntry entry) =>
-        (JsonElement)entry.Changes;
+        JsonSerializer.SerializeToElement(entry.Changes);
 
     [Fact]
     public async Task A_records_history_comes_back_newest_first_with_names_on_it()
@@ -158,6 +159,32 @@ public sealed class RecordHistoryTests
 
         // A create carries no "old", and nothing fills one in on the way out.
         Changes(page.Items[1]).GetProperty("Name").TryGetProperty("old", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task The_few_fields_that_do_not_humanise_well_carry_a_label()
+    {
+        Entry(changes: """
+            {"BodyText":{"old":"Hi","new":"Hello"},"Name":{"old":"A","new":"B"},"HtmlBody":{"redacted":true}}
+            """);
+
+        var entry = (await CreateService().GetAsync(
+            "Template", "tpl_18", new RecordHistoryQuery(), TestContext.Current.CancellationToken)).Items[0];
+
+        var changes = Changes(entry);
+
+        // "Body text" is what the client would have made of the name on its own.
+        changes.GetProperty("BodyText").GetProperty("label").GetString().Should().Be("Message body");
+
+        // The values are untouched beside it, and a field with no label is left alone entirely for
+        // the client to humanise.
+        changes.GetProperty("BodyText").GetProperty("old").GetString().Should().Be("Hi");
+        changes.GetProperty("BodyText").GetProperty("new").GetString().Should().Be("Hello");
+        changes.GetProperty("Name").TryGetProperty("label", out _).Should().BeFalse();
+
+        // Including a redaction, which keeps its shape rather than gaining values it never had.
+        changes.GetProperty("HtmlBody").GetProperty("redacted").GetBoolean().Should().BeTrue();
+        changes.GetProperty("HtmlBody").EnumerateObject().Should().ContainSingle();
     }
 
     [Fact]
