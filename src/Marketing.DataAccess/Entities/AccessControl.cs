@@ -49,6 +49,25 @@ public sealed class UserPermissionOverride : BaseEntity, IRequiresTenant
     public User User { get; set; } = null!;
 }
 
+/// <summary>One person's answer to "keep telling me about this".</summary>
+/// <remarks>
+/// Not tenant-scoped: the preference follows the person, and an administrator who silences campaign
+/// notifications must not silence them for a colleague in the same workspace. A missing row means
+/// enabled, so a new user, a new category and an untouched switch are all the same thing - nothing
+/// is written until somebody actually turns something off.
+/// </remarks>
+public sealed class UserNotificationPreference : BaseEntity
+{
+    /// <summary>Whose preference it is. Per person, never per workspace.</summary>
+    public long UserId { get; set; }
+
+    /// <summary>The group being switched.</summary>
+    public NotificationCategory Category { get; set; }
+
+    /// <summary>Whether this person still wants these. A missing row means yes.</summary>
+    public bool Enabled { get; set; }
+}
+
 /// <summary>A message shown in the notification centre.</summary>
 /// <remarks>
 /// Tenant-scoped rather than tenant-<em>required</em>: a notification addressed to platform staff

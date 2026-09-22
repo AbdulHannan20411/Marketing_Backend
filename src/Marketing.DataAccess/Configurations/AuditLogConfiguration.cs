@@ -36,8 +36,12 @@ public sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.HasIndex(log => new { log.TenantId, log.OccurredOn })
             .IsDescending(false, true);
 
-        // "Everything that ever happened to this row" - the entity detail drawer.
-        builder.HasIndex(log => new { log.EntityName, log.EntityId });
+        // "Everything that ever happened to this row, newest first" - the history panel, which is
+        // the only shape this table is read in outside an investigation. Time descending as the
+        // third key means the first page is the front of the index rather than a sort of every
+        // entry a long-lived record has collected.
+        builder.HasIndex(log => new { log.EntityName, log.EntityId, log.OccurredOn })
+            .IsDescending(false, false, true);
 
         builder.HasIndex(log => log.UserId);
     }

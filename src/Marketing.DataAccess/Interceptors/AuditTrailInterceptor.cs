@@ -121,7 +121,11 @@ public sealed class AuditTrailInterceptor : SaveChangesInterceptor
         // while it is being modified would throw.
         var auditable = context.ChangeTracker
             .Entries<BaseEntity>()
-            .Where(entry => entry.State is EntityState.Added or EntityState.Modified)
+            // Deleted as well as Added and Modified. Almost every delete in this platform is
+            // rewritten into an IsDeleted update before it reaches here, but not all of them -
+            // a join row cleared out in bulk, say - and a delete that leaves no trace is the one
+            // entry an investigation always wants.
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
             .Where(entry => !ExcludedTypes.Contains(entry.Entity.GetType()))
             .ToList();
 
@@ -172,6 +176,11 @@ public sealed class AuditTrailInterceptor : SaveChangesInterceptor
             return AuditAction.Created;
         }
 
+        if (entry.State == EntityState.Deleted)
+        {
+            return AuditAction.Deleted;
+        }
+
         // The auditing interceptor has already rewritten hard deletes into an IsDeleted update, so
         // a delete arrives here as a modification with that flag newly set.
         var deletedFlag = entry.Property(nameof(BaseEntity.IsDeleted));
@@ -194,7 +203,9 @@ public sealed class AuditTrailInterceptor : SaveChangesInterceptor
                 continue;
             }
 
-            if (action != AuditAction.Created && !property.IsModified)
+            // A create reports every column it set; a hard delete reports every column it took
+            // away. Only an update is about what moved.
+            if (action == AuditAction.Updated && !property.IsModified)
             {
                 continue;
             }
@@ -205,9 +216,17 @@ public sealed class AuditTrailInterceptor : SaveChangesInterceptor
                 continue;
             }
 
-            changes[name] = action == AuditAction.Created
-                ? new { @new = property.CurrentValue }
-                : new { old = property.OriginalValue, @new = property.CurrentValue };
+            changes[name] = action switch
+            {
+                AuditAction.Created => new { @new = property.CurrentValue },
+
+                // The row is going; there is no new value to report, and the old one is the whole
+                // point of the entry.
+                AuditAction.Deleted when entry.State == EntityState.Deleted =>
+                    new { old = property.OriginalValue },
+
+                _ => new { old = property.OriginalValue, @new = property.CurrentValue },
+            };
         }
 
         return changes;

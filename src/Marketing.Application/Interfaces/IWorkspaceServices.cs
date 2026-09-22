@@ -1,4 +1,5 @@
 using Marketing.Application.DTOs.Workspace;
+using static Marketing.Common.Constants.ContractEnums;
 using Marketing.Common.Requests;
 using Marketing.Common.Responses;
 
@@ -124,6 +125,42 @@ public interface INotificationService
 
     /// <summary>Marks every notification read and returns the full updated list.</summary>
     public Task<IReadOnlyList<AppNotification>> MarkAllReadAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Returns which groups the caller still wants, all six of them.</summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<NotificationPreferences> GetPreferencesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Saves the caller's switches and returns the state as stored.
+    /// </summary>
+    /// <remarks>
+    /// Partial by design: a category the body does not mention keeps whatever it had, so an older
+    /// client cannot silently reset a switch it has never heard of.
+    /// </remarks>
+    /// <param name="wanted">The categories to change, keyed by category. Unknown keys are ignored.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<NotificationPreferences> UpdatePreferencesAsync(
+        IReadOnlyDictionary<string, bool> wanted,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Narrows a set of recipients to those who still want to hear about this kind.
+    /// </summary>
+    /// <remarks>
+    /// Called before the rows are written, so a silenced notification is never stored, never
+    /// pushed and never counted - which is the only way a switch can be honest about the bell,
+    /// whose counts are computed server-side. Filtering one recipient out leaves the others alone.
+    /// <para>
+    /// Security and system notifications pass through untouched, whatever is stored for them.
+    /// </para>
+    /// </remarks>
+    /// <param name="userIds">Intended recipients.</param>
+    /// <param name="kind">What they would be told about.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<IReadOnlyList<long>> WhoWantsAsync(
+        IReadOnlyCollection<long> userIds,
+        NotificationKind kind,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Global search across the resolved tenant.</summary>

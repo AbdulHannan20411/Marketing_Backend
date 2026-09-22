@@ -64,6 +64,7 @@ public interface IPaymentNotifier
 public sealed partial class PaymentNotifier : IPaymentNotifier
 {
     private readonly IRepository<Notification> _notifications;
+    private readonly INotificationService _preferences;
     private readonly IUserRepository _users;
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
@@ -77,6 +78,7 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
     /// <summary>Initialises a new instance.</summary>
     public PaymentNotifier(
         IRepository<Notification> notifications,
+        INotificationService preferences,
         IUserRepository users,
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
@@ -90,6 +92,7 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
         ArgumentNullException.ThrowIfNull(options);
 
         _notifications = notifications;
+        _preferences = preferences;
         _users = users;
         _queries = queries;
         _unitOfWork = unitOfWork;
@@ -114,9 +117,16 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
         {
             var reviewers = await LoadReviewersAsync(cancellationToken);
 
+            // A reviewer who switched billing notifications off is dropped before the row is
+            // written, not hidden afterwards.
+            var wanted = await _preferences.WhoWantsAsync(
+                [.. reviewers.Select(reviewer => reviewer.Id)],
+                NotificationKind.PaymentSubmitted,
+                cancellationToken);
+
             var created = new List<Notification>(reviewers.Count);
 
-            foreach (var reviewer in reviewers)
+            foreach (var reviewer in reviewers.Where(reviewer => wanted.Contains(reviewer.Id)))
             {
                 // Addressed to the individual reviewer. A tenant-wide notification is not an option
                 // here: platform staff sit outside every tenant.
@@ -292,6 +302,7 @@ public sealed partial class PaymentNotifier : IPaymentNotifier
         new(
             PublicId.From(PublicId.Notification, notification.Id),
             notification.Kind,
+            NotificationCategories.Of(notification.Kind),
             notification.Title,
             notification.Body,
             notification.Priority,

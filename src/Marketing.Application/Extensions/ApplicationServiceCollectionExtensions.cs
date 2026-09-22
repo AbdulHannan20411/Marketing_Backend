@@ -105,6 +105,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<Services.Security.ISecurityAlertService, Services.Security.SecurityAlertService>();
         services.AddScoped<Services.Security.ISessionTracker, Services.Security.SessionTracker>();
         services.AddScoped<Services.Security.ISecurityOverviewService, Services.Security.SecurityOverviewService>();
+        services.AddScoped<Services.Audit.IRecordHistoryService, Services.Audit.RecordHistoryService>();
         services.AddScoped<ICampaignWriteService, CampaignWriteService>();
         services.AddScoped<IAdminAccountService, AdminAccountService>();
         services.AddScoped<IWhatsAppConnectionService, WhatsAppConnectionService>();

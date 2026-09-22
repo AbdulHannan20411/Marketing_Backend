@@ -4,6 +4,7 @@ using Marketing.Application.DTOs.Workspace;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Extensions;
 using Marketing.Business.Repositories.Interfaces;
+using Marketing.Common.Constants;
 using Marketing.Common.Helpers;
 using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;
@@ -58,6 +59,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
     private readonly IRepository<ConversationMessage> _messages;
     private readonly IRepository<Contact> _contacts;
     private readonly IRepository<Notification> _notifications;
+    private readonly INotificationService _notificationService;
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IMediaService _media;
@@ -73,6 +75,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
         IRepository<ConversationMessage> messages,
         IRepository<Contact> contacts,
         IRepository<Notification> notifications,
+        INotificationService notificationService,
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
         IMediaService media,
@@ -87,6 +90,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
         _messages = messages;
         _contacts = contacts;
         _notifications = notifications;
+        _notificationService = notificationService;
         _queries = queries;
         _unitOfWork = unitOfWork;
         _media = media;
@@ -335,7 +339,13 @@ public sealed partial class InboundMessageService : IInboundMessageService
                 return;
             }
 
-            var recipients = await _access.UsersWhoMayViewAsync(connection.Id, cancellationToken);
+            var mayView = await _access.UsersWhoMayViewAsync(connection.Id, cancellationToken);
+
+            // Whoever has switched Messages off is dropped here, before anything is written: a row
+            // that exists but is hidden still counts towards their bell, which the client cannot
+            // correct because that count is computed server-side.
+            var recipients = await _notificationService.WhoWantsAsync(
+                mayView, NotificationKind.InboxMessageReceived, cancellationToken);
 
             if (recipients.Count == 0)
             {
@@ -377,6 +387,7 @@ public sealed partial class InboundMessageService : IInboundMessageService
                     new AppNotification(
                         PublicId.From(PublicId.Notification, notification.Id),
                         notification.Kind,
+                        NotificationCategories.Of(notification.Kind),
                         notification.Title,
                         notification.Body,
                         notification.Priority,

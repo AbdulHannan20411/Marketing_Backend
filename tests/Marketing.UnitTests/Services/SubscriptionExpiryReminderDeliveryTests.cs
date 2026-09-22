@@ -29,6 +29,7 @@ public sealed class SubscriptionExpiryReminderDeliveryTests
 
     private readonly IRepository<TenantSubscription> _subscriptions = Substitute.For<IRepository<TenantSubscription>>();
     private readonly IRepository<Notification> _notifications = Substitute.For<IRepository<Notification>>();
+    private readonly INotificationService _wants = Substitute.For<INotificationService>();
     private readonly IUserRepository _users = Substitute.For<IUserRepository>();
     private readonly IQueryExecutor _queries = Substitute.For<IQueryExecutor>();
     private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
@@ -56,6 +57,13 @@ public sealed class SubscriptionExpiryReminderDeliveryTests
 
         _users.GetTenantAdministratorsAsync(TenantId, Arg.Any<CancellationToken>())
             .Returns(_administrators);
+
+        // Nobody has switched billing notifications off, which is every user until one does.
+        _wants.WhoWantsAsync(
+                Arg.Any<IReadOnlyCollection<long>>(),
+                Arg.Any<Marketing.Common.Constants.ContractEnums.NotificationKind>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<IReadOnlyCollection<long>>()!.ToList());
 
         _notifications.When(repository => repository.Add(Arg.Any<Notification>()))
             .Do(call => _added.Add(call.Arg<Notification>()!));
@@ -100,6 +108,7 @@ public sealed class SubscriptionExpiryReminderDeliveryTests
         new(
             _subscriptions,
             _notifications,
+            _wants,
             _users,
             _queries,
             _unitOfWork,

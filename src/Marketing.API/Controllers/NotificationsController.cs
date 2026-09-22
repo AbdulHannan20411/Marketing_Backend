@@ -1,7 +1,9 @@
+using System.Text.Json;
 using Asp.Versioning;
 using Marketing.Application.DTOs.Workspace;
 using Marketing.Application.Interfaces;
 using Marketing.Common.Constants;
+using Marketing.Common.Exceptions;
 using Marketing.Common.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -104,6 +106,74 @@ public sealed class NotificationsController : ApiControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> MarkReadAsync(string id, CancellationToken cancellationToken) =>
         Success(await _notifications.MarkReadAsync(id, cancellationToken));
+
+    /// <summary>Returns which groups of notifications the caller still wants.</summary>
+    /// <remarks>
+    /// Always all six, and always <c>true</c> for security and system. A user who has never
+    /// changed anything gets everything on rather than a 404, which would read as "this API has no
+    /// preferences at all".
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The switches.</response>
+    [HttpGet("preferences")]
+    [ProducesResponseType(typeof(ApiResponse<NotificationPreferences>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPreferencesAsync(CancellationToken cancellationToken) =>
+        Success(await _notifications.GetPreferencesAsync(cancellationToken));
+
+    /// <summary>Saves the caller's switches.</summary>
+    /// <remarks>
+    /// Partial: a category the body leaves out keeps what it had. Unknown keys are ignored, so an
+    /// older client sending a category that no longer exists - or a newer one sending a category
+    /// this build has not added yet - still saves the rest. Security and system are stored as on
+    /// whatever the body says.
+    /// </remarks>
+    /// <param name="body">An object of booleans, keyed by category.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">The switches as stored.</response>
+    /// <response code="422">The body was not an object of booleans.</response>
+    [HttpPut("preferences")]
+    [ProducesResponseType(typeof(ApiResponse<NotificationPreferences>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UpdatePreferencesAsync(
+        [FromBody] JsonElement body,
+        CancellationToken cancellationToken)
+    {
+        // Read as raw JSON rather than bound to a type: a model-binding failure is a 400 with the
+        // framework's wording, and this contract asks for a 422 that names the offending key.
+        return Success(
+            await _notifications.UpdatePreferencesAsync(ReadSwitches(body), cancellationToken),
+            "Notification settings saved.");
+    }
+
+    /// <summary>Reads the booleans out of the body, refusing anything else.</summary>
+    /// <param name="body">The request body.</param>
+    private static Dictionary<string, bool> ReadSwitches(JsonElement body)
+    {
+        if (body.ValueKind != JsonValueKind.Object)
+        {
+            throw new ValidationException("preferences", "Send an object of true/false switches.");
+        }
+
+        var wanted = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var property in body.EnumerateObject())
+        {
+            switch (property.Value.ValueKind)
+            {
+                case JsonValueKind.True:
+                case JsonValueKind.False:
+                    wanted[property.Name] = property.Value.GetBoolean();
+                    break;
+
+                default:
+                    throw new ValidationException(
+                        property.Name,
+                        $"\"{property.Name}\" must be true or false.");
+            }
+        }
+
+        return wanted;
+    }
 
     /// <summary>Marks every unread notification read.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>

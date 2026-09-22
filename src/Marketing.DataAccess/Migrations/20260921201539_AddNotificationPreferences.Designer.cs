@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Marketing.DataAccess.Context;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Marketing.DataAccess.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260921201539_AddNotificationPreferences")]
+    partial class AddNotificationPreferences
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -170,13 +173,12 @@ namespace Marketing.DataAccess.Migrations
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_audit_logs_user_id");
 
+                    b.HasIndex("EntityName", "EntityId")
+                        .HasDatabaseName("ix_audit_logs_entity_name_entity_id");
+
                     b.HasIndex("TenantId", "OccurredOn")
                         .IsDescending(false, true)
                         .HasDatabaseName("ix_audit_logs_tenant_id_occurred_on");
-
-                    b.HasIndex("EntityName", "EntityId", "OccurredOn")
-                        .IsDescending(false, false, true)
-                        .HasDatabaseName("ix_audit_logs_entity_name_entity_id_occurred_on");
 
                     b.ToTable("audit_logs", (string)null);
                 });

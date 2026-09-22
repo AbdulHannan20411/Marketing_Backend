@@ -236,6 +236,7 @@ public sealed class NotificationPagingTests
     private NotificationService CreateService() =>
         new(
             _notifications,
+            Substitute.For<IRepository<UserNotificationPreference>>(),
             _queries,
             Substitute.For<IUnitOfWork>(),
             new StubCurrentUser { UserId = UserId },

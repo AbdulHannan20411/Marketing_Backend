@@ -51,6 +51,28 @@ public sealed record PermissionSetResponse(
     int AssignedCount);
 
 /// <summary>
+/// Which groups of notifications one person still wants.
+/// </summary>
+/// <remarks>
+/// Always all six, whatever is stored: a client handed a partial object cannot tell a category it
+/// has never heard of from one that is switched off. <c>Security</c> and <c>System</c> are always
+/// true - they are not offered as switches and are not honoured as ones.
+/// </remarks>
+/// <param name="Messages">Customer replies and conversation assignment.</param>
+/// <param name="Campaigns">A campaign finished, failed or paused.</param>
+/// <param name="Team">Invitations and permission changes.</param>
+/// <param name="Billing">Payments, renewals, plan changes and usage limits.</param>
+/// <param name="Security">Sign-ins and sharing warnings. Always true.</param>
+/// <param name="System">Connections, tokens and allowances. Always true.</param>
+public sealed record NotificationPreferences(
+    bool Messages,
+    bool Campaigns,
+    bool Team,
+    bool Billing,
+    bool Security,
+    bool System);
+
+/// <summary>
 /// How a caller asks for their notifications.
 /// </summary>
 /// <remarks>
@@ -77,6 +99,9 @@ public sealed class NotificationQuery
 
     /// <summary>Severity to filter by, or null for every severity.</summary>
     public NotificationPriority? Priority { get; init; }
+
+    /// <summary>Group to filter by, or null for every group.</summary>
+    public NotificationCategory? Category { get; init; }
 
     /// <summary>Whether the caller asked for a page rather than the whole list.</summary>
     public bool WantsPage => Page.HasValue || PageSize.HasValue;
@@ -109,6 +134,10 @@ public sealed record NotificationFeed(
 /// <summary>A notification.</summary>
 /// <param name="Id">Opaque identifier, prefixed <c>ntf_</c>.</param>
 /// <param name="Kind">What it is about.</param>
+/// <param name="Category">
+/// The group it belongs to, and the switch that silences it. Derived from <paramref name="Kind"/>
+/// server-side so the client never has to infer it from the kind's prefix.
+/// </param>
 /// <param name="Title">Headline.</param>
 /// <param name="Body">Body text.</param>
 /// <param name="Priority">Severity.</param>
@@ -120,6 +149,7 @@ public sealed record NotificationFeed(
 public sealed record AppNotification(
     string Id,
     NotificationKind Kind,
+    NotificationCategory Category,
     string Title,
     string Body,
     NotificationPriority Priority,

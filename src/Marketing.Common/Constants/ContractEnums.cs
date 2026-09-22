@@ -613,6 +613,40 @@ public static class ContractEnums
     }
 
     /// <summary>
+    /// The group a notification belongs to, and the thing a user switches off.
+    /// </summary>
+    /// <remarks>
+    /// Coarser than <see cref="NotificationKind"/> on purpose: people think in "stop telling me
+    /// about campaigns", not in individual event names, and a new kind should join an existing
+    /// switch rather than need one of its own.
+    /// <para>
+    /// <c>Security</c> and <c>System</c> cannot be switched off. They are the ones a user least
+    /// expects - a stolen sign-in, a broken WhatsApp connection, a spent allowance - and a switch
+    /// set months ago must not be the reason nobody noticed.
+    /// </para>
+    /// </remarks>
+    public enum NotificationCategory
+    {
+        /// <summary>Customer replies and conversation assignment.</summary>
+        Messages,
+
+        /// <summary>A campaign finished, failed or paused.</summary>
+        Campaigns,
+
+        /// <summary>Invitations and permission changes.</summary>
+        Team,
+
+        /// <summary>Payments, renewals, plan changes and usage limits.</summary>
+        Billing,
+
+        /// <summary>Sign-ins, shared-login warnings, suspensions. Never silenced.</summary>
+        Security,
+
+        /// <summary>Connections, tokens, allowances - and any kind with no mapping. Never silenced.</summary>
+        System,
+    }
+
+    /// <summary>
     /// What a notification is about.
     /// <para>
     /// Wire values are dotted, which no naming policy produces, so every member pins its own.

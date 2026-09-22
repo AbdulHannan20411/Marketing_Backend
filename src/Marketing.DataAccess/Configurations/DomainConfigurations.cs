@@ -522,6 +522,27 @@ public sealed class UserPermissionOverrideConfiguration : BaseEntityConfiguratio
 }
 
 /// <summary>Fluent configuration for <see cref="Notification"/>.</summary>
+public sealed class UserNotificationPreferenceConfiguration : BaseEntityConfiguration<UserNotificationPreference>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<UserNotificationPreference> builder)
+    {
+        builder.ToTable("user_notification_preferences");
+
+        builder.Property(preference => preference.Category)
+            .IsRequired()
+            .HasMaxLength(20)
+            .HasConversion<string>();
+
+        // One row per person per category. Two would leave two answers to "does Ali want campaign
+        // notifications", and whichever was read first would decide.
+        builder.HasIndex(preference => new { preference.UserId, preference.Category })
+            .IsUnique()
+            .HasFilter("is_deleted = false");
+    }
+}
+
+/// <summary>Fluent configuration for <see cref="Notification"/>.</summary>
 public sealed class NotificationConfiguration : BaseEntityConfiguration<Notification>
 {
     /// <inheritdoc />

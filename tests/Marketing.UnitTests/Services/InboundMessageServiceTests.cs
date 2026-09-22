@@ -30,6 +30,7 @@ public sealed class InboundMessageServiceTests
     private readonly IRepository<ConversationMessage> _messages = Substitute.For<IRepository<ConversationMessage>>();
     private readonly IRepository<Contact> _contacts = Substitute.For<IRepository<Contact>>();
     private readonly IRepository<Notification> _notifications = Substitute.For<IRepository<Notification>>();
+    private readonly INotificationService _wants = Substitute.For<INotificationService>();
     private readonly List<Notification> _raised = [];
     private readonly IQueryExecutor _queries = Substitute.For<IQueryExecutor>();
     private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
@@ -74,6 +75,10 @@ public sealed class InboundMessageServiceTests
 
         _notifications.When(repository => repository.Add(Arg.Any<Notification>()))
             .Do(call => _raised.Add(call.Arg<Notification>()!));
+
+        // Nobody has switched messages off, which is every user until one does.
+        _wants.WhoWantsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<NotificationKind>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<IReadOnlyCollection<long>>()!.ToList());
     }
 
     private InboundMessageService CreateService() =>
@@ -82,6 +87,7 @@ public sealed class InboundMessageServiceTests
             _messages,
             _contacts,
             _notifications,
+            _wants,
             _queries,
             _unitOfWork,
             _media,
@@ -164,6 +170,27 @@ public sealed class InboundMessageServiceTests
         // And pushed, so the bell moves without a refresh.
         await _realtime.Received(2).NotifyUserAsync(
             Arg.Any<long>(), Arg.Any<Marketing.Application.DTOs.Workspace.AppNotification>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Someone_who_switched_messages_off_is_not_told_and_their_colleague_still_is()
+    {
+        // User 7 has silenced Messages; user 9 has not. The filter runs before anything is written,
+        // so there is no hidden row counting towards user 7's bell.
+        _wants.WhoWantsAsync(
+                Arg.Any<IReadOnlyCollection<long>>(),
+                NotificationKind.InboxMessageReceived,
+                Arg.Any<CancellationToken>())
+            .Returns([9L]);
+
+        await CreateService().ApplyAsync(Value(TextMessage()), _connection, TestContext.Current.CancellationToken);
+
+        _raised.Should().ContainSingle().Which.UserId.Should().Be(9L);
+
+        await _realtime.Received(1).NotifyUserAsync(
+            9L, Arg.Any<Marketing.Application.DTOs.Workspace.AppNotification>(), Arg.Any<CancellationToken>());
+        await _realtime.DidNotReceive().NotifyUserAsync(
+            7L, Arg.Any<Marketing.Application.DTOs.Workspace.AppNotification>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

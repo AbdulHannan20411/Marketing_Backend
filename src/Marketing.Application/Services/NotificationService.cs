@@ -2,6 +2,7 @@ using Marketing.Application.DTOs.Workspace;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Exceptions;
+using Marketing.Common.Constants;
 using Marketing.Common.Helpers;
 using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;
@@ -22,6 +23,7 @@ public sealed class NotificationService : INotificationService
     private const int MaxNotifications = 50;
 
     private readonly IRepository<Notification> _notifications;
+    private readonly IRepository<UserNotificationPreference> _preferences;
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUser _currentUser;
@@ -30,12 +32,14 @@ public sealed class NotificationService : INotificationService
     /// <summary>Initialises a new instance.</summary>
     public NotificationService(
         IRepository<Notification> notifications,
+        IRepository<UserNotificationPreference> preferences,
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
         ICurrentUser currentUser,
         ITenantContext tenantContext)
     {
         _notifications = notifications;
+        _preferences = preferences;
         _queries = queries;
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
@@ -47,8 +51,11 @@ public sealed class NotificationService : INotificationService
     {
         var userId = _currentUser.UserId;
 
+        var silenced = await SilencedKindsAsync(userId, cancellationToken);
+
         var rows = await _queries.ToListAsync(
             Scoped(userId)
+                .Where(notification => !silenced.Contains(notification.Kind))
                 .OrderByDescending(notification => notification.OccurredOn)
                 .Take(MaxNotifications),
             cancellationToken);
@@ -64,7 +71,13 @@ public sealed class NotificationService : INotificationService
         ArgumentNullException.ThrowIfNull(query);
 
         var userId = _currentUser.UserId;
-        var mine = Scoped(userId);
+
+        // Applied to the rows and to both counters. A silenced category that still counted towards
+        // the bell would be the switch's most obvious lie, and the client cannot correct it: the
+        // two numbers below are computed here, not from the page.
+        var silenced = await SilencedKindsAsync(userId, cancellationToken);
+
+        var mine = Scoped(userId).Where(notification => !silenced.Contains(notification.Kind));
 
         var size = Math.Clamp(query.PageSize ?? NotificationQuery.DefaultPageSize, 1, NotificationQuery.MaxPageSize);
         var page = Math.Max(query.Page ?? 1, 1);
@@ -79,6 +92,22 @@ public sealed class NotificationService : INotificationService
         if (query.Priority is { } priority)
         {
             matching = matching.Where(notification => notification.Priority == priority);
+        }
+
+        if (query.Category is { } category)
+        {
+            // Expanded to kinds rather than matched on a stored category, so the grouping has one
+            // definition and old rows written before categories existed are filed correctly too.
+            var kinds = NotificationCategories.KindsIn(category);
+
+            matching = category == NotificationCategory.System
+
+                // System is the fallback, so it is everything that is not mapped elsewhere - which
+                // cannot be listed, only excluded.
+                ? matching.Where(notification =>
+                    kinds.Contains(notification.Kind)
+                    || !NotificationCategories.Mapped.Contains(notification.Kind))
+                : matching.Where(notification => kinds.Contains(notification.Kind));
         }
 
         var total = await _queries.CountAsync(matching, cancellationToken);
@@ -191,10 +220,186 @@ public sealed class NotificationService : INotificationService
             || (notification.TenantId == null && notification.UserId == null));
     }
 
+    /// <inheritdoc />
+    public async Task<NotificationPreferences> GetPreferencesAsync(CancellationToken cancellationToken = default)
+    {
+        var userId = _currentUser.UserId
+                     ?? throw new AuthenticationException("not_authenticated");
+
+        return Shape(await StoredAsync(userId, cancellationToken));
+    }
+
+    /// <inheritdoc />
+    public async Task<NotificationPreferences> UpdatePreferencesAsync(
+        IReadOnlyDictionary<string, bool> wanted,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(wanted);
+
+        var userId = _currentUser.UserId
+                     ?? throw new AuthenticationException("not_authenticated");
+
+        var rows = await _queries.ToListAsync(
+            _preferences.Query(asNoTracking: false).Where(preference => preference.UserId == userId),
+            cancellationToken);
+
+        var changed = false;
+
+        foreach (var category in NotificationCategories.All)
+        {
+            // Unknown keys are ignored rather than refused: an older client may send a category
+            // that no longer exists, a newer one may send a category this build has not added yet,
+            // and neither is worth failing a settings save over.
+            if (!wanted.TryGetValue(Wire(category), out var enabled))
+            {
+                continue;
+            }
+
+            // The two that cannot be silenced are stored as on whatever the body says, so a client
+            // that sends them - and the frontend sends all six - cannot write a row that would
+            // later be read as "this person asked not to be warned about a stolen sign-in".
+            if (!NotificationCategories.CanBeSilenced(category))
+            {
+                enabled = true;
+            }
+
+            var row = rows.FirstOrDefault(preference => preference.Category == category);
+
+            if (row is null)
+            {
+                // Nothing is written for a switch left on: absent already means enabled.
+                if (enabled)
+                {
+                    continue;
+                }
+
+                _preferences.Add(new UserNotificationPreference
+                {
+                    UserId = userId,
+                    Category = category,
+                    Enabled = false,
+                });
+
+                changed = true;
+
+                continue;
+            }
+
+            if (row.Enabled != enabled)
+            {
+                row.Enabled = enabled;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+
+        return Shape(await StoredAsync(userId, cancellationToken));
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<long>> WhoWantsAsync(
+        IReadOnlyCollection<long> userIds,
+        NotificationKind kind,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(userIds);
+
+        var category = NotificationCategories.Of(kind);
+
+        if (userIds.Count == 0 || !NotificationCategories.CanBeSilenced(category))
+        {
+            return [.. userIds];
+        }
+
+        // One query for the whole audience: this runs on the inbound-message path, which is as hot
+        // as anything in the product.
+        var silenced = await _queries.ToListAsync(
+            _preferences.Query()
+                .Where(preference =>
+                    userIds.Contains(preference.UserId)
+                    && preference.Category == category
+                    && !preference.Enabled)
+                .Select(preference => preference.UserId),
+            cancellationToken);
+
+        return silenced.Count == 0
+            ? [.. userIds]
+            : [.. userIds.Where(userId => !silenced.Contains(userId))];
+    }
+
+    /// <summary>The wire name of a category, which is what the client sends.</summary>
+    private static string Wire(NotificationCategory category) =>
+        category.ToString().ToLowerInvariant();
+
+    /// <summary>Turns the stored answers into the six-field object the contract specifies.</summary>
+    private static NotificationPreferences Shape(Dictionary<NotificationCategory, bool> stored) =>
+        new(
+            stored[NotificationCategory.Messages],
+            stored[NotificationCategory.Campaigns],
+            stored[NotificationCategory.Team],
+            stored[NotificationCategory.Billing],
+            Security: true,
+            System: true);
+
+    /// <summary>
+    /// Reads the caller's switches, defaulting to on.
+    /// </summary>
+    /// <remarks>
+    /// A missing row means enabled, so nothing is written until somebody actually turns something
+    /// off, and a category added later starts on for everyone without a backfill.
+    /// </remarks>
+    private async Task<Dictionary<NotificationCategory, bool>> StoredAsync(
+        long userId,
+        CancellationToken cancellationToken)
+    {
+        var rows = await _queries.ToListAsync(
+            _preferences.Query().Where(preference => preference.UserId == userId),
+            cancellationToken);
+
+        var stored = new Dictionary<NotificationCategory, bool>();
+
+        foreach (var category in NotificationCategories.All)
+        {
+            var row = rows.FirstOrDefault(preference => preference.Category == category);
+
+            // Security and system are never honoured as switches, whatever a stale row says.
+            stored[category] = !NotificationCategories.CanBeSilenced(category)
+                               || row is null
+                               || row.Enabled;
+        }
+
+        return stored;
+    }
+
+    /// <summary>The kinds this user has asked not to hear about. Empty for almost everyone.</summary>
+    private async Task<IReadOnlyList<NotificationKind>> SilencedKindsAsync(
+        long? userId,
+        CancellationToken cancellationToken)
+    {
+        if (userId is not { } id)
+        {
+            return [];
+        }
+
+        var stored = await StoredAsync(id, cancellationToken);
+
+        return
+        [
+            .. stored
+                .Where(entry => !entry.Value)
+                .SelectMany(entry => NotificationCategories.KindsIn(entry.Key)),
+        ];
+    }
+
     private static AppNotification Map(Notification notification) =>
         new(
             PublicId.From(PublicId.Notification, notification.Id),
             notification.Kind,
+            NotificationCategories.Of(notification.Kind),
             notification.Title,
             notification.Body,
             notification.Priority,

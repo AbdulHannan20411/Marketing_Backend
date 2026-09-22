@@ -37,6 +37,7 @@ public sealed partial class SubscriptionExpiryReminderService : ISubscriptionExp
 
     private readonly IRepository<TenantSubscription> _subscriptions;
     private readonly IRepository<Notification> _notifications;
+    private readonly INotificationService _preferences;
     private readonly IUserRepository _users;
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
@@ -51,6 +52,7 @@ public sealed partial class SubscriptionExpiryReminderService : ISubscriptionExp
     public SubscriptionExpiryReminderService(
         IRepository<TenantSubscription> subscriptions,
         IRepository<Notification> notifications,
+        INotificationService preferences,
         IUserRepository users,
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
@@ -65,6 +67,7 @@ public sealed partial class SubscriptionExpiryReminderService : ISubscriptionExp
 
         _subscriptions = subscriptions;
         _notifications = notifications;
+        _preferences = preferences;
         _users = users;
         _queries = queries;
         _unitOfWork = unitOfWork;
@@ -180,7 +183,15 @@ public sealed partial class SubscriptionExpiryReminderService : ISubscriptionExp
         // stamps TenantId from this context, not from the entity handed to it.
         using (_tenantContext.BeginScope(tenantId))
         {
-            foreach (var administrator in administrators)
+            // Billing can be switched off per person, so whoever asked not to hear about it is
+            // dropped before any row is written. The email is a separate decision, made by whoever
+            // sends it; a muted category means silence on every channel.
+            var wanted = await _preferences.WhoWantsAsync(
+                [.. administrators.Select(administrator => administrator.Id)],
+                NotificationKind.SubscriptionExpiring,
+                cancellationToken);
+
+            foreach (var administrator in administrators.Where(administrator => wanted.Contains(administrator.Id)))
             {
                 _notifications.Add(new Notification
                 {

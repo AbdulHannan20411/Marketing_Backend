@@ -131,6 +131,10 @@ public class ApplicationDbContext : DbContext
     /// <summary>Notifications.</summary>
     public DbSet<Notification> Notifications => Set<Notification>();
 
+    /// <summary>Which notification groups each person still wants.</summary>
+    public DbSet<UserNotificationPreference> UserNotificationPreferences =>
+        Set<UserNotificationPreference>();
+
     /// <summary>Single-use invitation and password-reset tokens.</summary>
     public DbSet<UserToken> UserTokens => Set<UserToken>();
 
