@@ -126,6 +126,37 @@ public interface INotificationService
     /// <summary>Marks every notification read and returns the full updated list.</summary>
     public Task<IReadOnlyList<AppNotification>> MarkAllReadAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Clears one notification from the caller's feed.
+    /// </summary>
+    /// <remarks>
+    /// Idempotent. An identifier that is already gone - two open tabs, a retry - is an ordinary
+    /// outcome and answers zero, not an error. An identifier belonging to somebody else answers
+    /// zero as well: a refusal would confirm that the notification exists.
+    /// <para>
+    /// The event the notification is about is untouched. Clearing "campaign failed" clears the
+    /// message, never the campaign, its delivery report or its audit trail.
+    /// </para>
+    /// </remarks>
+    /// <param name="notificationId">Notification identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<NotificationDeleteResult> DeleteAsync(
+        string notificationId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Clears several notifications from the caller's feed, by identifier or by scope.
+    /// </summary>
+    /// <remarks>
+    /// A scope is evaluated over everything addressed to the caller, not over the rows a client
+    /// happens to hold, so "delete all" does not leave behind what arrived while the page was open.
+    /// </remarks>
+    /// <param name="request">The identifiers, or the scope. Exactly one of the two.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<NotificationDeleteResult> DeleteManyAsync(
+        DeleteNotificationsRequest request,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Returns which groups the caller still wants, all six of them.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task<NotificationPreferences> GetPreferencesAsync(CancellationToken cancellationToken = default);

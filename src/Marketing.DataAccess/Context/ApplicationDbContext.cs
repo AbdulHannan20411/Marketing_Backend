@@ -135,6 +135,10 @@ public class ApplicationDbContext : DbContext
     public DbSet<UserNotificationPreference> UserNotificationPreferences =>
         Set<UserNotificationPreference>();
 
+    /// <summary>Shared notifications individual people have cleared from their own feed.</summary>
+    public DbSet<NotificationDismissal> NotificationDismissals =>
+        Set<NotificationDismissal>();
+
     /// <summary>Single-use invitation and password-reset tokens.</summary>
     public DbSet<UserToken> UserTokens => Set<UserToken>();
 

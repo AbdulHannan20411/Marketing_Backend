@@ -73,6 +73,41 @@ public sealed record NotificationPreferences(
     bool System);
 
 /// <summary>
+/// Which notifications a bulk delete should clear.
+/// </summary>
+/// <remarks>
+/// Exactly one of the two is given. Both together is ambiguous - a scope that contradicts the list
+/// has no obvious winner - and neither is an empty instruction, so both are refused rather than
+/// guessed at.
+/// </remarks>
+/// <param name="Ids">The identifiers to delete, for the rows a person ticked.</param>
+/// <param name="Scope">The set to delete, evaluated server-side over everything the caller has.</param>
+public sealed record DeleteNotificationsRequest(
+    IReadOnlyList<string>? Ids,
+    NotificationDeleteScope? Scope)
+{
+    /// <summary>
+    /// Most identifiers one request may carry.
+    /// </summary>
+    /// <remarks>
+    /// Far more than any screen can select. The point is a bound on the <c>IN</c> clause, not a
+    /// limit anybody will meet: clearing more than this is what <see cref="Scope"/> is for.
+    /// </remarks>
+    public const int MaxIds = 500;
+}
+
+/// <summary>
+/// How many notifications a delete removed.
+/// </summary>
+/// <remarks>
+/// The client has already taken the rows off screen, so this is wording for the confirmation
+/// rather than state. A count higher than the person expected - rows this tab never held - is the
+/// truthful answer, not a discrepancy.
+/// </remarks>
+/// <param name="Deleted">Notifications cleared for the caller. Zero when they were already gone.</param>
+public sealed record NotificationDeleteResult(int Deleted);
+
+/// <summary>
 /// How a caller asks for their notifications.
 /// </summary>
 /// <remarks>

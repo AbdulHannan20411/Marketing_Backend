@@ -542,6 +542,29 @@ public sealed class UserNotificationPreferenceConfiguration : BaseEntityConfigur
     }
 }
 
+/// <summary>Fluent configuration for <see cref="NotificationDismissal"/>.</summary>
+public sealed class NotificationDismissalConfiguration : BaseEntityConfiguration<NotificationDismissal>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<NotificationDismissal> builder)
+    {
+        builder.ToTable("notification_dismissals");
+
+        // One row per person per notification. Dismissing twice - two tabs, a retry - is ordinary,
+        // and a second row would make the anti-join below count the same decision twice.
+        builder.HasIndex(dismissal => new { dismissal.UserId, dismissal.NotificationId })
+            .IsUnique()
+            .HasFilter("is_deleted = false");
+
+        // Cascade: when the purge job finally removes the notification there is nothing left to
+        // dismiss, and a dangling row would outlive the thing it refers to.
+        builder.HasOne<Notification>()
+            .WithMany()
+            .HasForeignKey(dismissal => dismissal.NotificationId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
 /// <summary>Fluent configuration for <see cref="Notification"/>.</summary>
 public sealed class NotificationConfiguration : BaseEntityConfiguration<Notification>
 {

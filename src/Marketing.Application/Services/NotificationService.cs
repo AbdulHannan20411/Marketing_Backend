@@ -1,3 +1,4 @@
+using System.Net;
 using Marketing.Application.DTOs.Workspace;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Repositories.Interfaces;
@@ -24,6 +25,7 @@ public sealed class NotificationService : INotificationService
 
     private readonly IRepository<Notification> _notifications;
     private readonly IRepository<UserNotificationPreference> _preferences;
+    private readonly IRepository<NotificationDismissal> _dismissals;
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUser _currentUser;
@@ -33,6 +35,7 @@ public sealed class NotificationService : INotificationService
     public NotificationService(
         IRepository<Notification> notifications,
         IRepository<UserNotificationPreference> preferences,
+        IRepository<NotificationDismissal> dismissals,
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
         ICurrentUser currentUser,
@@ -40,6 +43,7 @@ public sealed class NotificationService : INotificationService
     {
         _notifications = notifications;
         _preferences = preferences;
+        _dismissals = dismissals;
         _queries = queries;
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
@@ -188,6 +192,161 @@ public sealed class NotificationService : INotificationService
         return await GetAsync(cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task<NotificationDeleteResult> DeleteAsync(
+        string notificationId,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = Caller();
+
+        // Parsed rather than validated. An identifier this route cannot read names nothing the
+        // caller has, which is the same answer as one that has already gone - and a 422 here would
+        // turn a stale client into an error dialog over a row that is not there either way.
+        if (!PublicId.TryParse(PublicId.Notification, notificationId, out var id))
+        {
+            return new NotificationDeleteResult(0);
+        }
+
+        var notification = await _queries.FirstOrDefaultAsync(
+            Scoped(userId, tracked: true).Where(row => row.Id == id),
+            cancellationToken);
+
+        // Missing, already cleared, or somebody else's - one answer for all three. Distinguishing
+        // them would let a caller confirm that an identifier exists by the shape of the refusal.
+        if (notification is null)
+        {
+            return new NotificationDeleteResult(0);
+        }
+
+        Clear(notification, userId);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return new NotificationDeleteResult(1);
+    }
+
+    /// <inheritdoc />
+    public async Task<NotificationDeleteResult> DeleteManyAsync(
+        DeleteNotificationsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var userId = Caller();
+
+        var rows = await MatchingAsync(request, userId, cancellationToken);
+
+        foreach (var notification in rows)
+        {
+            Clear(notification, userId);
+        }
+
+        if (rows.Count > 0)
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+
+        return new NotificationDeleteResult(rows.Count);
+    }
+
+    /// <summary>Resolves what a bulk delete is being asked to clear.</summary>
+    /// <param name="request">The identifiers, or the scope.</param>
+    /// <param name="userId">The caller.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task<IReadOnlyList<Notification>> MatchingAsync(
+        DeleteNotificationsRequest request,
+        long userId,
+        CancellationToken cancellationToken)
+    {
+        // Exactly one of the two. Both is ambiguous - a scope that disagrees with the list has no
+        // obvious winner - and neither is an instruction to do nothing dressed up as a request.
+        if ((request.Ids is not null) == (request.Scope is not null))
+        {
+            throw new RequestRejectedException(
+                HttpStatusCode.BadRequest,
+                "invalid_request",
+                "Send either \"ids\" or \"scope\", and not both.",
+                "ids");
+        }
+
+        if (request.Ids is { } given)
+        {
+            if (given.Count > DeleteNotificationsRequest.MaxIds)
+            {
+                throw new RequestRejectedException(
+                    HttpStatusCode.BadRequest,
+                    "too_many_ids",
+                    $"Delete at most {DeleteNotificationsRequest.MaxIds} notifications at a time, or send a scope.",
+                    "ids");
+            }
+
+            var ids = new List<long>(given.Count);
+
+            foreach (var value in given)
+            {
+                // Unreadable identifiers are dropped, for the reason given in DeleteAsync. Nine
+                // good ones and one stale one should clear nine, not fail ten.
+                if (PublicId.TryParse(PublicId.Notification, value, out var id))
+                {
+                    ids.Add(id);
+                }
+            }
+
+            return ids.Count == 0
+                ? []
+                : await _queries.ToListAsync(
+                    Scoped(userId, tracked: true).Where(row => ids.Contains(row.Id)),
+                    cancellationToken);
+        }
+
+        // A scope clears what the caller can actually see, so silenced categories are left alone:
+        // "delete all" means the list in front of them, and a category switched off for a month
+        // should still have its history when it is switched back on.
+        var silenced = await SilencedKindsAsync(userId, cancellationToken);
+
+        var matching = Scoped(userId, tracked: true)
+            .Where(notification => !silenced.Contains(notification.Kind));
+
+        if (request.Scope == NotificationDeleteScope.Read)
+        {
+            matching = matching.Where(notification => notification.Read);
+        }
+
+        return await _queries.ToListAsync(matching, cancellationToken);
+    }
+
+    /// <summary>
+    /// Takes one notification out of this caller's feed, and only this caller's.
+    /// </summary>
+    /// <remarks>
+    /// Which of the two things that means depends on who the row belongs to, and the difference
+    /// matters: a workspace-wide notification is a single row several people read, so deleting it
+    /// would clear it off a colleague's screen too.
+    /// </remarks>
+    /// <param name="notification">The row, tracked.</param>
+    /// <param name="userId">The caller.</param>
+    private void Clear(Notification notification, long userId)
+    {
+        if (notification.UserId is null)
+        {
+            _dismissals.Add(new NotificationDismissal
+            {
+                UserId = userId,
+                NotificationId = notification.Id,
+            });
+
+            return;
+        }
+
+        // Soft, as everywhere else: the global filter takes it out of every query, and a support
+        // question about a notification somebody swears they never received is still answerable.
+        _notifications.Remove(notification);
+    }
+
+    /// <summary>The signed-in user. Deleting is personal, so there is no sensible anonymous case.</summary>
+    private long Caller() =>
+        _currentUser.UserId ?? throw new AuthenticationException("not_authenticated");
+
     /// <summary>
     /// Notifications addressed to this user, plus tenant-wide ones.
     /// <para>
@@ -205,6 +364,15 @@ public sealed class NotificationService : INotificationService
         // workspace, so only the recipient test is added here. For a platform administrator it is
         // bypassed by design, which is exactly why the constraint below has to be explicit.
         var query = _notifications.Query(asNoTracking: !tracked);
+
+        // A shared notification - one row, read by the whole workspace - is cleared per person
+        // rather than deleted, so the ones this caller has cleared are subtracted here. Written as
+        // a correlated exists rather than a list of identifiers loaded up front: the set is
+        // unbounded in principle, and the unique index makes this an index probe.
+        query = query.Where(notification =>
+            notification.UserId != null
+            || !_dismissals.Query().Any(dismissal =>
+                dismissal.UserId == userId && dismissal.NotificationId == notification.Id));
 
         if (_tenantContext.TenantId is { } tenantId)
         {

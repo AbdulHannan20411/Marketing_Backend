@@ -175,6 +175,48 @@ public sealed class NotificationsController : ApiControllerBase
         return wanted;
     }
 
+    /// <summary>Clears one notification from the caller's feed.</summary>
+    /// <remarks>
+    /// Idempotent, and deliberately quiet: an identifier that is already gone, that cannot be read,
+    /// or that belongs to a colleague all answer <c>200</c> with <c>deleted: 0</c> rather than a
+    /// refusal. Two open tabs deleting the same row is ordinary, and a 404 that distinguished
+    /// "already gone" from "not yours" would confirm that somebody else's identifier exists.
+    /// <para>
+    /// Deletes the message, never the thing it is about. Clearing "Campaign X failed" leaves the
+    /// campaign, its delivery report and its history exactly where they were.
+    /// </para>
+    /// </remarks>
+    /// <param name="id">Notification identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">How many were cleared: one, or zero if it had already gone.</response>
+    [HttpDelete("{id}")]
+    [ProducesResponseType(typeof(ApiResponse<NotificationDeleteResult>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> DeleteAsync(string id, CancellationToken cancellationToken) =>
+        Success(await _notifications.DeleteAsync(id, cancellationToken));
+
+    /// <summary>Clears several notifications from the caller's feed.</summary>
+    /// <remarks>
+    /// Exactly one of <c>ids</c> and <c>scope</c>; both, or neither, is a <c>400</c>. A scope is
+    /// evaluated here over everything addressed to the caller, not over the rows a client is
+    /// holding, so "delete all" does not leave behind whatever arrived while the page was open.
+    /// <para>
+    /// A <c>POST</c> rather than a <c>DELETE</c> with a body. A body on <c>DELETE</c> is permitted
+    /// but unreliable in practice - proxies and HTTP stacks are within their rights to drop it -
+    /// and this matches <c>POST /notifications/read-all</c>, which is the same shape of operation.
+    /// </para>
+    /// </remarks>
+    /// <param name="request">The identifiers to clear, or the scope to clear.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">How many were cleared.</response>
+    /// <response code="400">Both <c>ids</c> and <c>scope</c>, neither, or too many identifiers.</response>
+    [HttpPost("delete")]
+    [ProducesResponseType(typeof(ApiResponse<NotificationDeleteResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> DeleteManyAsync(
+        [FromBody] DeleteNotificationsRequest request,
+        CancellationToken cancellationToken) =>
+        Success(await _notifications.DeleteManyAsync(request, cancellationToken));
+
     /// <summary>Marks every unread notification read.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The updated notifications.</response>

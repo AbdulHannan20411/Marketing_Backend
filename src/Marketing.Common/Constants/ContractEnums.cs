@@ -647,6 +647,24 @@ public static class ContractEnums
     }
 
     /// <summary>
+    /// Which of the caller's notifications a bulk delete clears.
+    /// </summary>
+    /// <remarks>
+    /// A scope rather than a list of identifiers, because the client only knows about the rows it
+    /// is holding. "Delete all" built from those would leave behind anything raised since the page
+    /// loaded, or never delivered to this tab - and the row would reappear on the next refresh,
+    /// which reads as a broken delete rather than as a new notification.
+    /// </remarks>
+    public enum NotificationDeleteScope
+    {
+        /// <summary>Everything addressed to the caller.</summary>
+        All,
+
+        /// <summary>Everything the caller has already read.</summary>
+        Read,
+    }
+
+    /// <summary>
     /// What a notification is about.
     /// <para>
     /// Wire values are dotted, which no naming policy produces, so every member pins its own.

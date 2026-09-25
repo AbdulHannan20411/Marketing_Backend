@@ -68,6 +68,29 @@ public sealed class UserNotificationPreference : BaseEntity
     public bool Enabled { get; set; }
 }
 
+/// <summary>
+/// One person's decision to clear a notification addressed to their whole workspace.
+/// </summary>
+/// <remarks>
+/// Notifications come in two shapes. Most carry a recipient and are one person's row, so deleting
+/// one is deleting the row. A <see cref="Notification.UserId"/> of null means "everyone in the
+/// workspace" - one row read by the whole team - and deleting <em>that</em> row would clear a
+/// notification off five colleagues' screens because one of them was finished with it.
+/// <para>
+/// So a shared notification is never deleted by a user. This records who has dismissed it, and the
+/// feed leaves out the ones the caller has. The row itself survives for everybody else, and is the
+/// purge job's problem rather than a person's.
+/// </para>
+/// </remarks>
+public sealed class NotificationDismissal : BaseEntity
+{
+    /// <summary>Who dismissed it. Per person, never per workspace.</summary>
+    public long UserId { get; set; }
+
+    /// <summary>The shared notification they are finished with.</summary>
+    public long NotificationId { get; set; }
+}
+
 /// <summary>A message shown in the notification centre.</summary>
 /// <remarks>
 /// Tenant-scoped rather than tenant-<em>required</em>: a notification addressed to platform staff

@@ -76,6 +76,8 @@ public sealed class NotificationPreferenceTests
     private readonly IRepository<Notification> _notifications = Substitute.For<IRepository<Notification>>();
     private readonly IRepository<UserNotificationPreference> _preferences =
         Substitute.For<IRepository<UserNotificationPreference>>();
+    private readonly IRepository<NotificationDismissal> _dismissals =
+        Substitute.For<IRepository<NotificationDismissal>>();
     private readonly InMemoryQueryExecutor _queries = new();
     private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
 
@@ -83,6 +85,7 @@ public sealed class NotificationPreferenceTests
     {
         _notifications.Query(Arg.Any<bool>()).Returns(_ => _rows.AsQueryable());
         _preferences.Query(Arg.Any<bool>()).Returns(_ => _stored.AsQueryable());
+        _dismissals.Query(Arg.Any<bool>()).Returns(_ => Array.Empty<NotificationDismissal>().AsQueryable());
 
         _preferences.When(repository => repository.Add(Arg.Any<UserNotificationPreference>()))
             .Do(call => _stored.Add(call.Arg<UserNotificationPreference>()!));
@@ -92,6 +95,7 @@ public sealed class NotificationPreferenceTests
         new(
             _notifications,
             _preferences,
+            _dismissals,
             _queries,
             _unitOfWork,
             new StubCurrentUser { UserId = userId },

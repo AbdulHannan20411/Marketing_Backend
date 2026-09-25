@@ -60,7 +60,18 @@ public sealed class AuditTrailInterceptor : SaveChangesInterceptor
     /// their content. Reply attempts are operational bookkeeping that repeats the customer's words.
     /// </remarks>
     private static readonly HashSet<Type> ExcludedTypes =
-        [typeof(RefreshToken), typeof(AutoReplyKnowledgeEntry), typeof(AutoReplyAttempt)];
+    [
+        typeof(RefreshToken),
+        typeof(AutoReplyKnowledgeEntry),
+        typeof(AutoReplyAttempt),
+
+        // A notification is a message about a business record, not a business record. Every one
+        // written produced an audit entry saying a message had been written, and clearing a full
+        // list would have produced a hundred more that nobody will ever read. The event it refers
+        // to is audited where it happens.
+        typeof(Notification),
+        typeof(NotificationDismissal),
+    ];
 
     /// <summary>
     /// Columns that describe the change rather than the record.

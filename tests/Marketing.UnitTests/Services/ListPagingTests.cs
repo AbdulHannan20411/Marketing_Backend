@@ -208,6 +208,8 @@ public sealed class NotificationPagingTests
 
     private readonly List<Notification> _rows = [];
     private readonly IRepository<Notification> _notifications = Substitute.For<IRepository<Notification>>();
+    private readonly IRepository<NotificationDismissal> _dismissals =
+        Substitute.For<IRepository<NotificationDismissal>>();
     private readonly InMemoryQueryExecutor _queries = new();
 
     public NotificationPagingTests()
@@ -231,12 +233,14 @@ public sealed class NotificationPagingTests
         }
 
         _notifications.Query(Arg.Any<bool>()).Returns(_ => _rows.AsQueryable());
+        _dismissals.Query(Arg.Any<bool>()).Returns(_ => Array.Empty<NotificationDismissal>().AsQueryable());
     }
 
     private NotificationService CreateService() =>
         new(
             _notifications,
             Substitute.For<IRepository<UserNotificationPreference>>(),
+            _dismissals,
             _queries,
             Substitute.For<IUnitOfWork>(),
             new StubCurrentUser { UserId = UserId },
