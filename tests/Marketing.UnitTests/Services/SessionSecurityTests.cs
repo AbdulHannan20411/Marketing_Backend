@@ -38,11 +38,38 @@ internal sealed class InMemoryQueryExecutor : IQueryExecutor
     public Task<int> SumAsync(IQueryable<int> query, CancellationToken cancellationToken = default) =>
         Task.FromResult(query.Sum());
 
-    public IAsyncEnumerable<TResult> StreamAsync<TResult>(IQueryable<TResult> query, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException();
+    public IAsyncEnumerable<TResult> StreamAsync<TResult>(IQueryable<TResult> query, CancellationToken cancellationToken = default)
+    {
+        Queries++;
 
-    public Task<PagedResult<TResult>> ToPagedAsync<TResult>(IQueryable<TResult> query, int page, int pageSize, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException();
+        // Materialised up front, exactly as the provider composes the query up front: a stream
+        // that deferred composition would hide the one thing the export tests check, which is
+        // that an unsortable field is refused before a single row is written.
+        var rows = query.ToList();
+
+        return ToAsync(rows);
+    }
+
+    /// <summary>Wraps a materialised list as an async sequence.</summary>
+    private static async IAsyncEnumerable<TResult> ToAsync<TResult>(IEnumerable<TResult> rows)
+    {
+        foreach (var row in rows)
+        {
+            yield return row;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    public Task<PagedResult<TResult>> ToPagedAsync<TResult>(IQueryable<TResult> query, int page, int pageSize, CancellationToken cancellationToken = default)
+    {
+        Queries++;
+
+        var total = query.Count();
+        var items = query.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+        return Task.FromResult(new PagedResult<TResult>(items, total, page, pageSize));
+    }
 }
 
 /// <summary>Reading a device out of its user agent.</summary>

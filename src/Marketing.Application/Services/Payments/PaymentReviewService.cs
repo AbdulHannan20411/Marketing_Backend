@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Marketing.Application.DTOs.Payments;
 using Marketing.Business.Extensions;
 using Marketing.Business.Repositories.Interfaces;
@@ -60,6 +61,28 @@ public sealed class PaymentReviewService : IPaymentReviewService
 {
     /// <summary>Shortest rejection reason that can plausibly tell a customer what to fix.</summary>
     public const int MinimumReasonLength = 10;
+
+    /// <summary>
+    /// Sortable columns, matched against the client's <c>sortBy</c>.
+    /// <para>
+    /// An allow-list, so a client-supplied sort field is matched against known keys and never
+    /// reaches the provider as text.
+    /// </para>
+    /// </summary>
+    private static readonly Dictionary<string, Expression<Func<PaymentRequest, object?>>> SortableColumns =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = request => request.Id,
+            ["submittedAt"] = request => request.SubmittedAt,
+
+            // Null until somebody decides. PostgreSQL sorts nulls last ascending and first
+            // descending, so the pending ones group together either way rather than scattering.
+            ["reviewedAt"] = request => request.ReviewedAt,
+            ["status"] = request => request.Status,
+            ["amount"] = request => request.Amount,
+            ["organisation"] = request => request.Organisation,
+            ["plan"] = request => request.PlanName,
+        };
 
     private readonly IRepository<PaymentRequest> _requests;
     private readonly IRepository<SubscriptionPlan> _plans;
@@ -134,7 +157,13 @@ public sealed class PaymentReviewService : IPaymentReviewService
         source = source.WhereOrganisationOrEmailMatches(query.Search);
 
         var page = await _queries.ToPagedAsync(
-            source.OrderByDescending(request => request.SubmittedAt),
+            source
+                .ApplySort(query, SortableColumns, request => request.SubmittedAt)
+
+                // Two reviewers work this queue at once, and sorting by status puts everything
+                // pending in one bucket. Without the tiebreak, paging can hand the same payment
+                // to both of them and hide another from both.
+                .ThenByDescending(request => request.Id),
             query.Page,
             query.PageSize,
             cancellationToken);

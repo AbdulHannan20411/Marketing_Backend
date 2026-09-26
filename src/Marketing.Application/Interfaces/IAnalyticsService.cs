@@ -19,15 +19,23 @@ public interface IAnalyticsService
     public Task<DashboardSnapshot> GetDashboardAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Streams every delivery failure, newest first, for export.
+    /// Streams every delivery failure, in the order the caller asked for, for export.
     /// </summary>
     /// <remarks>
     /// Unpaged and streamed. An export that returns a page is not an export, and materialising a
     /// workspace's whole failure history to write it straight back out would size the request by
     /// how badly a campaign went rather than by anything the caller chose.
+    /// <para>
+    /// <paramref name="request"/> is taken for its sort alone; its page and page size are ignored
+    /// on purpose. The sort goes through the same allow-list and the same default as the paged
+    /// read, so the file and the screen that offered it cannot disagree about the order - which
+    /// they did, and the file is the artefact that leaves the product.
+    /// </para>
     /// </remarks>
+    /// <param name="request">Sort to apply. Paging on it is ignored.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public IAsyncEnumerable<DeliveryFailureResponse> StreamFailuresAsync(
+        PageRequest request,
         CancellationToken cancellationToken = default);
 
     /// <summary>Returns a page of delivery failures, newest first.</summary>

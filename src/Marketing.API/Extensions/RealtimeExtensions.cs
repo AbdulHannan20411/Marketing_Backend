@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.SignalR;
 namespace Marketing.API.Extensions;
 
 /// <summary>Configures the real-time channel.</summary>
-public static class RealtimeExtensions
+public static partial class RealtimeExtensions
 {
     /// <summary>
     /// Registers SignalR, and a Redis backplane when one is configured.
@@ -33,7 +33,14 @@ public static class RealtimeExtensions
 
         var redis = configuration.GetSection(RedisOptions.SectionName).Get<RedisOptions>();
 
-        if (redis is { Enabled: true } && !string.IsNullOrWhiteSpace(redis.ConnectionString))
+        // Three conditions, not two. UseSignalRBackplane is separate from Enabled because the
+        // backplane is the one Redis dependency that is not fail-soft: it registers the
+        // connection's subscription, so a connection it cannot register is refused rather than
+        // served without updates. With Redis down that is every connection - the socket upgrades,
+        // dies a couple of seconds later when the connect attempt times out, and the client
+        // reconnects into the same wall for as long as the page is open.
+        if (redis is { Enabled: true, UseSignalRBackplane: true }
+            && !string.IsNullOrWhiteSpace(redis.ConnectionString))
         {
             // Without a backplane, a push only reaches clients connected to the instance that
             // produced it - so with two replicas roughly half the users silently miss every
@@ -80,8 +87,37 @@ public static class RealtimeExtensions
 
         app.MapHub<RealtimeHub>(RealtimeHub.Route);
 
+        // Said once, at startup, because the alternative is what actually happened: the only trace
+        // of a backplane refusing every connection was three framework log lines in fourteen
+        // hours, and the symptom that got noticed was a browser network tab.
+        var redis = app.Configuration.GetSection(RedisOptions.SectionName).Get<RedisOptions>();
+
+        if (redis is { Enabled: true, UseSignalRBackplane: true }
+            && !string.IsNullOrWhiteSpace(redis.ConnectionString))
+        {
+            LogBackplaneOn(app.Logger, RealtimeHub.Route);
+        }
+        else
+        {
+            LogBackplaneOff(app.Logger, RealtimeHub.Route);
+        }
+
         return app;
     }
+
+    [LoggerMessage(
+        EventId = 4110,
+        Level = LogLevel.Information,
+        Message = "Realtime hub {Route} is using the Redis backplane. Every connection needs Redis: "
+                  + "if Redis is unavailable the hub will refuse connections and clients will reconnect in a loop.")]
+    private static partial void LogBackplaneOn(ILogger logger, string route);
+
+    [LoggerMessage(
+        EventId = 4111,
+        Level = LogLevel.Information,
+        Message = "Realtime hub {Route} is running without a backplane. Pushes reach clients on this "
+                  + "instance only, which is correct for a single instance and wrong for more than one.")]
+    private static partial void LogBackplaneOff(ILogger logger, string route);
 
     /// <summary>Derives SignalR's user identifier from the token's subject claim.</summary>
     private sealed class ClaimsUserIdProvider : IUserIdProvider

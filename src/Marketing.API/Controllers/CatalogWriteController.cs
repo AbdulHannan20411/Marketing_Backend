@@ -7,6 +7,7 @@ using Marketing.Application.DTOs.WhatsApp;
 using Marketing.Application.Interfaces;
 using Marketing.Application.Services;
 using Marketing.Common.Constants;
+using Marketing.Common.Requests;
 using Marketing.Common.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -485,6 +486,45 @@ public sealed class CampaignWriteController : ApiControllerBase
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
         return Success(await _campaigns.PreviewAudienceAsync(request, cancellationToken));
+    }
+
+    /// <summary>Lists the audience that <c>preview-audience</c> counts, one page at a time.</summary>
+    /// <remarks>
+    /// The same predicate as the count, so <c>totalItems</c> with no search term equals
+    /// <c>recipientCount</c> for the same groups - which means a caller can read both from this one
+    /// request and stop calling the count separately on every group toggle.
+    /// <para>
+    /// Ordered by name and then by key. <c>search</c> matches name, number and email, and narrows
+    /// the audience rather than the address book, so "is Ayesha included?" is one read rather than
+    /// a hundred and fifty pages. No groups is an empty page, matching the count's zero.
+    /// </para>
+    /// <para>
+    /// A <c>POST</c> because the audience is a list of groups, which does not belong in a query
+    /// string; paging stays in the query string where every other list endpoint keeps it.
+    /// </para>
+    /// </remarks>
+    /// <param name="request">Groups to resolve across, and an optional search term.</param>
+    /// <param name="page">Paging.</param>
+    /// <param name="adminId">Optional workspace to act within, for platform staff.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">One page of recipients, with the audience total.</response>
+    [HttpPost("preview-audience/contacts")]
+    [RequirePermission(Permissions.WhatsApp.CampaignsCreate)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<AudienceRecipient>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> PreviewAudienceContactsAsync(
+        [FromBody] AudienceRecipientsRequest request,
+        [FromQuery] PageRequest page,
+        [FromQuery] string? adminId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = await _scope.EnterAsync(adminId, cancellationToken);
+
+        var recipients = await _campaigns.PreviewAudienceContactsAsync(request, page, cancellationToken);
+
+        Response.Headers[AppConstants.Headers.TotalCount] =
+            recipients.TotalItems.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        return Success(recipients);
     }
 }
 

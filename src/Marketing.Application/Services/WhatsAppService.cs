@@ -1,5 +1,7 @@
+using System.Linq.Expressions;
 using Marketing.Application.DTOs.WhatsApp;
 using Marketing.Application.Interfaces;
+using Marketing.Business.Extensions;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Exceptions;
 using Marketing.Common.Helpers;
@@ -69,6 +71,29 @@ public interface IWhatsAppService
 /// <inheritdoc cref="IWhatsAppService" />
 public sealed class WhatsAppService : IWhatsAppService
 {
+    /// <summary>
+    /// Sortable columns, matched against the client's <c>sortBy</c>.
+    /// <para>
+    /// An allow-list, so a client-supplied sort field is matched against known keys and never
+    /// reaches the provider as text.
+    /// </para>
+    /// </summary>
+    private static readonly Dictionary<string, Expression<Func<MessageTemplate, object?>>> SortableColumns =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = template => template.Id,
+            ["name"] = template => template.Name,
+            ["status"] = template => template.Status,
+            ["category"] = template => template.Category,
+
+            // The same expression the response returns for updatedAt, so the column sorts by the
+            // value printed in it. A template never edited has no ModifiedOn, and sorting by that
+            // alone would file every one of them together at one end.
+            ["updatedAt"] = template => template.ModifiedOn ?? template.CreatedOn,
+            ["createdAt"] = template => template.CreatedOn,
+            ["timesUsed"] = template => template.TimesUsed,
+        };
+
     private readonly Services.WhatsApp.IWhatsAppAccessService _access;
     private readonly Services.WhatsApp.IWhatsAppAccountService _accounts;
     private readonly Services.WhatsApp.ITemplateHeaderSampleService _headerSamples;
@@ -179,10 +204,14 @@ public sealed class WhatsAppService : IWhatsAppService
         }
 
         var projected = filtered
-            // Newest-updated first: a template someone just resubmitted is the one they are looking
-            // for. CreatedOn stands in for rows never edited, which have no ModifiedOn.
-            .OrderByDescending(template => template.ModifiedOn ?? template.CreatedOn)
+            // Newest-updated first by default: a template someone just resubmitted is the one they
+            // are looking for. CreatedOn stands in for rows never edited, which have no ModifiedOn.
+            .ApplySort(query, SortableColumns, template => template.ModifiedOn ?? template.CreatedOn)
             .ThenBy(template => template.Name)
+
+            // Name is not unique either - two numbers on one WABA may carry the same template
+            // name - so the key settles what is left and makes paging deterministic.
+            .ThenBy(template => template.Id)
             .Select(template => new
             {
                 template.Id,

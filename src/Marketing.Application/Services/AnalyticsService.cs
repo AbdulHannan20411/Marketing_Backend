@@ -1,3 +1,5 @@
+using System.Linq.Expressions;
+using Marketing.Business.Extensions;
 using Marketing.Application.DTOs.Campaigns;
 using Marketing.Application.Services.Campaigns;
 using Marketing.Common.Exceptions;
@@ -17,6 +19,24 @@ namespace Marketing.Application.Services;
 /// <inheritdoc cref="IAnalyticsService" />
 public sealed class AnalyticsService : IAnalyticsService
 {
+    /// <summary>
+    /// Sortable columns on the failure log, matched against the client's <c>sortBy</c>.
+    /// <para>
+    /// An allow-list, so a client-supplied sort field is matched against known keys and never
+    /// reaches the provider as text.
+    /// </para>
+    /// </summary>
+    private static readonly Dictionary<string, Expression<Func<DeliveryFailure, object?>>> SortableFailureColumns =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = failure => failure.Id,
+            ["occurredAt"] = failure => failure.OccurredOn,
+            ["campaignName"] = failure => failure.CampaignName,
+            ["contactName"] = failure => failure.ContactName,
+            ["errorCode"] = failure => failure.ErrorCode,
+            ["phoneNumber"] = failure => failure.PhoneNumber,
+        };
+
     /// <summary>Window the dashboard reports on.</summary>
     private const int WindowDays = 30;
 
@@ -87,12 +107,21 @@ public sealed class AnalyticsService : IAnalyticsService
 
     /// <inheritdoc />
     public IAsyncEnumerable<DeliveryFailureResponse> StreamFailuresAsync(
+        PageRequest request,
         CancellationToken cancellationToken = default)
     {
-        // The same ordering and the same tenant filter as the paged read, so a file and the screen
-        // that offered it cannot disagree about what happened or in what order.
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Literally the same allow-list, the same tiebreak and the same default as the paged read
+        // above, because they are one field read twice rather than two lists that have to be kept
+        // in step. A file that disagrees with the screen it was exported from is a worse artefact
+        // than a slow one: the screen is re-sorted in a second, the CSV is what gets emailed.
+        //
+        // The sort is read off the request and the paging on it is ignored. An export is the whole
+        // result set; a page of one that looks complete is the failure mode worth avoiding.
         var projected = _failures.Query()
-            .OrderByDescending(failure => failure.OccurredOn)
+            .ApplySort(request, SortableFailureColumns, failure => failure.OccurredOn)
+            .ThenByDescending(failure => failure.Id)
             .Select(failure => new DeliveryFailureResponse(
                 PublicId.From(PublicId.DeliveryFailure, failure.Id),
                 failure.CampaignName,
@@ -113,7 +142,11 @@ public sealed class AnalyticsService : IAnalyticsService
         ArgumentNullException.ThrowIfNull(request);
 
         var projected = _failures.Query()
-            .OrderByDescending(failure => failure.OccurredOn)
+            .ApplySort(request, SortableFailureColumns, failure => failure.OccurredOn)
+
+            // A campaign fails in bulk, so a run's failures share a campaign name and very nearly
+            // share an instant. Sorting by either without the key is a sort with hundreds of ties.
+            .ThenByDescending(failure => failure.Id)
             .Select(failure => new
             {
                 failure.Id,
@@ -217,6 +250,26 @@ public sealed class AnalyticsService : IAnalyticsService
 /// <inheritdoc cref="ICampaignService" />
 public sealed class CampaignService : ICampaignService
 {
+    /// <summary>
+    /// Sortable columns on a campaign's run history.
+    /// </summary>
+    /// <remarks>
+    /// No metric columns. A run still in flight carries stale counters - they are rolled onto the
+    /// row when it closes, and the read below recounts them from the message rows afterwards - so
+    /// sorting by "sent" in the database would order the page by numbers the page does not show.
+    /// </remarks>
+    private static readonly Dictionary<string, Expression<Func<CampaignRun, object?>>> SortableRunColumns =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = run => run.Id,
+            ["occurrenceNumber"] = run => run.OccurrenceNumber,
+            ["scheduledFor"] = run => run.ScheduledForUtc,
+            ["startedAt"] = run => run.StartedAt,
+            ["completedAt"] = run => run.CompletedAt,
+            ["status"] = run => run.Status,
+            ["triggeredManually"] = run => run.TriggeredManually,
+        };
+
     private readonly IRepository<Campaign> _campaigns;
     private readonly IRepository<CampaignRun> _runs;
     private readonly IRepository<CampaignMessage> _messages;
@@ -276,7 +329,11 @@ public sealed class CampaignService : ICampaignService
         // manual run started before an overdue scheduled one still reads in schedule order.
         var query = _runs.Query()
             .Where(run => run.CampaignId == id)
-            .OrderByDescending(run => run.ScheduledForUtc)
+            .ApplySort(request, SortableRunColumns, run => run.ScheduledForUtc)
+
+            // The occurrence number is unique within a campaign, so this both settles ties and is
+            // the right secondary order: a manual run started before an overdue scheduled one
+            // still reads in schedule order.
             .ThenByDescending(run => run.OccurrenceNumber);
 
         var page = await _queries.ToPagedAsync(query, request.Page, request.PageSize, cancellationToken);

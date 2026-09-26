@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Marketing.Application.DTOs.Platform;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Extensions;
@@ -17,6 +18,51 @@ public sealed class PlatformService : IPlatformService
 {
     private const int TrendDays = 30;
     private const int TopAdminCount = 5;
+
+    /// <summary>
+    /// Sortable columns on the workspace list, matched against the client's <c>sortBy</c>.
+    /// <para>
+    /// An allow-list, so a client-supplied sort field is matched against known keys and never
+    /// reaches the provider as text.
+    /// </para>
+    /// </summary>
+    private static readonly Dictionary<string, Expression<Func<Tenant, object?>>> SortableTenantColumns =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = tenant => tenant.Id,
+            ["name"] = tenant => tenant.Name,
+            ["plan"] = tenant => tenant.PlanBand,
+            ["status"] = tenant => tenant.Status,
+
+            // The same subquery the list projects, so the column sorts by the number printed in
+            // it. Counted in the database rather than over the page.
+            ["seats"] = tenant => tenant.Users.Count(user => !user.IsDeleted),
+            ["messagesThisMonth"] = tenant => tenant.MessagesThisMonth,
+            ["createdAt"] = tenant => tenant.CreatedOn,
+        };
+
+    /// <summary>
+    /// Sortable columns on the platform audit log.
+    /// </summary>
+    /// <remarks>
+    /// Over the joined row rather than the entity, because two of the columns on screen are not
+    /// columns in the table: the actor's name lives in <c>users</c> and the workspace's in
+    /// <c>tenants</c>. Sorting them meant resolving both in SQL, which the read below now does.
+    /// </remarks>
+    private static readonly Dictionary<string, Expression<Func<AuditEntryRow, object?>>> SortableAuditColumns =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["occurredAt"] = row => row.OccurredOn,
+            ["actor"] = row => row.Actor,
+            ["action"] = row => row.Action,
+
+            // Severity is derived, not stored - a deletion is a warning and everything else is
+            // information - so it sorts by the thing it is derived from. Ascending puts the
+            // routine entries first and the deletions last, which is the order the word implies.
+            ["severity"] = row => row.Action == AppConstants.AuditAction.Deleted,
+            ["workspace"] = row => row.Workspace,
+            ["entity"] = row => row.EntityName,
+        };
 
     private readonly IRepository<Tenant> _tenants;
     private readonly IUserRepository _users;
@@ -264,7 +310,11 @@ public sealed class PlatformService : IPlatformService
         ArgumentNullException.ThrowIfNull(request);
 
         var projected = _tenants.Query()
-            .OrderBy(tenant => tenant.Name)
+            .ApplySort(request, SortableTenantColumns, tenant => tenant.Name)
+
+            // Names are not unique across the platform, and neither is a plan band or a status.
+            // The key settles the ties so paging cannot repeat a workspace.
+            .ThenBy(tenant => tenant.Id)
             .Select(tenant => new
             {
                 tenant.Id,
@@ -299,33 +349,48 @@ public sealed class PlatformService : IPlatformService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var projected = _auditLogs.Query()
-            .OrderByDescending(entry => entry.OccurredOn)
-            .Select(entry => new
+        // The actor and the workspace are resolved in the database rather than after the page is
+        // materialised. Two reasons, and the second is the one that matters: a name the query does
+        // not know cannot be sorted on, and the previous shape read every user and every tenant on
+        // the platform on every request in order to label ten rows.
+        //
+        // Left joins throughout. The system identity has no user row, and a platform-level entry
+        // has no workspace; an inner join would have silently dropped exactly the entries a
+        // reviewer opens this screen to find.
+        var joined =
+            from entry in _auditLogs.Query()
+            join candidate in _users.Query() on entry.UserId equals candidate.Id into candidates
+            from actor in candidates.DefaultIfEmpty()
+            join owner in _tenants.Query() on entry.TenantId equals (long?)owner.Id into owners
+            from workspace in owners.DefaultIfEmpty()
+            // An object initialiser, not a constructor. Ordering happens after this projection,
+            // and EF can resolve a member access back through a member-init but not through a
+            // constructor call - with positional arguments the sort failed to translate at all.
+            select new AuditEntryRow
             {
-                entry.Id,
-                entry.UserId,
-                entry.EntityName,
-                entry.EntityId,
-                entry.Action,
-                entry.IpAddress,
-                entry.OccurredOn,
-                entry.TenantId,
-            });
+                Id = entry.Id,
+                EntityName = entry.EntityName,
+                EntityId = entry.EntityId,
+                Action = entry.Action,
+                IpAddress = entry.IpAddress,
+                OccurredOn = entry.OccurredOn,
+                Actor = actor == null ? null : actor.DisplayName,
+                Workspace = workspace == null ? null : workspace.Name,
+            };
+
+        var projected = joined
+            .ApplySort(request, SortableAuditColumns, row => row.OccurredOn)
+
+            // Entries written by one save share an instant to the microsecond, so the default sort
+            // alone is not deterministic. The key is time-ordered, which makes this both a
+            // tiebreak and the right secondary order.
+            .ThenByDescending(row => row.Id);
 
         var page = await _queries.ToPagedAsync(projected, request.PageNumber, request.PageSize, cancellationToken);
 
-        var tenantNames = await _queries.ToListAsync(
-            _tenants.Query().Select(tenant => new { tenant.Id, tenant.Name }),
-            cancellationToken);
-
-        var actorNames = await _queries.ToListAsync(
-            _users.Query().Select(user => new { user.Id, user.DisplayName }),
-            cancellationToken);
-
         return page.Map(row =>
         {
-            var actor = actorNames.FirstOrDefault(user => user.Id == row.UserId)?.DisplayName ?? "System";
+            var actor = row.Actor ?? "System";
 
             return new AuditLogEntryResponse(
                 PublicId.From(PublicId.Audit, row.Id),
@@ -333,7 +398,7 @@ public sealed class PlatformService : IPlatformService
                 Initials.From(actor),
                 $"{row.Action} {row.EntityName}",
                 row.EntityId,
-                tenantNames.FirstOrDefault(tenant => tenant.Id == row.TenantId)?.Name ?? "Platform",
+                row.Workspace ?? "Platform",
                 row.IpAddress ?? string.Empty,
                 // Deletions are the entries a reviewer looks for first, so they carry more weight
                 // than a routine create or update.
@@ -405,6 +470,40 @@ public sealed class PlatformService : IPlatformService
 
     private static decimal PercentChange(int current, int previous) =>
         previous == 0 ? 0m : Math.Round((current - previous) * 100m / previous, 1);
+
+    /// <summary>
+    /// One audit entry with its actor and workspace already resolved.
+    /// </summary>
+    /// <remarks>
+    /// A named type rather than an anonymous one, because the sort allow-list is a static field
+    /// and has to name the type it selects from.
+    /// </remarks>
+    private sealed record AuditEntryRow
+    {
+        /// <summary>Audit entry key.</summary>
+        public long Id { get; init; }
+
+        /// <summary>CLR name of the entity that changed.</summary>
+        public required string EntityName { get; init; }
+
+        /// <summary>Key of the row that changed.</summary>
+        public required string EntityId { get; init; }
+
+        /// <summary>Kind of change. Severity is derived from it.</summary>
+        public AppConstants.AuditAction Action { get; init; }
+
+        /// <summary>Client address, when one was recorded.</summary>
+        public string? IpAddress { get; init; }
+
+        /// <summary>Instant the change was committed.</summary>
+        public DateTimeOffset OccurredOn { get; init; }
+
+        /// <summary>Actor's display name, or null for the system identity.</summary>
+        public string? Actor { get; init; }
+
+        /// <summary>Workspace name, or null for a platform-level change.</summary>
+        public string? Workspace { get; init; }
+    }
 
     private sealed record AdminRow(
         long Id,

@@ -25,6 +25,9 @@ public sealed class ContactService : IContactService
     private static readonly Dictionary<string, Expression<Func<Contact, object?>>> SortableColumns =
         new(StringComparer.OrdinalIgnoreCase)
         {
+            // The real key, not the public id. "cnt_9" sorts after "cnt_10" as text, which is the
+            // wrong order under a header that says "ID" - and the prefix is derived anyway.
+            ["id"] = contact => contact.Id,
             ["fullName"] = contact => contact.FullName,
             ["status"] = contact => contact.Status,
             ["country"] = contact => contact.Country,
@@ -66,7 +69,13 @@ public sealed class ContactService : IContactService
         // entity can escape this layer. Identifiers stay as keys here and are formatted after
         // materialisation, because PublicId is C# the provider cannot translate.
         var projected = ContactProjection.Project(
-            source.ApplySort(query, SortableColumns, contact => contact.CreatedOn));
+            source
+                .ApplySort(query, SortableColumns, contact => contact.CreatedOn)
+
+                // Settles ties so paging is deterministic. Sorting by status puts hundreds of rows
+                // in one bucket, and the order within it is otherwise whatever the plan produced
+                // that time - which shows a contact on page one and again on page two.
+                .ThenBy(contact => contact.Id));
 
         var page = await _queries.ToPagedAsync(projected, query.Page, query.PageSize, cancellationToken);
 

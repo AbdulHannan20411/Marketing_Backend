@@ -35,8 +35,14 @@ public static class QueryableExtensions
     /// <param name="request">Paging request carrying the requested sort.</param>
     /// <param name="allowedSorts">Sort key to key-selector map. Comparison is case-insensitive.</param>
     /// <param name="defaultSort">Applied when the request specifies no sort.</param>
+    /// <returns>
+    /// An ordered query, so the caller can append a tiebreak. Almost every allow-list contains a
+    /// low-cardinality column - a status, a category, a plan band - and <c>LIMIT/OFFSET</c> over a
+    /// sort whose ties the database may break differently on each execution repeats rows on one
+    /// page and loses them from another. A <c>ThenBy(x =&gt; x.Id)</c> costs nothing and settles it.
+    /// </returns>
     /// <exception cref="ValidationException">The requested sort key is not in the allow-list.</exception>
-    public static IQueryable<TSource> ApplySort<TSource>(
+    public static IOrderedQueryable<TSource> ApplySort<TSource>(
         this IQueryable<TSource> source,
         PageRequest request,
         IReadOnlyDictionary<string, Expression<Func<TSource, object?>>> allowedSorts,

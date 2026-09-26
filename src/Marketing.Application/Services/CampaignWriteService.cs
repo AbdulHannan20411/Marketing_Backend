@@ -1,9 +1,12 @@
 using Marketing.Application.DTOs.Campaigns;
 using Marketing.Application.Interfaces;
+using Marketing.Business.Extensions;
 using Marketing.Application.Services.Campaigns;
 using Marketing.Business.Repositories.Interfaces;
 using Marketing.Common.Exceptions;
 using Marketing.Common.Helpers;
+using Marketing.Common.Requests;
+using Marketing.Common.Responses;
 using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;
 using static Marketing.Common.Constants.ContractEnums;
@@ -64,6 +67,22 @@ public interface ICampaignWriteService
     public Task<PreviewAudienceResponse> PreviewAudienceAsync(
         PreviewAudienceRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lists the same audience the count describes, one page at a time.
+    /// </summary>
+    /// <remarks>
+    /// Built from the identical predicate as <see cref="PreviewAudienceAsync"/>, so the total above
+    /// the list and the list itself cannot drift apart. Ordered by name and then by key, because a
+    /// page boundary in an unstable order repeats a row or skips one.
+    /// </remarks>
+    /// <param name="request">Groups to resolve across, and an optional search term.</param>
+    /// <param name="page">Paging. The search term on this is ignored in favour of the body's.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<PagedResult<AudienceRecipient>> PreviewAudienceContactsAsync(
+        AudienceRecipientsRequest request,
+        PageRequest page,
+        CancellationToken cancellationToken = default);
 }
 
 /// <inheritdoc cref="ICampaignWriteService" />
@@ -75,6 +94,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
     private readonly IRepository<MessageTemplate> _templates;
     private readonly IWhatsAppConnectionRepository _connections;
     private readonly IRepository<ContactGroupMember> _groupMembers;
+    private readonly IRepository<Contact> _contacts;
     private readonly IQueryExecutor _queries;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IRealtimeNotifier _realtime;
@@ -92,6 +112,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
         IRepository<MessageTemplate> templates,
         IWhatsAppConnectionRepository connections,
         IRepository<ContactGroupMember> groupMembers,
+        IRepository<Contact> contacts,
         IQueryExecutor queries,
         IUnitOfWork unitOfWork,
         IRealtimeNotifier realtime,
@@ -109,6 +130,7 @@ public sealed class CampaignWriteService : ICampaignWriteService
         _templates = templates;
         _connections = connections;
         _groupMembers = groupMembers;
+        _contacts = contacts;
         _queries = queries;
         _unitOfWork = unitOfWork;
         _realtime = realtime;
@@ -416,6 +438,62 @@ public sealed class CampaignWriteService : ICampaignWriteService
             await CountAudienceAsync(request.GroupIds, cancellationToken));
     }
 
+    /// <inheritdoc />
+    public async Task<PagedResult<AudienceRecipient>> PreviewAudienceContactsAsync(
+        AudienceRecipientsRequest request,
+        PageRequest page,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(page);
+
+        var parsed = ParseGroupIds(request.GroupIds);
+
+        if (parsed.Count == 0)
+        {
+            // No groups is an empty audience, not a bad request. The count answers zero for the
+            // same input, and the wizard asks both questions before anything has been chosen.
+            return PagedResults.Empty<AudienceRecipient>(page.Page, page.PageSize);
+        }
+
+        // The count's own query, captured and used as a subquery rather than rewritten as a join
+        // over contacts. Two predicates that mean the same thing today are two predicates that can
+        // be changed one at a time, and the first symptom would be a list of 1,238 names under a
+        // heading that says 1,240.
+        var audience = AudienceContactIds(parsed);
+
+        var recipients = _contacts.Query()
+            .Where(contact => audience.Contains(contact.Id))
+
+            // Applied after the audience, so it narrows the recipients rather than searching the
+            // whole address book. "Is Ayesha included?" is the question this screen exists for,
+            // and it is one filtered read instead of 155 pages.
+            .WhereMatchesSearch(request.Search)
+
+            // Name, then key. Without the tiebreak two people called Ayesha Khan sort arbitrarily,
+            // and the arbitrary part is free to differ between the query for page one and the
+            // query for page two - which repeats one of them and loses the other.
+            .OrderBy(contact => contact.FullName)
+            .ThenBy(contact => contact.Id)
+            .Select(contact => new AudienceContactRow(
+                contact.Id,
+                contact.FullName,
+                contact.PhoneNumber,
+                contact.Status));
+
+        var paged = await _queries.ToPagedAsync(recipients, page.Page, page.PageSize, cancellationToken);
+
+        return paged.Map(row => new AudienceRecipient(
+            PublicId.From(PublicId.Contact, row.Id),
+            row.FullName,
+
+            // Computed here rather than in the browser, so this dialog's avatars match the ones on
+            // the contacts list. Two implementations disagree on "Ayesha bint Khalid" eventually.
+            Initials.From(row.FullName),
+            row.PhoneNumber,
+            row.Status));
+    }
+
     /// <summary>Validates a rule, stores it, and computes the first occurrence.</summary>
     private void ApplyRecurrence(Campaign campaign, RecurrenceRule rule)
     {
@@ -636,26 +714,34 @@ public sealed class CampaignWriteService : ICampaignWriteService
     {
         var parsed = ParseGroupIds(groupIds);
 
-        if (parsed.Count == 0)
-        {
-            return 0;
-        }
-
-        // Distinct, because a contact in two chosen groups is one recipient, not two - and the
-        // audience size is what the customer is billed against.
-        //
-        // Unsubscribed and blocked contacts are excluded here rather than at send time. Counting
-        // them would quote the operator a number the dispatcher then refuses to honour, and the
-        // gap would look like messages going missing.
-        return await _queries.CountAsync(
-            _groupMembers.Query()
-                .Where(member => parsed.Contains(member.ContactGroupId)
-                                 && !member.Contact.IsDeleted
-                                 && member.Contact.Status == ContactStatus.Subscribed)
-                .Select(member => member.ContactId)
-                .Distinct(),
-            cancellationToken);
+        return parsed.Count == 0
+            ? 0
+            : await _queries.CountAsync(AudienceContactIds(parsed), cancellationToken);
     }
+
+    /// <summary>
+    /// Who a campaign across these groups would actually reach.
+    /// </summary>
+    /// <remarks>
+    /// The single definition of an audience. The wizard's count and the recipient list are both
+    /// this query - the count over it, the list joined to contacts and paged - because a screen
+    /// that shows a total and a list built from two definitions of the same thing will eventually
+    /// show two different numbers.
+    /// <para>
+    /// Distinct, because a contact in two chosen groups is one recipient rather than two, and the
+    /// audience size is what the customer is billed against. Unsubscribed and blocked contacts are
+    /// excluded here rather than at send time: counting them would quote the operator a number the
+    /// dispatcher then refuses to honour, and the gap would look like messages going missing.
+    /// </para>
+    /// </remarks>
+    /// <param name="groupIds">Group keys, already parsed.</param>
+    private IQueryable<long> AudienceContactIds(IReadOnlyList<long> groupIds) =>
+        _groupMembers.Query()
+            .Where(member => groupIds.Contains(member.ContactGroupId)
+                             && !member.Contact.IsDeleted
+                             && member.Contact.Status == ContactStatus.Subscribed)
+            .Select(member => member.ContactId)
+            .Distinct();
 
     private async Task<CampaignResponse> MapAsync(Campaign campaign, CancellationToken cancellationToken) =>
         CampaignMapper.ToResponse(
@@ -735,3 +821,14 @@ public sealed class CampaignWriteService : ICampaignWriteService
         campaign.WhatsAppConnectionId ??= connection.Id;
     }
 }
+
+/// <summary>Database-shaped recipient, before the key is formatted and the initials are derived.</summary>
+/// <param name="Id">Primary key.</param>
+/// <param name="FullName">Full name.</param>
+/// <param name="PhoneNumber">Display-form number.</param>
+/// <param name="Status">Consent state.</param>
+internal sealed record AudienceContactRow(
+    long Id,
+    string FullName,
+    string PhoneNumber,
+    ContactStatus Status);

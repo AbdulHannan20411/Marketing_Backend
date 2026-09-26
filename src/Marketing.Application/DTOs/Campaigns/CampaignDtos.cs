@@ -118,6 +118,38 @@ public sealed record PreviewAudienceRequest(IReadOnlyList<string> GroupIds);
 /// <param name="RecipientCount">Distinct contacts who would receive the campaign.</param>
 public sealed record PreviewAudienceResponse(int RecipientCount);
 
+/// <summary>
+/// Request to list the recipients an audience resolves to, rather than count them.
+/// </summary>
+/// <remarks>
+/// The same input as the count, plus a search term. Deliberately the same request shape, because
+/// the two answers have to describe one audience: a list built from a second reading of "who is in
+/// these groups" would eventually show 1,238 names under a heading that says 1,240.
+/// </remarks>
+/// <param name="GroupIds">Groups to resolve across. Empty means an empty audience.</param>
+/// <param name="Search">Optional name, number or email fragment. Blank matches everyone.</param>
+public sealed record AudienceRecipientsRequest(IReadOnlyList<string>? GroupIds, string? Search);
+
+/// <summary>
+/// One recipient in a campaign's audience.
+/// </summary>
+/// <remarks>
+/// Slimmer than <c>ContactResponse</c> on purpose. The dialog renders a name, a number and a
+/// consent badge; the full contact shape would add a tag list and a group list per row, which are
+/// two more collection joins per page for something nothing on the screen reads.
+/// </remarks>
+/// <param name="Id">Opaque contact identifier, prefixed <c>cnt_</c>.</param>
+/// <param name="FullName">Full name.</param>
+/// <param name="Initials">Initials, computed server-side so every avatar agrees.</param>
+/// <param name="PhoneNumber">Display-form number.</param>
+/// <param name="Status">Consent state. Always <c>subscribed</c> - the audience excludes the rest.</param>
+public sealed record AudienceRecipient(
+    string Id,
+    string FullName,
+    string Initials,
+    string PhoneNumber,
+    ContactStatus Status);
+
 /// <summary>One message that could not be delivered.</summary>
 /// <param name="Id">Opaque identifier.</param>
 /// <param name="CampaignName">Campaign the message belonged to.</param>

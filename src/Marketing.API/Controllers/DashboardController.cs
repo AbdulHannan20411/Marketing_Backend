@@ -115,23 +115,35 @@ public sealed class ReportsController : ApiControllerBase
     /// Written straight to the response as rows arrive. Buffering it would hold a workspace's
     /// entire failure history in memory to produce a file that is streamed anyway.
     /// </para>
+    /// <para>
+    /// Takes the same <c>sortBy</c> and <c>sortDirection</c> as the list, off the same allow-list,
+    /// so the file arrives in the order the table was showing. <c>page</c> and <c>pageSize</c> are
+    /// accepted and ignored - the export is the whole result set, and a page of one that looks
+    /// complete is the artefact worth refusing to produce.
+    /// </para>
     /// </remarks>
+    /// <param name="request">Sort to apply. Paging on it is ignored.</param>
     /// <param name="adminId">Super Admin scoping.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">The CSV file.</response>
+    /// <response code="422">The requested sort field is not on the allow-list.</response>
     [HttpGet("failures/export")]
     [RequirePermission(Permissions.Reports.Export)]
     [Produces("text/csv")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
     public async Task ExportFailuresAsync(
+        [FromQuery] PageRequest request,
         [FromQuery] string? adminId,
         CancellationToken cancellationToken)
     {
         using var scope = await _scope.EnterAsync(adminId, cancellationToken);
 
+        // The query is composed here, before a single byte is written, so an unsortable field is
+        // a clean 422 rather than a truncated CSV with an error page stapled to the end of it.
         await StreamCsvAsync(
             "delivery-failures.csv",
-            _analytics.StreamFailuresAsync(cancellationToken),
+            _analytics.StreamFailuresAsync(request, cancellationToken),
             [
                 new CsvColumn<DeliveryFailureResponse>("Recipient", row => row.PhoneNumber),
                 new CsvColumn<DeliveryFailureResponse>("Contact", row => row.ContactName),

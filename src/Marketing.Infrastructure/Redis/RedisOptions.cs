@@ -24,6 +24,24 @@ public sealed class RedisOptions
     /// </summary>
     public bool Enabled { get; init; } = true;
 
+    /// <summary>
+    /// Whether SignalR's Redis backplane is registered.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Enabled"/>, because the two fail very differently. The cache is
+    /// fail-soft: with Redis down a read is a miss and the request still answers. The backplane is
+    /// not, and cannot be - it holds the connection's subscription, so a connection it cannot
+    /// register is a connection that will silently miss every message. It therefore refuses the
+    /// connection outright, and with Redis down that is every connection, forever, with the client
+    /// reconnecting in between.
+    /// <para>
+    /// A backplane only earns that risk when there is more than one instance to bridge. Turn it
+    /// off for a single-instance deployment and for development, where it buys nothing and takes
+    /// the whole realtime channel with it whenever Redis is unavailable.
+    /// </para>
+    /// </remarks>
+    public bool UseSignalRBackplane { get; init; } = true;
+
     /// <summary>Default time to live applied when a caller does not specify one.</summary>
     [Range(1, 86_400)]
     public int DefaultExpirationSeconds { get; init; } = 300;

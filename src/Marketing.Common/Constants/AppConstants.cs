@@ -1,3 +1,6 @@
+using System.ComponentModel;
+using System.Globalization;
+
 namespace Marketing.Common.Constants;
 
 /// <summary>
@@ -351,7 +354,21 @@ public static class AppConstants
         Locked = 3,
     }
 
-    /// <summary>Direction applied to a sort expression on a paged query.</summary>
+    /// <summary>
+    /// Direction applied to a sort expression on a paged query.
+    /// </summary>
+    /// <remarks>
+    /// <c>asc</c> and <c>desc</c> are accepted alongside the full words, through
+    /// <see cref="SortDirectionConverter"/>. Query-string binding matches enum member names and
+    /// the camelCase JSON policy does not apply to it, so without the converter <c>desc</c> simply
+    /// failed to bind - and an unbound value is the default, which is an ascending list under a
+    /// header that says descending. The converter is <c>System.ComponentModel</c>, not MVC, so it
+    /// costs this layer no dependency.
+    /// <para>
+    /// A direction that is neither is now a binding failure rather than a silent ascending sort.
+    /// </para>
+    /// </remarks>
+    [TypeConverter(typeof(SortDirectionConverter))]
     public enum SortDirection
     {
         /// <summary>Ascending order.</summary>
@@ -359,6 +376,43 @@ public static class AppConstants
 
         /// <summary>Descending order.</summary>
         Descending = 1,
+    }
+
+    /// <summary>Accepts <c>asc</c>/<c>desc</c> as well as the full member names.</summary>
+    public sealed class SortDirectionConverter : TypeConverter
+    {
+        /// <inheritdoc />
+        public override bool CanConvertFrom(ITypeDescriptorContext? context, Type sourceType) =>
+            sourceType == typeof(string) || base.CanConvertFrom(context, sourceType);
+
+        /// <inheritdoc />
+        public override object? ConvertFrom(
+            ITypeDescriptorContext? context,
+            CultureInfo? culture,
+            object value)
+        {
+            if (value is not string text)
+            {
+                return base.ConvertFrom(context, culture, value);
+            }
+
+            var trimmed = text.Trim();
+
+            // An empty direction means "not specified", which is the default rather than an error.
+            // A client clearing its sort sends sortDirection= and should not get a 400 for it.
+            if (trimmed.Length == 0)
+            {
+                return SortDirection.Ascending;
+            }
+
+            return trimmed.ToLowerInvariant() switch
+            {
+                "asc" or "ascending" => SortDirection.Ascending,
+                "desc" or "descending" => SortDirection.Descending,
+                _ => throw new FormatException(
+                    $"'{text}' is not a sort direction. Use asc or desc."),
+            };
+        }
     }
 
     /// <summary>The kind of change recorded in an audit-trail entry.</summary>

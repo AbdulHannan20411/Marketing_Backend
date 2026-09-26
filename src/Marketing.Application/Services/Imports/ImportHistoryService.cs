@@ -54,6 +54,11 @@ public sealed class ImportHistoryService : IImportHistoryService
     private static readonly Dictionary<string, Expression<Func<ContactImportBatch, object?>>> SortableColumns =
         new(StringComparer.OrdinalIgnoreCase)
         {
+            // Both spellings of the same column: the screen calls it the batch id, the shared
+            // sorting contract calls the key column "id", and neither is worth making the client
+            // remember which.
+            ["id"] = batch => batch.Id,
+            ["batchId"] = batch => batch.Id,
             ["fileName"] = batch => batch.FileName,
             ["fileSizeBytes"] = batch => batch.FileSizeBytes,
             ["status"] = batch => batch.Status,
@@ -95,9 +100,13 @@ public sealed class ImportHistoryService : IImportHistoryService
 
         // Newest first by default: an operator opening this screen is almost always looking for
         // the import they just ran, not the first one they ever did.
-        var sorted = query.SortBy is { Length: > 0 }
-            ? source.ApplySort(query, SortableColumns, batch => batch.UploadedOn)
-            : source.OrderByDescending(batch => batch.UploadedOn);
+        var sorted = (query.SortBy is { Length: > 0 }
+                ? source.ApplySort(query, SortableColumns, batch => batch.UploadedOn)
+                : source.OrderByDescending(batch => batch.UploadedOn))
+
+            // Deterministic paging. Two imports of the same file in the same minute otherwise sort
+            // arbitrarily, and the arbitrary part is free to differ between page requests.
+            .ThenBy(batch => batch.Id);
 
         var page = await _queries.ToPagedAsync(
             sorted.Select(batch => new BatchRow(
