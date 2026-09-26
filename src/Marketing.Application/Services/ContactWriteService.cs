@@ -33,6 +33,7 @@ public sealed class ContactWriteService : IContactWriteService
     private readonly ITenantContext _tenantContext;
     private readonly IPlanGuard _planGuard;
     private readonly IDateTimeProvider _clock;
+    private readonly Audit.IActorNames _actors;
 
     /// <summary>Initialises a new instance.</summary>
     public ContactWriteService(
@@ -45,8 +46,10 @@ public sealed class ContactWriteService : IContactWriteService
         IUnitOfWork unitOfWork,
         ITenantContext tenantContext,
         IPlanGuard planGuard,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        Audit.IActorNames actors)
     {
+        _actors = actors;
         _contacts = contacts;
         _tagAssignments = tagAssignments;
         _groupMembers = groupMembers;
@@ -842,7 +845,12 @@ public sealed class ContactWriteService : IContactWriteService
             cancellationToken)
             ?? throw new NotFoundException("Contact", PublicId.From(PublicId.Contact, id));
 
-        return ContactProjection.ToResponse(row);
+        // Resolved here too, so the row a save returns carries the same columns as the row the
+        // list shows. Without it the table would blank its own "Modified by" cell on every edit
+        // until the next refresh.
+        var names = await _actors.ResolveAsync([row.CreatedBy, row.ModifiedBy], cancellationToken);
+
+        return ContactProjection.ToResponse(row, names);
     }
 
     private sealed record ResolvedContacts(

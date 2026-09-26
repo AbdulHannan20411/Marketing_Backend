@@ -128,7 +128,15 @@ public sealed record UsageMetric(UsageMetricKey Key, string Label, int Used, int
 /// </remarks>
 /// <param name="PlanId">Plan identifier.</param>
 /// <param name="PlanName">Plan name, for display.</param>
-/// <param name="Status">Subscription state, so the shell knows whether the workspace is locked.</param>
+/// <param name="Status">
+/// Subscription state, so the shell knows whether the workspace is locked.
+/// <para>
+/// There is no "no plan" value here, and deliberately so: a workspace that has never bought one
+/// gets a <b>404 carrying <c>no_subscription</c></b> instead. The client keeps that status apart
+/// from every other failure - a 404 is an answer, anything else is a missing answer and fails
+/// open - and an empty snapshot would have blurred the two back together.
+/// </para>
+/// </param>
 /// <param name="ExpiresAt">Instant access lapses without renewal.</param>
 /// <param name="TrialEndsAt">Instant the trial ends, when there is one.</param>
 /// <param name="Modules">Which feature modules the plan includes.</param>

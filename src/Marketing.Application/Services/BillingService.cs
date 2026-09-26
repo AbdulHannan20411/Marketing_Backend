@@ -143,8 +143,18 @@ public sealed class BillingService : IBillingService
     /// Called wherever the plan or the subscription's state moves. A limit the customer just paid
     /// for has to apply now, not in ten seconds.
     /// </remarks>
-    private void ForgetEntitlements() =>
+    private void ForgetEntitlements()
+    {
         _memory.Remove(EntitlementsKey(_tenantContext.TenantId) ?? string.Empty);
+
+        // The write gate keeps its own one-line answer, for the same reason and on a shorter
+        // fuse. Dropped here as well, so a customer who has just paid can use what they paid for
+        // on the next request rather than fifteen seconds later.
+        if (_tenantContext.TenantId is { } tenantId)
+        {
+            _memory.Remove(Billing.SubscriptionGate.KeyFor(tenantId));
+        }
+    }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<SubscriptionPlanResponse>> GetPurchasablePlansAsync(
@@ -506,6 +516,28 @@ public sealed class BillingService : IBillingService
     }
 
     /// <summary>Loads the caller's subscription and its plan, or fails with a clear message.</summary>
+    /// <summary>
+    /// The workspace's subscription and its plan.
+    /// </summary>
+    /// <remarks>
+    /// A workspace that has never bought a plan is a <b>404 carrying <c>no_subscription</c></b>,
+    /// and deliberately not a 200 with an empty snapshot. The client distinguishes that one status
+    /// from every other failure: a 404 is an answer - there is no plan, lock and grant nothing - 
+    /// while a 500, a timeout or a dropped connection fails open, because locking a paying
+    /// customer out over a lost request is worse than the hole this closes.
+    /// <para>
+    /// The code is there so that branch can key on the reason rather than on the status. A bare
+    /// 404 on this route would also be produced by a misspelled path or a version bump, and those
+    /// are "unknown", not "no plan".
+    /// </para>
+    /// <para>
+    /// A subscription pointing at a plan that no longer exists is a different 404, with the
+    /// ordinary code. That is a broken row rather than an absent one, and reporting it as "no
+    /// plan" would let a paying customer be locked out by a data fault.
+    /// </para>
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="tracked">Whether the rows are tracked for update.</param>
     private async Task<(TenantSubscription Subscription, SubscriptionPlan Plan)> LoadSubscriptionAsync(
         CancellationToken cancellationToken,
         bool tracked = false)
@@ -513,16 +545,37 @@ public sealed class BillingService : IBillingService
         var subscription = await _queries.FirstOrDefaultAsync(
             _subscriptions.Query(asNoTracking: !tracked),
             cancellationToken)
-            ?? throw new NotFoundException("This organisation has no subscription.");
+            ?? throw new RequestRejectedException(
+                System.Net.HttpStatusCode.NotFound,
+                NoSubscriptionCode,
+                "This organisation has no subscription.");
 
+        // A 500, not a 404, and the difference is load-bearing for the client. It reads any 404
+        // on this route as "there is no plan" and locks; a 5xx it reads as "no answer" and fails
+        // open. A subscription whose plan row has been deleted is a data fault on our side, so
+        // failing open is the right direction - the alternative is locking a paying customer out
+        // of a product they bought because somebody archived a plan.
         var plan = await _queries.FirstOrDefaultAsync(
             _plans.Query(asNoTracking: !tracked)
                 .Where(plan => plan.Id == subscription.SubscriptionPlanId),
             cancellationToken)
-            ?? throw new NotFoundException("Plan", subscription.SubscriptionPlanId);
+            ?? throw new RequestRejectedException(
+                System.Net.HttpStatusCode.InternalServerError,
+                "plan_unavailable",
+                $"This workspace's subscription points at a plan that no longer exists "
+                + $"(#{subscription.SubscriptionPlanId}). Restore the plan or move the workspace to another.");
 
         return (subscription, plan);
     }
+
+    /// <summary>
+    /// The code on the 404 a workspace with no plan gets.
+    /// </summary>
+    /// <remarks>
+    /// Public because it is a contract term, not an implementation detail - the client branches
+    /// on it, and a test asserts it.
+    /// </remarks>
+    public const string NoSubscriptionCode = "no_subscription";
 
     /// <summary>
     /// Counts current usage against every metric a plan can limit.

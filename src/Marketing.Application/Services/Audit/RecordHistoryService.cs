@@ -101,6 +101,18 @@ public sealed class RecordHistoryService : IRecordHistoryService
         // workspace, and a scoped read has no tenant to be scoped to.
         var crossTenant = registered.PlatformOnly || (_currentUser.IsSuperAdmin && !_tenantContext.HasTenant);
 
+        // "current" means "the workspace I am in", and platform staff are in none until they scope
+        // themselves to one. Answering "Workspace 'current' was not found" for that is true and
+        // useless: it reads as a missing feature rather than as a missing workspace, and only one
+        // of the two is a reason to go and select an admin.
+        if (string.Equals(entityId, AuditableRecord.Current, StringComparison.OrdinalIgnoreCase)
+            && !_tenantContext.HasTenant)
+        {
+            throw new NotFoundException(
+                "You are not currently in a workspace, so there is no 'current' record to read the "
+                + "history of. Platform staff select a workspace with ?adminId=.");
+        }
+
         // Resolving the identifier is also the existence check: every path below either finds the
         // caller's own row or finds nothing, and finding nothing is a 404 rather than an empty page.
         var id = await ResolveAsync(registered, entityId, crossTenant, cancellationToken)

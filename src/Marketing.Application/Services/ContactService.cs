@@ -33,6 +33,13 @@ public sealed class ContactService : IContactService
             ["country"] = contact => contact.Country,
             ["createdAt"] = contact => contact.CreatedOn,
             ["lastMessagedAt"] = contact => contact.LastMessagedAt,
+
+            // The two new audit columns. Sorted by the stored key rather than by the resolved
+            // name: the name is looked up after the page is read, so ordering by it would sort
+            // twenty rows by a value the other four hundred also have.
+            ["updatedAt"] = contact => contact.ModifiedOn,
+            ["createdBy"] = contact => contact.CreatedBy,
+            ["updatedBy"] = contact => contact.ModifiedBy,
         };
 
     /// <summary>Duplicate groups examined per request, bounding a pathological data set.</summary>
@@ -42,18 +49,41 @@ public sealed class ContactService : IContactService
     private readonly IRepository<ContactGroup> _groups;
     private readonly IRepository<ContactTag> _tags;
     private readonly IQueryExecutor _queries;
+    private readonly Audit.IActorNames _actors;
 
     /// <summary>Initialises a new instance.</summary>
     public ContactService(
         IRepository<Contact> contacts,
         IRepository<ContactGroup> groups,
         IRepository<ContactTag> tags,
-        IQueryExecutor queries)
+        IQueryExecutor queries,
+        Audit.IActorNames actors)
     {
         _contacts = contacts;
         _groups = groups;
         _tags = tags;
         _queries = queries;
+        _actors = actors;
+    }
+
+    /// <summary>
+    /// Resolves the "created by" and "modified by" names for one page of contacts.
+    /// </summary>
+    /// <remarks>
+    /// One query for the distinct actors on the page, not a join per row. A page of twenty
+    /// contacts is usually two or three people.
+    /// </remarks>
+    /// <param name="rows">The page.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task<PagedResult<ContactResponse>> DescribeAsync(
+        PagedResult<ContactRow> rows,
+        CancellationToken cancellationToken)
+    {
+        var names = await _actors.ResolveAsync(
+            rows.Items.SelectMany(row => (long?[])[row.CreatedBy, row.ModifiedBy]),
+            cancellationToken);
+
+        return rows.Map(row => ContactProjection.ToResponse(row, names));
     }
 
     /// <inheritdoc />
@@ -79,7 +109,7 @@ public sealed class ContactService : IContactService
 
         var page = await _queries.ToPagedAsync(projected, query.Page, query.PageSize, cancellationToken);
 
-        return page.Map(ContactProjection.ToResponse);
+        return await DescribeAsync(page, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -96,9 +126,14 @@ public sealed class ContactService : IContactService
         // The tenant filter has already excluded another tenant's row, so "not found" and "not
         // yours" arrive here identically - which is the point. Distinguishing them would confirm
         // that an identifier exists somewhere else on the platform.
-        return row is null
-            ? throw new NotFoundException("Contact", contactId)
-            : ContactProjection.ToResponse(row);
+        if (row is null)
+        {
+            throw new NotFoundException("Contact", contactId);
+        }
+
+        var names = await _actors.ResolveAsync([row.CreatedBy, row.ModifiedBy], cancellationToken);
+
+        return ContactProjection.ToResponse(row, names);
     }
 
     /// <inheritdoc />
@@ -292,7 +327,7 @@ public sealed class ContactService : IContactService
 
         var page = await _queries.ToPagedAsync(projected, request.Page, request.PageSize, cancellationToken);
 
-        return page.Map(ContactProjection.ToResponse);
+        return await DescribeAsync(page, cancellationToken);
     }
 
     private async Task EnsureGroupExistsAsync(long id, string groupId, CancellationToken cancellationToken)
@@ -350,9 +385,13 @@ public sealed class ContactService : IContactService
             ContactProjection.Project(source.OrderBy(contact => contact.CreatedOn)),
             cancellationToken);
 
+        var names = await _actors.ResolveAsync(
+            rows.SelectMany(row => (long?[])[row.CreatedBy, row.ModifiedBy]),
+            cancellationToken);
+
         // Regrouped here rather than in the query. The key is already on the row, and asking the
         // provider to emit it a second time as a computed column buys nothing.
-        return [.. rows.Select(row => (KeyOf(strategy, row), ContactProjection.ToResponse(row)))];
+        return [.. rows.Select(row => (KeyOf(strategy, row), ContactProjection.ToResponse(row, names)))];
     }
 
     private static string KeyOf(DuplicateStrategy strategy, ContactRow row) => strategy switch

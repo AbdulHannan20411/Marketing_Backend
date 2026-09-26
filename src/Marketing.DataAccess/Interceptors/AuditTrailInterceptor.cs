@@ -116,9 +116,32 @@ public sealed class AuditTrailInterceptor : SaveChangesInterceptor
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
+    /// <summary>
+    /// Written into <see cref="AuditLog.EntityId"/> for a row whose key does not exist yet.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not a number. A create used to be recorded against id <c>0</c>, which is a
+    /// well-formed id that simply matches no record - so 977 of them sat in the table looking
+    /// like data. This cannot be mistaken for a key, and a row still carrying it says exactly
+    /// what happened: the change committed, and the second statement that links it did not.
+    /// </remarks>
+    private const string PendingEntityId = "pending";
+
     private readonly ICurrentUser _currentUser;
     private readonly IRequestContext _requestContext;
     private readonly IDateTimeProvider _dateTimeProvider;
+
+    /// <summary>
+    /// Audit rows for inserts, waiting for the database to say what their key turned out to be.
+    /// </summary>
+    /// <remarks>
+    /// Per request: this interceptor is registered scoped, so the list belongs to one unit of work
+    /// and cannot be seen by another. Cleared after every save, successful or not.
+    /// </remarks>
+    private readonly List<(AuditLog Log, BaseEntity Entity)> _awaitingKeys = [];
+
+    /// <summary>Guards the fix-up save from being intercepted as a change of its own.</summary>
+    private bool _linkingKeys;
 
     /// <summary>Initialises a new instance.</summary>
     /// <param name="currentUser">Principal to attribute the change to.</param>
@@ -157,9 +180,134 @@ public sealed class AuditTrailInterceptor : SaveChangesInterceptor
         return base.SavingChangesAsync(eventData, result, cancellationToken);
     }
 
+    /// <summary>
+    /// Links each insert's audit row to the key the database has just assigned it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why a second statement is unavoidable.</b> The change set has to be read before the save
+    /// - afterwards the original values are gone - and the key only exists after it, because
+    /// PostgreSQL assigns it and returns it with the insert. The two facts are available at
+    /// different moments, so something has to span them.
+    /// <para>
+    /// What is <em>not</em> deferred is the audit row itself. It is inserted with the change, in
+    /// the same transaction, exactly as an update's is; only the identifier is corrected here.
+    /// That keeps the guarantee this file is built on - a change and its audit row commit together
+    /// or not at all - and it means a failure of this second statement degrades to an entry that
+    /// exists but is not linked, rather than to a create that happened with nothing recorded.
+    /// </para>
+    /// </remarks>
+    public override int SavedChanges(SaveChangesCompletedEventData eventData, int result)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+
+        if (!LinkKeys(eventData.Context))
+        {
+            return base.SavedChanges(eventData, result);
+        }
+
+        _linkingKeys = true;
+
+        try
+        {
+            eventData.Context!.SaveChanges();
+        }
+        finally
+        {
+            _linkingKeys = false;
+        }
+
+        return base.SavedChanges(eventData, result);
+    }
+
+    /// <inheritdoc cref="SavedChanges" />
+    public override async ValueTask<int> SavedChangesAsync(
+        SaveChangesCompletedEventData eventData,
+        int result,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+
+        if (!LinkKeys(eventData.Context))
+        {
+            return await base.SavedChangesAsync(eventData, result, cancellationToken);
+        }
+
+        _linkingKeys = true;
+
+        try
+        {
+            await eventData.Context!.SaveChangesAsync(cancellationToken);
+        }
+        finally
+        {
+            _linkingKeys = false;
+        }
+
+        return await base.SavedChangesAsync(eventData, result, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public override void SaveChangesFailed(DbContextErrorEventData eventData)
+    {
+        // The save rolled back, so the audit rows went with it. Left in the list they would be
+        // linked - and saved - by whatever the caller tried next.
+        _awaitingKeys.Clear();
+
+        base.SaveChangesFailed(eventData);
+    }
+
+    /// <inheritdoc />
+    public override Task SaveChangesFailedAsync(
+        DbContextErrorEventData eventData,
+        CancellationToken cancellationToken = default)
+    {
+        _awaitingKeys.Clear();
+
+        return base.SaveChangesFailedAsync(eventData, cancellationToken);
+    }
+
+    /// <summary>
+    /// Copies the assigned keys onto the waiting audit rows.
+    /// </summary>
+    /// <param name="context">The context that has just saved.</param>
+    /// <returns>Whether anything needs saving as a result.</returns>
+    private bool LinkKeys(DbContext? context)
+    {
+        if (context is null || _awaitingKeys.Count == 0)
+        {
+            return false;
+        }
+
+        var pending = _awaitingKeys.ToList();
+
+        // Cleared before the save rather than after, so the fix-up save's own completion callback
+        // finds nothing to do and cannot recurse.
+        _awaitingKeys.Clear();
+
+        var linked = false;
+
+        foreach (var (log, entity) in pending)
+        {
+            // Zero would mean the key was never assigned, which should be impossible for a row
+            // that has just been inserted. Leaving the placeholder is the honest answer if it
+            // ever happens - a "0" here is what this whole change is about.
+            if (entity.Id == 0)
+            {
+                continue;
+            }
+
+            log.EntityId = entity.Id.ToString(CultureInfo.InvariantCulture);
+            linked = true;
+        }
+
+        return linked;
+    }
+
     private void Capture(DbContext? context)
     {
-        if (context is null)
+        // The fix-up save carries nothing but corrected identifiers on rows this interceptor
+        // wrote a moment ago. Capturing it would be auditing the audit trail.
+        if (context is null || _linkingKeys)
         {
             return;
         }
@@ -186,6 +334,10 @@ public sealed class AuditTrailInterceptor : SaveChangesInterceptor
 
         var logs = new List<AuditLog>(auditable.Count);
 
+        // A save with nothing pending from a previous one. Anything still here belongs to a unit
+        // of work that never completed.
+        _awaitingKeys.Clear();
+
         foreach (var entry in auditable)
         {
             var action = ResolveAction(entry);
@@ -200,21 +352,38 @@ public sealed class AuditTrailInterceptor : SaveChangesInterceptor
                 continue;
             }
 
-            logs.Add(new AuditLog
+            var log = new AuditLog
             {
                 TenantId = entry.Entity.TenantId,
                 UserId = userId,
                 EntityName = entry.Entity.GetType().Name,
-                // Invariant, not the ambient culture. An audit trail is matched and searched by this
-                // string, and a culture using non-ASCII digits would write an id that no longer
-                // equals the one written under any other culture.
-                EntityId = entry.Entity.Id.ToString(CultureInfo.InvariantCulture),
+
+                // An insert has no key yet - the database assigns it and returns it with the
+                // insert, which has not run. Written as a placeholder here and corrected in
+                // SavedChanges; see LinkKeys. Recording entry.Entity.Id at this moment wrote the
+                // uninitialised zero, which is why no record's history ever showed its own
+                // creation.
+                //
+                // Invariant culture for the others, not the ambient one. An audit trail is matched
+                // and searched by this string, and a culture using non-ASCII digits would write an
+                // id that no longer equals the one written under any other culture.
+                EntityId = action == AuditAction.Created
+                    ? PendingEntityId
+                    : entry.Entity.Id.ToString(CultureInfo.InvariantCulture),
                 Action = action,
                 Changes = JsonSerializer.Serialize(changes, SerializerOptions),
                 CorrelationId = _requestContext.CorrelationId,
                 IpAddress = _requestContext.IpAddress,
                 OccurredOn = utcNow,
-            });
+            };
+
+            logs.Add(log);
+
+            if (action == AuditAction.Created)
+            {
+                // The entity, not a copy of its id: the id is the thing that does not exist yet.
+                _awaitingKeys.Add((log, entry.Entity));
+            }
         }
 
         if (logs.Count > 0)

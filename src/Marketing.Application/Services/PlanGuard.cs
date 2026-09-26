@@ -103,9 +103,31 @@ public sealed class PlanGuard : IPlanGuard
             return;
         }
 
-        throw new ForbiddenException(
+        // The same code the whole-subscription refusal uses, and deliberately so: the client
+        // listens for one code and turns it back into an upgrade offer rather than a red toast.
+        // Two codes would mean a module refusal arriving as an error the customer can do nothing
+        // with, which is the outcome this is here to avoid.
+        var refusal = new ForbiddenException(
+            SubscriptionRequiredCode,
             $"The {plan.Name} plan does not include this feature. Upgrade to enable it.");
+
+        // What distinguishes the two dialogs. A refusal naming a module means the workspace pays
+        // for something, just not this - "upgrade" - while one with no module means there is no
+        // usable subscription at all, and telling somebody who already pays to buy a plan reads
+        // as though their money went nowhere.
+        refusal.Extensions["module"] = module;
+
+        throw refusal;
     }
+
+    /// <summary>
+    /// The code both plan refusals carry: no subscription at all, and a plan without the module.
+    /// </summary>
+    /// <remarks>
+    /// Duplicated as a constant rather than referenced from <c>SubscriptionGate</c> to keep this
+    /// service free of a dependency on it; the two are asserted equal by a test.
+    /// </remarks>
+    public const string SubscriptionRequiredCode = "subscription_required";
 
     /// <inheritdoc />
     public async Task EnsureContactCapacityAsync(int adding, CancellationToken cancellationToken = default)

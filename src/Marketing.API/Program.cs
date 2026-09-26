@@ -205,6 +205,16 @@ try
     app.UseRateLimiter();
     app.UseAuthorization();
 
+    // After UseAuthorization on purpose. The caller must clear the endpoint's own gate as
+    // themselves first; only then does the preview narrow what that endpoint can see. Putting it
+    // earlier would let a preview decide route authorisation, which is the one direction this
+    // feature must never work in.
+    app.UseMiddleware<ViewAsEmployeeMiddleware>();
+
+    // After authorisation, so a caller who is not allowed here at all is told that rather than
+    // told to buy a plan. Before the endpoint, so no handler has to remember the rule.
+    app.UseMiddleware<SubscriptionGateMiddleware>();
+
     app.MapControllers().RequireRateLimiting(AppConstants.RateLimits.Default);
     app.MapApiHealthChecks();
 

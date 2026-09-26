@@ -905,7 +905,12 @@ public sealed partial class AuthenticationService : IAuthenticationService
             user.Tenant?.Name,
             roles.Contains(Roles.SuperAdmin, StringComparer.Ordinal),
             roles,
-            permissions);
+            permissions,
+
+            // Constant for this build. It is a statement about what the API has wired up, not
+            // about this user - whether they may use it is decided per request, by the resolver,
+            // against the workspace they are administering.
+            new ApiCapabilities(ViewAsEmployee: true));
 
     private static string? Truncate(string? value, int maxLength) =>
         value is null || value.Length <= maxLength ? value : value[..maxLength];

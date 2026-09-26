@@ -56,11 +56,21 @@ internal static class ContactProjection
             contact.OptedInAt,
             contact.LastMessagedAt,
             contact.CreatedOn,
-            contact.NormalizedPhoneNumber));
+            contact.NormalizedPhoneNumber,
+            contact.CreatedBy,
+            contact.ModifiedOn,
+            contact.ModifiedBy));
 
     /// <summary>Formats a materialised row for the wire.</summary>
+    /// <remarks>
+    /// The names are looked up rather than joined per row: one query for the distinct actors on a
+    /// page, resolved by the caller through <c>IActorNames</c> and handed in here. An id in a
+    /// "Modified by" column is the thing the record-history work was asked to stop doing, so this
+    /// column would not have been worth adding without them.
+    /// </remarks>
     /// <param name="row">Row read from the database.</param>
-    public static ContactResponse ToResponse(ContactRow row)
+    /// <param name="names">Display names by user key. An absent id renders as null.</param>
+    public static ContactResponse ToResponse(ContactRow row, IReadOnlyDictionary<long, string>? names = null)
     {
         ArgumentNullException.ThrowIfNull(row);
 
@@ -77,7 +87,10 @@ internal static class ContactProjection
             [.. row.GroupIds.Select(id => PublicId.From(PublicId.Group, id))],
             row.OptedInAt,
             row.LastMessagedAt,
-            row.CreatedOn);
+            row.CreatedOn,
+            Named(names, row.CreatedBy),
+            row.ModifiedOn,
+            Named(names, row.ModifiedBy));
     }
 
     private static IQueryable<Contact> ApplyStatusFilter(IQueryable<Contact> source, string? status)
@@ -126,6 +139,19 @@ internal static class ContactProjection
                 !assignment.IsDeleted && assignment.ContactTagId == parsed));
     }
 
+    /// <summary>
+    /// The actor's name, or null when nobody is named.
+    /// </summary>
+    /// <remarks>
+    /// Null covers three cases the client renders the same way: the row was written by the
+    /// platform rather than a person, the column was never set, or the id names somebody the
+    /// lookup could not find. An em dash is the honest answer to all three.
+    /// </remarks>
+    /// <param name="names">Display names by user key.</param>
+    /// <param name="userId">The key on the row.</param>
+    private static string? Named(IReadOnlyDictionary<long, string>? names, long? userId) =>
+        names is not null && userId is { } id && names.TryGetValue(id, out var name) ? name : null;
+
     private static bool IsUnfiltered(string? value) =>
         string.IsNullOrWhiteSpace(value)
         || string.Equals(value, ContactQuery.All, StringComparison.OrdinalIgnoreCase);
@@ -147,6 +173,9 @@ internal static class ContactProjection
 /// Digits-only number. Carried for duplicate grouping, never returned - the response exposes the
 /// display form only.
 /// </param>
+/// <param name="CreatedBy">Key of whoever created the row.</param>
+/// <param name="ModifiedOn">Instant of the last change, or null.</param>
+/// <param name="ModifiedBy">Key of whoever made it, or null.</param>
 internal sealed record ContactRow(
     long Id,
     string FullName,
@@ -159,4 +188,7 @@ internal sealed record ContactRow(
     DateTimeOffset? OptedInAt,
     DateTimeOffset? LastMessagedAt,
     DateTimeOffset CreatedOn,
-    string NormalizedPhone);
+    string NormalizedPhone,
+    long CreatedBy,
+    DateTimeOffset? ModifiedOn,
+    long? ModifiedBy);

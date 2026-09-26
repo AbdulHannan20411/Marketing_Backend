@@ -93,6 +93,9 @@ public static class InfrastructureServiceCollectionExtensions
 
         // Scoped: these read per-request state, and a singleton would capture the first request's
         // HttpContext for the lifetime of the process.
+        // Registered before ICurrentUser, which depends on it. Scoped, so the preview it holds
+        // lives exactly as long as the request that entered it.
+        services.AddScoped<IViewAsContext, ViewAsContext>();
         services.AddScoped<ICurrentUser, HttpContextCurrentUser>();
         services.AddScoped<ITenantContext, TenantContext>();
         services.AddScoped<IRequestContext, HttpRequestContext>();

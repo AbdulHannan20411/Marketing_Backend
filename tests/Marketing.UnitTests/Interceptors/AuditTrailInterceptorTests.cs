@@ -42,6 +42,28 @@ public sealed class AuditTrailInterceptorTests : IDisposable
     private void Intercept() =>
         _interceptor.SavingChanges(new DbContextEventData(null!, null!, _context), default);
 
+    /// <summary>
+    /// Runs the post-save pass, which links each insert's audit row to the key the database
+    /// assigned it.
+    /// </summary>
+    /// <remarks>
+    /// The context has no connection behind it - the model is built against the PostgreSQL
+    /// provider precisely so nothing has to be running - so the save this triggers throws. The
+    /// linking happens before that save is attempted, which is what these tests assert. Proving
+    /// the save itself belongs in the container-backed suite.
+    /// </remarks>
+    private void CompleteSave()
+    {
+        try
+        {
+            _interceptor.SavedChanges(new SaveChangesCompletedEventData(null!, null!, _context, 1), 1);
+        }
+        catch (Exception exception) when (exception is not Xunit.Sdk.XunitException)
+        {
+            // No database. See above.
+        }
+    }
+
     private IReadOnlyList<AuditLog> Written() =>
         [.. _context.ChangeTracker.Entries<AuditLog>().Select(entry => entry.Entity)];
 
@@ -90,6 +112,60 @@ public sealed class AuditTrailInterceptorTests : IDisposable
 
         // A create has nothing to compare against, so it reports new values alone.
         changes.GetProperty("DisplayName").TryGetProperty("old", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_creates_audit_row_is_linked_to_the_key_the_database_assigns()
+    {
+        var user = NewUser();
+
+        _context.Users.Add(user);
+
+        Intercept();
+
+        var log = Written().Should().ContainSingle().Which;
+
+        // Before the insert runs there is no key. Recording entry.Entity.Id here wrote the
+        // uninitialised zero - a well-formed id matching no record - so 977 create entries sat in
+        // the table that no record's history could ever find.
+        log.EntityId.Should().Be("pending");
+
+        // What PostgreSQL does with RETURNING id.
+        user.Id = 4242;
+
+        CompleteSave();
+
+        log.EntityId.Should().Be("4242");
+    }
+
+    [Fact]
+    public void An_update_is_linked_straight_away_and_needs_no_second_pass()
+    {
+        var user = Existing();
+
+        user.DisplayName = "Operator Two";
+
+        Intercept();
+
+        // The row was loaded, so its key was already known. Only inserts need the second pass,
+        // which is why updates and deletes were never affected by this.
+        Written().Should().ContainSingle().Which.EntityId.Should().Be("5001");
+    }
+
+    [Fact]
+    public void A_failed_save_does_not_leave_a_create_waiting_to_be_linked()
+    {
+        _context.Users.Add(NewUser());
+
+        Intercept();
+
+        _interceptor.SaveChangesFailed(new DbContextErrorEventData(null!, null!, _context, new InvalidOperationException()));
+
+        // Nothing was committed, so the audit row rolled back with the change. Left pending, it
+        // would be linked - and saved - by whatever the caller tried next.
+        CompleteSave();
+
+        Written().Should().ContainSingle().Which.EntityId.Should().Be("pending");
     }
 
     [Fact]

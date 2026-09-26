@@ -8,14 +8,17 @@ namespace Marketing.UnitTests.Infrastructure;
 
 public sealed class HttpContextCurrentUserTests
 {
-    private static HttpContextCurrentUser CreateUser(params Claim[] claims)
+    private static HttpContextCurrentUser CreateUser(params Claim[] claims) =>
+        CreateUser(new ViewAsContext(), claims);
+
+    private static HttpContextCurrentUser CreateUser(ViewAsContext viewAs, params Claim[] claims)
     {
         var context = new DefaultHttpContext
         {
             User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")),
         };
 
-        return new HttpContextCurrentUser(new HttpContextAccessor { HttpContext = context });
+        return new HttpContextCurrentUser(new HttpContextAccessor { HttpContext = context }, viewAs);
     }
 
     [Fact]

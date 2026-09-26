@@ -16,6 +16,12 @@ namespace Marketing.Application.DTOs.Contacts;
 /// <param name="OptedInAt">Instant consent was given.</param>
 /// <param name="LastMessagedAt">Instant of the last outbound message.</param>
 /// <param name="CreatedAt">Instant the contact was created.</param>
+/// <param name="CreatedBy">
+/// Who created it, by name. Null when the row was written by the platform itself - a seeded
+/// contact, a background job - which the client renders as an em dash.
+/// </param>
+/// <param name="UpdatedAt">Instant it was last changed, or null if it never has been.</param>
+/// <param name="UpdatedBy">Who last changed it, by name, or null if nobody has.</param>
 public sealed record ContactResponse(
     string Id,
     string FullName,
@@ -28,7 +34,10 @@ public sealed record ContactResponse(
     IReadOnlyList<string> GroupIds,
     DateTimeOffset? OptedInAt,
     DateTimeOffset? LastMessagedAt,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string? CreatedBy,
+    DateTimeOffset? UpdatedAt,
+    string? UpdatedBy);
 
 /// <summary>A named collection of contacts.</summary>
 /// <param name="Id">Opaque identifier, prefixed <c>grp_</c>.</param>

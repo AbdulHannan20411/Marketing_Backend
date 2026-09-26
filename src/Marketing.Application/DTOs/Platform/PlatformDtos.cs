@@ -53,6 +53,16 @@ public sealed class AdminAccountQuery
 /// <param name="TenantId">
 /// The organisation's id, <c>tnt_…</c> - what the platform's workspace routes take, such as
 /// <c>/superadmin/security/tenants/{tenantId}</c>. Platform staff only ever see this list.
+/// <para>
+/// Always present. The list is built from users who have a workspace - an account without one is
+/// excluded by the query, not returned with a null - so there is no "admin with no workspace"
+/// case to render. It was declared nullable and never was one; the type now says so.
+/// </para>
+/// <para>
+/// Not unique across the list. This is a list of <em>admin accounts</em>, and a workspace may have
+/// several: two rows carrying the same <c>tnt_…</c> are two people who administer one workspace.
+/// A screen that lists workspaces wants <c>GET /superadmin/tenants</c> instead.
+/// </para>
 /// </param>
 public sealed record AdminAccount(
     string Id,
@@ -70,7 +80,7 @@ public sealed record AdminAccount(
     int MessagesThisMonth,
     DateTimeOffset LastActiveAt,
     DateTimeOffset CreatedAt,
-    string? TenantId = null);
+    string TenantId);
 
 /// <summary>One day on the platform trend chart.</summary>
 /// <param name="Date">Date only.</param>
