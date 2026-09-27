@@ -187,6 +187,14 @@ public class ApplicationDbContext : DbContext
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
 
+        // Trigram matching, which is what makes the search boxes indexable. Every search in this
+        // product is ILIKE '%term%', and an infix pattern cannot use a B-tree; pg_trgm is the only
+        // index shape PostgreSQL offers that answers one. Declared on the model rather than run by
+        // hand so a fresh database gets it from the migrations like everything else.
+        //
+        // Trusted since PostgreSQL 13, so the database owner can install it without superuser.
+        modelBuilder.HasPostgresExtension("pg_trgm");
+
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
 
         OnAdditionalModelCreating(modelBuilder);

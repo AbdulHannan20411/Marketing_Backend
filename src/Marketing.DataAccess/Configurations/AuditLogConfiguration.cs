@@ -43,6 +43,17 @@ public sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.HasIndex(log => new { log.EntityName, log.EntityId, log.OccurredOn })
             .IsDescending(false, false, true);
 
-        builder.HasIndex(log => log.UserId);
+        // The platform audit screen, which reads across every workspace and so cannot use the
+        // index above: a tenant-leading index answers nothing when no tenant is named. This is the
+        // index the screen's date range and its newest-first default both need, and the table is
+        // append-only - it is the one list that is never smaller tomorrow.
+        builder.HasIndex(log => log.OccurredOn)
+            .IsDescending(true);
+
+        // "Everything this person did", filtered by date and read newest first - the shape the
+        // actor filter produces. Time is carried in the index because a bare user_id index leaves
+        // the ordering to a sort over every entry that person has ever written.
+        builder.HasIndex(log => new { log.UserId, log.OccurredOn })
+            .IsDescending(false, true);
     }
 }

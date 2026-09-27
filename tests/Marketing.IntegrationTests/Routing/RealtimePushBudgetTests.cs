@@ -23,6 +23,7 @@ public sealed class RealtimePushBudgetTests
         new(
             "ntf_1",
             NotificationKind.CampaignCompleted,
+            NotificationCategory.Campaigns,
             "Campaign finished",
             "All messages sent.",
             NotificationPriority.Info,
