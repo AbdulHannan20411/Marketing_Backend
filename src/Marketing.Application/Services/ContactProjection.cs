@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Marketing.Application.DTOs.Contacts;
 using Marketing.Business.Extensions;
 using Marketing.Common.Helpers;
@@ -18,6 +19,33 @@ namespace Marketing.Application.Services;
 /// </summary>
 internal static class ContactProjection
 {
+    /// <summary>
+    /// Sortable columns, matched against the client's <c>sortBy</c>.
+    /// <para>
+    /// An allow-list, so a client-supplied sort field is matched against known keys and never
+    /// reaches the provider as text.
+    /// </para>
+    /// </summary>
+    public static readonly Dictionary<string, Expression<Func<Contact, object?>>> SortableColumns =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            // The real key, not the public id. "cnt_9" sorts after "cnt_10" as text, which is the
+            // wrong order under a header that says "ID" - and the prefix is derived anyway.
+            ["id"] = contact => contact.Id,
+            ["fullName"] = contact => contact.FullName,
+            ["status"] = contact => contact.Status,
+            ["country"] = contact => contact.Country,
+            ["createdAt"] = contact => contact.CreatedOn,
+            ["lastMessagedAt"] = contact => contact.LastMessagedAt,
+
+            // The two new audit columns. Sorted by the stored key rather than by the resolved
+            // name: the name is looked up after the page is read, so ordering by it would sort
+            // twenty rows by a value the other four hundred also have.
+            ["updatedAt"] = contact => contact.ModifiedOn,
+            ["createdBy"] = contact => contact.CreatedBy,
+            ["updatedBy"] = contact => contact.ModifiedBy,
+        };
+
     /// <summary>
     /// Applies search and every list filter.
     /// <para>

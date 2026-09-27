@@ -1,4 +1,6 @@
+using System.Globalization;
 using Asp.Versioning;
+using Marketing.API.Export;
 using Marketing.API.Filters;
 using Marketing.Application.DTOs.Platform;
 using Marketing.Application.Interfaces;
@@ -81,16 +83,55 @@ public sealed class PlatformAdminController : ApiControllerBase
         SuccessPage(await _platform.GetTenantsAsync(request, cancellationToken));
 
     /// <summary>Returns a page of audit-log entries, newest first.</summary>
-    /// <param name="request">Paging parameters.</param>
+    /// <remarks>
+    /// Paging, sorting, and the screen's four filters: <c>search</c>, <c>actor</c>,
+    /// <c>from</c>/<c>to</c> and <c>severity</c>. Each is optional and each narrows the whole log
+    /// rather than the page, so the total underneath the list describes what the filters selected.
+    /// </remarks>
+    /// <param name="request">Paging, sorting and filters.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <response code="200">A page of audit entries.</response>
     [HttpGet("audit")]
     [RequirePermission(Permissions.Platform.Audit)]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<AuditLogEntryResponse>>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAuditAsync(
-        [FromQuery] PageRequest request,
+        [FromQuery] AuditLogQuery request,
         CancellationToken cancellationToken) =>
         SuccessPage(await _platform.GetAuditLogAsync(request, cancellationToken));
+
+    /// <summary>Downloads the audit log the filters select, as CSV.</summary>
+    /// <remarks>
+    /// One request. The client used to build this file itself by paging the list endpoint at a
+    /// hundred rows a time - sixty-eight requests for sixty-eight pages - and gave up at five
+    /// thousand rows. Rows are streamed to the response as they are read, so neither the server
+    /// nor the browser holds the file.
+    /// <para>
+    /// Same filters, same sort and the same query as the list, so the file matches the screen it
+    /// was exported from.
+    /// </para>
+    /// </remarks>
+    /// <param name="request">The screen's filters and sort. Paging is ignored.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">A CSV file.</response>
+    [HttpGet("audit/export")]
+    [RequirePermission(Permissions.Platform.Audit)]
+    [Produces("text/csv")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public Task GetAuditExportAsync(
+        [FromQuery] AuditLogQuery request,
+        CancellationToken cancellationToken) =>
+        StreamCsvAsync(
+            "audit-log.csv",
+            _platform.StreamAuditLogAsync(request, cancellationToken),
+            [
+                new CsvColumn<AuditLogEntryResponse>("When", entry => entry.OccurredAt.ToString("O", CultureInfo.InvariantCulture)),
+                new CsvColumn<AuditLogEntryResponse>("Who", entry => entry.Actor),
+                new CsvColumn<AuditLogEntryResponse>("Action", entry => entry.Action),
+                new CsvColumn<AuditLogEntryResponse>("Record", entry => entry.Target),
+                new CsvColumn<AuditLogEntryResponse>("Workspace", entry => entry.Workspace),
+                new CsvColumn<AuditLogEntryResponse>("Severity", entry => entry.Severity.ToString()),
+                new CsvColumn<AuditLogEntryResponse>("IP address", entry => entry.IpAddress),
+            ]);
 
     /// <summary>Returns infrastructure health, quotas and throughput.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>

@@ -139,6 +139,9 @@ public class ApplicationDbContext : DbContext
     public DbSet<NotificationDismissal> NotificationDismissals =>
         Set<NotificationDismissal>();
 
+    /// <summary>Asynchronous list-view exports, from request to expiry.</summary>
+    public DbSet<ExportJob> ExportJobs => Set<ExportJob>();
+
     /// <summary>Single-use invitation and password-reset tokens.</summary>
     public DbSet<UserToken> UserTokens => Set<UserToken>();
 

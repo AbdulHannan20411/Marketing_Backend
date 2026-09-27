@@ -80,6 +80,19 @@ public sealed partial class SignalRRealtimeNotifier : IRealtimeNotifier
             cancellationToken);
 
     /// <inheritdoc />
+    public Task PublishExportProgressAsync(
+        long userId,
+        ExportProgress progress,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(
+            // The requester's own group. An export names a file and a row count for data that
+            // person chose to extract; the rest of the workspace has no business hearing about it.
+            RealtimeHub.UserGroup(userId),
+            RealtimeEvents.ExportProgress,
+            progress,
+            cancellationToken);
+
+    /// <inheritdoc />
     public async Task PublishPaymentRequestAsync(
         long? tenantId,
         PaymentRequestEvent payment,

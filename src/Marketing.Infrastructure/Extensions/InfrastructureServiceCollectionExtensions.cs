@@ -56,6 +56,10 @@ public static class InfrastructureServiceCollectionExtensions
         // billing flow works end to end; swapping in a provider replaces this one registration.
         services.AddScoped<Application.Interfaces.IPaymentGateway, ManualPaymentGateway>();
 
+        // Export writers. Stateless, so one of each; the runner picks by format.
+        services.AddSingleton<Application.Services.Exports.IExportFileWriter, Exports.CsvExportFileWriter>();
+        services.AddSingleton<Application.Services.Exports.IExportFileWriter, Exports.XlsxExportFileWriter>();
+
         services.AddOptions<Application.Configurations.SmtpOptions>()
             .Bind(configuration.GetSection(Application.Configurations.SmtpOptions.SectionName))
             .ValidateDataAnnotations()
@@ -230,9 +234,16 @@ public static class InfrastructureServiceCollectionExtensions
                 health.Tags.Add("messaging");
             });
 
-            // Consumers are contributed here. The platform ships none yet — its asynchronous work
-            // runs on the import outbox, which is deliberately untouched — so this is the seam that
-            // will carry them, and what the messaging tests use to attach one.
+            // The export worker. First consumer on the bus, and registered here rather than
+            // through the caller's seam because it ships with the platform: the endpoint has to
+            // exist wherever the API runs, or an export is queued and nothing ever reads it.
+            //
+            // The import outbox is deliberately untouched. It is a different mechanism for a
+            // different problem — work that must commit in the same transaction as the row that
+            // caused it — and rewriting it onto the broker would be a migration nobody asked for.
+            bus.AddConsumer<Messaging.Consumers.ExportJobConsumer>();
+
+            // Anything else is contributed here: another module, or a test attaching its own.
             configureBus?.Invoke(bus);
 
             bus.UsingRabbitMq((context, configurator) =>

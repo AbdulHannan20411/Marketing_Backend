@@ -542,6 +542,44 @@ public sealed class UserNotificationPreferenceConfiguration : BaseEntityConfigur
     }
 }
 
+/// <summary>Fluent configuration for <see cref="ExportJob"/>.</summary>
+public sealed class ExportJobConfiguration : BaseEntityConfiguration<ExportJob>
+{
+    /// <inheritdoc />
+    protected override void ConfigureEntity(EntityTypeBuilder<ExportJob> builder)
+    {
+        builder.ToTable("export_jobs");
+
+        builder.Property(job => job.Dataset).IsRequired().HasMaxLength(64);
+        builder.Property(job => job.Format).IsRequired().HasMaxLength(8).HasConversion<string>();
+        builder.Property(job => job.Status).IsRequired().HasMaxLength(16).HasConversion<string>();
+        builder.Property(job => job.Columns).HasColumnType("text[]").IsRequired();
+        builder.Property(job => job.FileName).HasMaxLength(260);
+        builder.Property(job => job.FileStorageKey).HasMaxLength(512);
+        builder.Property(job => job.Fingerprint).IsRequired().HasMaxLength(64);
+
+        // The captured list-view state. jsonb rather than text so a support question about what
+        // somebody actually exported can be answered with a query instead of by eye.
+        builder.Property(job => job.QueryJson).IsRequired().HasColumnType("jsonb");
+
+        // Bounded, and truncated before it is stored. This is the sentence shown to a user, and
+        // an unbounded column invites somebody to put an exception in it one day.
+        builder.Property(job => job.ErrorMessage).HasMaxLength(500);
+
+        // The export centre's only query: this user's exports, newest first.
+        builder.HasIndex(job => new { job.TenantId, job.RequestedByUserId, job.CreatedOn })
+            .IsDescending(false, false, true);
+
+        // What the cleanup job scans for. Filtered, so the index stays the size of the exports
+        // still holding a file rather than of every export ever run.
+        builder.HasIndex(job => job.ExpiresAt)
+            .HasFilter("status = 'Completed' and is_deleted = false");
+
+        // Duplicate detection reads this within a short window; see ExportJobService.
+        builder.HasIndex(job => new { job.TenantId, job.RequestedByUserId, job.Fingerprint });
+    }
+}
+
 /// <summary>Fluent configuration for <see cref="NotificationDismissal"/>.</summary>
 public sealed class NotificationDismissalConfiguration : BaseEntityConfiguration<NotificationDismissal>
 {

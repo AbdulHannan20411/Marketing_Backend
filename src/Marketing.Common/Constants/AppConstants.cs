@@ -259,6 +259,17 @@ public static class AppConstants
         public static string UserPermissions(long tenantId, long userId) =>
             $"{TenantPrefix(tenantId)}user:{userId}:permissions";
 
+        /// <summary>
+        /// The latest progress reading for a running export.
+        /// </summary>
+        /// <remarks>
+        /// A convenience, never the record. The job row carries the authoritative count; this
+        /// exists so a client that reconnects mid export can be told where it is without a
+        /// database read, and so a reading survives between pushes. Losing it costs nothing.
+        /// </remarks>
+        public static string ExportProgress(long tenantId, long exportJobId) =>
+            $"{TenantPrefix(tenantId)}export:{exportJobId}:progress";
+
         /// <summary>Cached tenant record, keyed by slug for the sign-in path.</summary>
         public static string TenantBySlug(string slug) =>
             $"{PlatformPrefix()}tenant:slug:{slug.ToLowerInvariant()}";

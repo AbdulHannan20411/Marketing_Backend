@@ -32,8 +32,22 @@ public interface IPlatformService
         CancellationToken cancellationToken = default);
 
     /// <summary>Returns a page of audit-log entries, newest first.</summary>
+    /// <param name="request">Paging, sorting and the screen's filters. All filters optional.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public Task<PagedResult<AuditLogEntryResponse>> GetAuditLogAsync(
-        PageRequest request,
+        AuditLogQuery request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>The same entries the page returns, streamed, for an export.</summary>
+    /// <remarks>
+    /// Streamed rather than paged because an export has no page: the rows go to the response as
+    /// they arrive from the database, so the memory it costs is one row and not one audit log.
+    /// Same filters and same order as <see cref="GetAuditLogAsync"/>, from the same query.
+    /// </remarks>
+    /// <param name="request">Filters and sort. Paging is ignored.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public IAsyncEnumerable<AuditLogEntryResponse> StreamAuditLogAsync(
+        AuditLogQuery request,
         CancellationToken cancellationToken = default);
 
     /// <summary>Returns infrastructure health, quotas and throughput.</summary>

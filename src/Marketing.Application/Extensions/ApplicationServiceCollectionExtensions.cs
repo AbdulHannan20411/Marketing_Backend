@@ -57,6 +57,18 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<Services.Security.IViewAsResolver, Services.Security.ViewAsResolver>();
         services.AddScoped<Services.Billing.ISubscriptionGate, Services.Billing.SubscriptionGate>();
         services.AddScoped<Services.Audit.IActorNames, Services.Audit.ActorNames>();
+
+        // Asynchronous list-view exports. The registry is built from whatever datasets are
+        // registered, so making one more list exportable is one AddScoped below and nothing else.
+        services.AddScoped<Services.Exports.IExportJobService, Services.Exports.ExportJobService>();
+        services.AddScoped<Services.Exports.IExportDatasetRegistry, Services.Exports.ExportDatasetRegistry>();
+        services.AddScoped<Services.Exports.IExportDataset, Services.Exports.Datasets.ContactExportDataset>();
+        services.AddScoped<Services.Exports.IExportDataset, Services.Exports.Datasets.DeliveryFailureExportDataset>();
+
+        // Singleton: the runner holds no state of its own and creates a scope per unit of work.
+        // Scoped would make it a captive dependency of the consumer that resolves it.
+        services.AddSingleton<Services.Exports.IExportRunner, Services.Exports.ExportRunner>();
+        services.AddScoped<Services.Exports.IExportMaintenanceService, Services.Exports.ExportMaintenanceService>();
         services.AddScoped<IPlanGuard, PlanGuard>();
         services.AddScoped<IContactService, ContactService>();
         services.AddScoped<IAnalyticsService, AnalyticsService>();

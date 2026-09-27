@@ -15,32 +15,6 @@ namespace Marketing.Application.Services;
 /// <inheritdoc cref="IContactService" />
 public sealed class ContactService : IContactService
 {
-    /// <summary>
-    /// Sortable columns, matched against the client's <c>sortBy</c>.
-    /// <para>
-    /// An allow-list, so a client-supplied sort field is matched against known keys and never
-    /// reaches the provider as text.
-    /// </para>
-    /// </summary>
-    private static readonly Dictionary<string, Expression<Func<Contact, object?>>> SortableColumns =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            // The real key, not the public id. "cnt_9" sorts after "cnt_10" as text, which is the
-            // wrong order under a header that says "ID" - and the prefix is derived anyway.
-            ["id"] = contact => contact.Id,
-            ["fullName"] = contact => contact.FullName,
-            ["status"] = contact => contact.Status,
-            ["country"] = contact => contact.Country,
-            ["createdAt"] = contact => contact.CreatedOn,
-            ["lastMessagedAt"] = contact => contact.LastMessagedAt,
-
-            // The two new audit columns. Sorted by the stored key rather than by the resolved
-            // name: the name is looked up after the page is read, so ordering by it would sort
-            // twenty rows by a value the other four hundred also have.
-            ["updatedAt"] = contact => contact.ModifiedOn,
-            ["createdBy"] = contact => contact.CreatedBy,
-            ["updatedBy"] = contact => contact.ModifiedBy,
-        };
 
     /// <summary>Duplicate groups examined per request, bounding a pathological data set.</summary>
     private const int MaxDuplicateScan = 5000;
@@ -100,7 +74,7 @@ public sealed class ContactService : IContactService
         // materialisation, because PublicId is C# the provider cannot translate.
         var projected = ContactProjection.Project(
             source
-                .ApplySort(query, SortableColumns, contact => contact.CreatedOn)
+                .ApplySort(query, ContactProjection.SortableColumns, contact => contact.CreatedOn)
 
                 // Settles ties so paging is deterministic. Sorting by status puts hundreds of rows
                 // in one bucket, and the order within it is otherwise whatever the plan produced
@@ -323,7 +297,7 @@ public sealed class ContactService : IContactService
         CancellationToken cancellationToken)
     {
         var projected = ContactProjection.Project(
-            source.ApplySort(request, SortableColumns, contact => contact.CreatedOn));
+            source.ApplySort(request, ContactProjection.SortableColumns, contact => contact.CreatedOn));
 
         var page = await _queries.ToPagedAsync(projected, request.Page, request.PageSize, cancellationToken);
 

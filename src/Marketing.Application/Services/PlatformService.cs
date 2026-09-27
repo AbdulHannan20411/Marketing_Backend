@@ -1,4 +1,3 @@
-using System.Linq.Expressions;
 using Marketing.Application.DTOs.Platform;
 using Marketing.Application.Interfaces;
 using Marketing.Business.Extensions;
@@ -9,6 +8,9 @@ using Marketing.Common.Requests;
 using Marketing.Common.Responses;
 using Marketing.DataAccess.Entities;
 using Marketing.Shared.Abstractions;
+using Microsoft.EntityFrameworkCore;
+using System.Linq.Expressions;
+using static Marketing.Common.Constants.AppConstants;
 using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Application.Services;
@@ -49,6 +51,21 @@ public sealed class PlatformService : IPlatformService
     /// columns in the table: the actor's name lives in <c>users</c> and the workspace's in
     /// <c>tenants</c>. Sorting them meant resolving both in SQL, which the read below now does.
     /// </remarks>
+    /// <summary>How an entry with no user behind it reports itself.</summary>
+    private const string SystemActor = "System";
+
+    /// <summary>
+    /// Severity, derived from the kind of change.
+    /// </summary>
+    /// <remarks>
+    /// Deletions are the entries a reviewer looks for first, so they carry more weight than a
+    /// routine create or update. Nothing derives to <see cref="AuditSeverity.Critical"/> yet -
+    /// permission grants, role changes, suspensions and plan changes are the candidates, and
+    /// promoting them is a decision about the product rather than about this method.
+    /// </remarks>
+    private static AuditSeverity SeverityOf(AppConstants.AuditAction action) =>
+        action == AppConstants.AuditAction.Deleted ? AuditSeverity.Warning : AuditSeverity.Info;
+
     private static readonly Dictionary<string, Expression<Func<AuditEntryRow, object?>>> SortableAuditColumns =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -304,16 +321,22 @@ public sealed class PlatformService : IPlatformService
 
     /// <inheritdoc />
     public async Task<PagedResult<TenantResponse>> GetTenantsAsync(
-        PageRequest request,
-        CancellationToken cancellationToken = default)
+     PageRequest request,
+     CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var projected = _tenants.Query()
-            .ApplySort(request, SortableTenantColumns, tenant => tenant.Name)
+        var projected = _tenants.Query();
 
-            // Names are not unique across the platform, and neither is a plan band or a status.
-            // The key settles the ties so paging cannot repeat a workspace.
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            projected = projected.Where(tenant =>
+                tenant.Name.Contains(request.Search) ||
+                tenant.ContactEmail.Contains(request.Search));
+        }
+
+        var query = projected
+            .ApplySort(request, SortableTenantColumns, tenant => tenant.Name)
             .ThenBy(tenant => tenant.Id)
             .Select(tenant => new
             {
@@ -328,7 +351,11 @@ public sealed class PlatformService : IPlatformService
                 Seats = tenant.Users.Count(user => !user.IsDeleted),
             });
 
-        var page = await _queries.ToPagedAsync(projected, request.PageNumber, request.PageSize, cancellationToken);
+        var page = await _queries.ToPagedAsync(
+            query,
+            request.PageNumber,
+            request.PageSize,
+            cancellationToken);
 
         return page.Map(row => new TenantResponse(
             PublicId.From(PublicId.Tenant, row.Id),
@@ -342,13 +369,53 @@ public sealed class PlatformService : IPlatformService
             row.CreatedOn));
     }
 
+
     /// <inheritdoc />
     public async Task<PagedResult<AuditLogEntryResponse>> GetAuditLogAsync(
-        PageRequest request,
+        AuditLogQuery request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var page = await _queries.ToPagedAsync(
+            AuditQuery(request),
+            request.PageNumber,
+            request.PageSize,
+            cancellationToken);
+
+        return page.Map(ToAuditResponse);
+    }
+
+    /// <inheritdoc />
+    public IAsyncEnumerable<AuditLogEntryResponse> StreamAuditLogAsync(
+        AuditLogQuery request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Stream(cancellationToken);
+
+        async IAsyncEnumerable<AuditLogEntryResponse> Stream(
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token)
+        {
+            await foreach (var row in _queries.StreamAsync(AuditQuery(request), token))
+            {
+                yield return ToAuditResponse(row);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The audit log, joined, filtered and ordered - one query behind both readers.
+    /// </summary>
+    /// <remarks>
+    /// The export and the screen have to agree about what the filters select and what order they
+    /// select it in. Two copies of this would drift, and the failure would be silent: a file that
+    /// does not match the list it was exported from, which nobody checks until it matters.
+    /// </remarks>
+    /// <param name="request">Paging is ignored here; the caller applies it.</param>
+    private IQueryable<AuditEntryRow> AuditQuery(AuditLogQuery request)
+    {
         // The actor and the workspace are resolved in the database rather than after the page is
         // materialised. Two reasons, and the second is the one that matters: a name the query does
         // not know cannot be sorted on, and the previous shape read every user and every tenant on
@@ -358,53 +425,106 @@ public sealed class PlatformService : IPlatformService
         // has no workspace; an inner join would have silently dropped exactly the entries a
         // reviewer opens this screen to find.
         var joined =
-            from entry in _auditLogs.Query()
-            join candidate in _users.Query() on entry.UserId equals candidate.Id into candidates
-            from actor in candidates.DefaultIfEmpty()
-            join owner in _tenants.Query() on entry.TenantId equals (long?)owner.Id into owners
-            from workspace in owners.DefaultIfEmpty()
-            // An object initialiser, not a constructor. Ordering happens after this projection,
-            // and EF can resolve a member access back through a member-init but not through a
-            // constructor call - with positional arguments the sort failed to translate at all.
-            select new AuditEntryRow
-            {
-                Id = entry.Id,
-                EntityName = entry.EntityName,
-                EntityId = entry.EntityId,
-                Action = entry.Action,
-                IpAddress = entry.IpAddress,
-                OccurredOn = entry.OccurredOn,
-                Actor = actor == null ? null : actor.DisplayName,
-                Workspace = workspace == null ? null : workspace.Name,
-            };
+                    from entry in _auditLogs.Query()
+                    join candidate in _users.Query() on entry.UserId equals candidate.Id into candidates
+                    from actor in candidates.DefaultIfEmpty()
+                    join owner in _tenants.Query() on entry.TenantId equals (long?)owner.Id into owners
+                    from workspace in owners.DefaultIfEmpty()
+                    select new AuditEntryRow
+                    {
+                        Id = entry.Id,
+                        EntityName = entry.EntityName,
+                        EntityId = entry.EntityId,
+                        Action = entry.Action,
+                        IpAddress = entry.IpAddress,
+                        OccurredOn = entry.OccurredOn,
+                        Actor = actor == null ? null : actor.DisplayName,
+                        Workspace = workspace == null ? null : workspace.Name,
+                    };
 
-        var projected = joined
-            .ApplySort(request, SortableAuditColumns, row => row.OccurredOn)
+        var filtered = joined;
 
-            // Entries written by one save share an instant to the microsecond, so the default sort
-            // alone is not deterministic. The key is time-ordered, which makes this both a
-            // tiebreak and the right secondary order.
-            .ThenByDescending(row => row.Id);
-
-        var page = await _queries.ToPagedAsync(projected, request.PageNumber, request.PageSize, cancellationToken);
-
-        return page.Map(row =>
+        if (!string.IsNullOrWhiteSpace(request.Search))
         {
-            var actor = row.Actor ?? "System";
+            var search = request.Search.Trim();
+            var pattern = $"%{search}%";
 
-            return new AuditLogEntryResponse(
-                PublicId.From(PublicId.Audit, row.Id),
-                actor,
-                Initials.From(actor),
-                $"{row.Action} {row.EntityName}",
-                row.EntityId,
-                row.Workspace ?? "Platform",
-                row.IpAddress ?? string.Empty,
-                // Deletions are the entries a reviewer looks for first, so they carry more weight
-                // than a routine create or update.
-                row.Action == AppConstants.AuditAction.Deleted ? AuditSeverity.Warning : AuditSeverity.Info,
-                row.OccurredOn);
-        });
+            filtered = filtered.Where(row =>
+                (row.Actor != null &&
+                 EF.Functions.ILike(row.Actor, pattern)) ||
+
+                EF.Functions.ILike(row.EntityName, pattern) ||
+
+                EF.Functions.ILike(row.EntityId, pattern) ||
+
+                EF.Functions.ILike(
+                    row.Action == AuditAction.Created
+                        ? "Created"
+                        : row.Action == AuditAction.Updated
+                            ? "Updated"
+                            : "Deleted",
+                    pattern));
+        }
+
+
+
+        if (request.From is { } from)
+        {
+            filtered = filtered.Where(row => row.OccurredOn >= from);
+        }
+
+        if (request.To is { } to)
+        {
+            filtered = filtered.Where(row => row.OccurredOn <= to);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Actor))
+        {
+            var actor = request.Actor.Trim();
+
+            // Exact, not a contains: this backs a picker, and the value came from an entry this
+            // endpoint produced. The system identity has no user row and reports as "System" in the
+            // response rather than in the data, so it is matched on the null it actually is.
+            filtered = string.Equals(actor, SystemActor, StringComparison.OrdinalIgnoreCase)
+                ? filtered.Where(row => row.Actor == null)
+                : filtered.Where(row => row.Actor == actor);
+        }
+
+        if (request.Severity is { } severity)
+        {
+            // Severity is derived from the action rather than stored, so the filter has to be a
+            // predicate over the action - and it is derived in exactly one place, below, so the two
+            // cannot drift apart. Critical has no action behind it today and therefore matches
+            // nothing; that is the honest answer until the platform decides which actions deserve
+            // the word. Answering it with the whole log, or with the warnings, would be worse.
+            filtered = severity switch
+            {
+                AuditSeverity.Warning => filtered.Where(row => row.Action == AppConstants.AuditAction.Deleted),
+                AuditSeverity.Info => filtered.Where(row => row.Action != AppConstants.AuditAction.Deleted),
+                _ => filtered.Where(_ => false),
+            };
+        }
+
+        return filtered
+            .ApplySort(request, SortableAuditColumns, row => row.OccurredOn)
+            .ThenByDescending(row => row.Id);
+    }
+
+    /// <summary>One joined row, as the screen and the file both report it.</summary>
+    private static AuditLogEntryResponse ToAuditResponse(AuditEntryRow row)
+    {
+        var actor = row.Actor ?? SystemActor;
+
+        return new AuditLogEntryResponse(
+            PublicId.From(PublicId.Audit, row.Id),
+            actor,
+            Initials.From(actor),
+            $"{row.Action} {row.EntityName}",
+            row.EntityId,
+            row.Workspace ?? "Platform",
+            row.IpAddress ?? string.Empty,
+            SeverityOf(row.Action),
+            row.OccurredOn);
     }
 
     /// <inheritdoc />

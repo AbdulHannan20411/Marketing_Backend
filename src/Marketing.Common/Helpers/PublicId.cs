@@ -79,6 +79,17 @@ public static class PublicId
     public const string Export = "exp";
 
     /// <summary>
+    /// A list-view export job.
+    /// </summary>
+    /// <remarks>
+    /// Its own prefix rather than sharing <see cref="Export"/>, which belongs to the import
+    /// error report. Two unrelated tables behind one prefix means an id from either parses for
+    /// both, and the only thing standing between them is a tenant check that would have to be
+    /// right in two places instead of one.
+    /// </remarks>
+    public const string ExportJob = "exj";
+
+    /// <summary>
     /// Prefix for manual payment requests.
     /// <para>
     /// Deliberately not <c>pay</c>, which already identifies a captured <c>Payment</c>. Two entity

@@ -1,3 +1,4 @@
+using Marketing.Common.Requests;
 using static Marketing.Common.Constants.ContractEnums;
 
 namespace Marketing.Application.DTOs.Platform;
@@ -32,6 +33,33 @@ public sealed class AdminAccountQuery
 
     /// <summary>Whether the caller asked for a page rather than the whole list.</summary>
     public bool WantsPage => Page.HasValue || PageSize.HasValue;
+}
+
+/// <summary>What the platform audit log can be narrowed by.</summary>
+/// <remarks>
+/// Every filter is optional and absent means "do not narrow by this". The client omits a parameter
+/// rather than sending it empty, so there is no sentinel value to recognise and no <c>all</c>
+/// member on the enum - absent is how "every severity" is said.
+/// </remarks>
+public sealed class AuditLogQuery : PageRequest
+{
+    /// <summary>Actor's display name, matched exactly. Null for everyone.</summary>
+    /// <remarks>
+    /// A name rather than a key because that is what the entry reports: <c>AuditLogEntryResponse</c>
+    /// carries <c>Actor</c> and no user id, so a name is the only thing the client can send back.
+    /// Two people can share a display name, which makes this a weaker filter than it looks - see
+    /// the note on <c>UserId</c> in the frontend brief.
+    /// </remarks>
+    public string? Actor { get; init; }
+
+    /// <summary>Inclusive lower bound on when the change happened.</summary>
+    public DateTimeOffset? From { get; init; }
+
+    /// <summary>Inclusive upper bound on when the change happened.</summary>
+    public DateTimeOffset? To { get; init; }
+
+    /// <summary>Severity to show, or null for every severity.</summary>
+    public AuditSeverity? Severity { get; init; }
 }
 
 /// <summary>An Admin account, as the platform screens list it.</summary>

@@ -52,6 +52,42 @@ public static class ContactQueryExtensions
 /// </summary>
 public static class SearchQueryExtensions
 {
+    /// <summary>
+    /// Matches a delivery failure by campaign, contact, number or reason, case-insensitively.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than in the export dataset for the same reason as contact search: the
+    /// translation to PostgreSQL <c>ILIKE</c> is an Entity Framework concern, and the Application
+    /// layer composing the query stays free of EF.
+    /// <para>
+    /// The paged failure endpoint does not offer search today. This exists for the export, whose
+    /// captured list-view state carries whatever the screen had - so the predicate is ready when
+    /// that screen grows a search box, and means nothing until it does.
+    /// </para>
+    /// </remarks>
+    /// <param name="source">Query being composed.</param>
+    /// <param name="search">Search term. A blank term applies no filter.</param>
+    public static IQueryable<Marketing.DataAccess.Entities.DeliveryFailure> WhereFailureMatches(
+        this IQueryable<Marketing.DataAccess.Entities.DeliveryFailure> source,
+        string? search)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            return source;
+        }
+
+        // A bound parameter, never concatenated. Wildcards are ours.
+        var term = $"%{search.Trim()}%";
+
+        return source.Where(failure =>
+            EF.Functions.ILike(failure.CampaignName, term)
+            || EF.Functions.ILike(failure.ContactName, term)
+            || EF.Functions.ILike(failure.PhoneNumber, term)
+            || EF.Functions.ILike(failure.Reason, term));
+    }
+
     /// <summary>Matches a campaign name, case-insensitively.</summary>
     public static IQueryable<Campaign> WhereNameMatches(this IQueryable<Campaign> source, string term)
     {

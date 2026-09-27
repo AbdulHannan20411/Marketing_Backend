@@ -106,7 +106,55 @@ public interface IRealtimeNotifier
         IReadOnlyCollection<long> userIds,
         DTOs.WhatsApp.ConversationResponse conversation,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Pushes an export's state to the one user who asked for it.
+    /// </summary>
+    /// <remarks>
+    /// To a user group, never to the tenant. An export carries a file name and a row count for
+    /// data the requester chose to extract, and a colleague has no business being told about it -
+    /// still less being handed a link they might be able to follow.
+    /// </remarks>
+    /// <param name="userId">The user who requested the export.</param>
+    /// <param name="progress">Current state.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task PublishExportProgressAsync(
+        long userId,
+        ExportProgress progress,
+        CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// An export's live state, as pushed to the person who asked for it.
+/// </summary>
+/// <remarks>
+/// One event for the whole lifecycle rather than four - queued, progress, completed, failed - with
+/// <paramref name="Status"/> saying which it is. The client needs a single subscription and a
+/// single reducer; four events would be four handlers that have to agree about the same row.
+/// <para>
+/// Carries no storage key and no path. A completed export says what it is called and how big it
+/// is; downloading it goes back through the API, which checks ownership again.
+/// </para>
+/// </remarks>
+/// <param name="JobId">Opaque export identifier, prefixed <c>exj_</c>.</param>
+/// <param name="Dataset">Registry key of the list view.</param>
+/// <param name="DatasetName">What to call it in a toast.</param>
+/// <param name="Status">Where it has got to.</param>
+/// <param name="ProcessedRecords">Rows written so far.</param>
+/// <param name="TotalRecords">Rows expected, or null when the count was not worth taking.</param>
+/// <param name="Percentage">Completion, or null for indeterminate.</param>
+/// <param name="FileName">Name the download saves as, once there is a file.</param>
+/// <param name="ErrorMessage">Why it failed, in words a user can read.</param>
+public sealed record ExportProgress(
+    string JobId,
+    string Dataset,
+    string DatasetName,
+    Common.Constants.ContractEnums.ExportJobStatus Status,
+    int ProcessedRecords,
+    int? TotalRecords,
+    int? Percentage,
+    string? FileName,
+    string? ErrorMessage);
 
 /// <summary>An import's live state, as pushed to the wizard.</summary>
 /// <param name="BatchId">Opaque import identifier.</param>
@@ -162,4 +210,13 @@ public static class RealtimeEvents
 
     /// <summary>A manual payment was submitted or decided.</summary>
     public const string PaymentRequestUpdated = "paymentRequestUpdated";
+
+    /// <summary>
+    /// An export was queued, advanced, finished or failed.
+    /// </summary>
+    /// <remarks>
+    /// Sent to the requesting user's group alone. The payload's status says which of the four it
+    /// is, so the client keeps one subscription rather than four handlers that have to agree.
+    /// </remarks>
+    public const string ExportProgress = "exportProgress";
 }

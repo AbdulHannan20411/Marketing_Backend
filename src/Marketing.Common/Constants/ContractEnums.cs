@@ -647,6 +647,44 @@ public static class ContractEnums
     }
 
     /// <summary>
+    /// Where a list-view export has got to.
+    /// </summary>
+    /// <remarks>
+    /// The database is the source of truth for this, not the cache and not the broker. A queue
+    /// redelivering a message asks this column whether the work is already done.
+    /// </remarks>
+    public enum ExportJobStatus
+    {
+        /// <summary>Accepted and waiting for a worker.</summary>
+        Queued,
+
+        /// <summary>A worker has claimed it and is writing the file.</summary>
+        Processing,
+
+        /// <summary>The file is written and can be downloaded.</summary>
+        Completed,
+
+        /// <summary>It will not be produced. <c>ErrorMessage</c> says why, in words a user can read.</summary>
+        Failed,
+
+        /// <summary>Withdrawn before it finished.</summary>
+        Cancelled,
+
+        /// <summary>Completed once, and the file has since been deleted.</summary>
+        Expired,
+    }
+
+    /// <summary>What an export is written as.</summary>
+    public enum ExportFormat
+    {
+        /// <summary>Comma-separated, UTF-8 with a byte-order mark.</summary>
+        Csv,
+
+        /// <summary>An Excel workbook.</summary>
+        Xlsx,
+    }
+
+    /// <summary>
     /// Which of the caller's notifications a bulk delete clears.
     /// </summary>
     /// <remarks>
