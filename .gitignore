@@ -38,3 +38,7 @@ data/
 
 # Local file storage. Uploaded imports and generated reports are tenant data, not source.
 src/Marketing.API/App_Data/
+
+# Deployment variables. Identifiers and ARNs rather than secrets, but
+# environment-specific and not something to share between machines.
+deploy/aws/env.sh

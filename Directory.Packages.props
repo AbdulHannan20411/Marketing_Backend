@@ -55,6 +55,13 @@
     <PackageVersion Include="Polly.Extensions" Version="8.7.0" />
     <PackageVersion Include="PDFsharp-MigraDoc" Version="6.2.4" />
     <PackageVersion Include="ClosedXML" Version="0.104.2" />
+    <!--
+      S3, for file storage on a deployment with more than one instance. Only the S3 client and
+      the DI glue - not the whole AWS SDK. Credentials are never configured in code: the default
+      chain picks up the ECS task role, so nothing about deploying to AWS needs a key in config.
+    -->
+    <PackageVersion Include="AWSSDK.S3" Version="4.0.103.4" />
+    <PackageVersion Include="AWSSDK.Extensions.NETCore.Setup" Version="4.0.101.4" />
     <PackageVersion Include="MailKit" Version="4.17.0" />
     <PackageVersion Include="Refit" Version="8.0.0" />
     <PackageVersion Include="Refit.HttpClientFactory" Version="8.0.0" />

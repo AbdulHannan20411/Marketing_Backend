@@ -1,0 +1,108 @@
+{
+  "//": "ECS Fargate task definition for the API. Placeholders of the form ${NAME} are substituted by deploy.sh from deploy/aws/env.sh. Registered with: aws ecs register-task-definition --cli-input-json file://rendered.json",
+
+  "family": "${PROJECT}-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+
+  "//cpu": "1 vCPU / 2 GB is the smallest size that comfortably runs the export writer, which holds one batch plus a workbook in memory.",
+  "cpu": "1024",
+  "memory": "2048",
+
+  "//runtimePlatform": "ARM64 targets Graviton, which is about 20% cheaper than X86_64 for the same work. The Dockerfile cross-compiles for it. Change both this and the --platform in deploy.sh together, or the task will fail to start with an exec format error.",
+  "runtimePlatform": {
+    "cpuArchitecture": "ARM64",
+    "operatingSystemFamily": "LINUX"
+  },
+
+  "//executionRoleArn": "Pulls the image and reads the secrets below. Needs AmazonECSTaskExecutionRolePolicy plus secretsmanager:GetSecretValue on the secrets.",
+  "executionRoleArn": "${EXECUTION_ROLE_ARN}",
+
+  "//taskRoleArn": "What the application itself is allowed to do: s3:GetObject/PutObject/DeleteObject on the bucket prefix, and nothing else. This is why no AWS key appears anywhere in this file.",
+  "taskRoleArn": "${TASK_ROLE_ARN}",
+
+  "volumes": [
+    {
+      "//": "An empty ephemeral volume, not a tmpfs - Fargate does not support tmpfs. It exists so /tmp stays writable under readonlyRootFilesystem, which the export writer needs: it streams each file to disk before uploading rather than holding a few hundred megabytes in memory.",
+      "name": "tmp"
+    }
+  ],
+
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "${IMAGE}",
+      "essential": true,
+
+      "portMappings": [
+        { "containerPort": 8080, "protocol": "tcp", "appProtocol": "http" }
+      ],
+
+      "//readonlyRootFilesystem": "Safe only because Storage:Provider is S3. With the local provider the application creates and writes its storage directory and would fail at start-up.",
+      "readonlyRootFilesystem": true,
+      "mountPoints": [{ "sourceVolume": "tmp", "containerPath": "/tmp", "readOnly": false }],
+
+      "//stopTimeout": "ECS sends SIGTERM, waits, then SIGKILL. The default 30s can cut off an in-flight export; 120 gives it room. An export killed anyway is recovered by the stalled-job sweep, so this is politeness rather than correctness.",
+      "stopTimeout": 120,
+
+      "environment": [
+        { "name": "ASPNETCORE_ENVIRONMENT", "value": "Production" },
+        { "name": "ASPNETCORE_HTTP_PORTS", "value": "8080" },
+
+        { "//": "The API serves requests; the worker service runs the schedule. Two API tasks with the scheduler on would dispatch every campaign twice.",
+          "name": "Scheduler__Enabled", "value": "false" },
+
+        { "//": "Never true with more than one task: several instances race to migrate the same database while the previous version is still serving. deploy.sh runs the migration as its own task first.",
+          "name": "Database__ApplyMigrationsOnStartup", "value": "false" },
+        { "name": "Database__SeedOnStartup", "value": "false" },
+
+        { "name": "Storage__Provider", "value": "S3" },
+        { "name": "Storage__BucketName", "value": "${S3_BUCKET}" },
+        { "name": "Storage__Prefix", "value": "${S3_PREFIX}" },
+
+        { "//": "SignalR across more than one task requires the backplane. Without it a client connected to task A never receives an export-finished event raised on task B, and the toast simply never arrives.",
+          "name": "Redis__Enabled", "value": "true" },
+        { "name": "Redis__UseSignalRBackplane", "value": "true" },
+
+        { "name": "RabbitMQ__Enabled", "value": "true" },
+        { "name": "Email__ClientBaseUrl", "value": "${CLIENT_BASE_URL}" },
+        { "name": "Authentication__Issuer", "value": "${JWT_ISSUER}" },
+        { "name": "Authentication__Audience", "value": "${JWT_AUDIENCE}" },
+        { "name": "AWS_REGION", "value": "${AWS_REGION}" }
+      ],
+
+      "//secrets": "Injected as environment variables by the execution role at start-up. The values never appear in the task definition, in CloudFormation, or in `aws ecs describe-task-definition` output.",
+      "secrets": [
+        { "name": "Database__ConnectionString", "valueFrom": "${SECRET_ARN}:DatabaseConnectionString::" },
+        { "name": "Redis__ConnectionString", "valueFrom": "${SECRET_ARN}:RedisConnectionString::" },
+        { "name": "RabbitMQ__Host", "valueFrom": "${SECRET_ARN}:RabbitHost::" },
+        { "name": "RabbitMQ__Username", "valueFrom": "${SECRET_ARN}:RabbitUsername::" },
+        { "name": "RabbitMQ__Password", "valueFrom": "${SECRET_ARN}:RabbitPassword::" },
+        { "name": "Authentication__SigningKey", "valueFrom": "${SECRET_ARN}:JwtSigningKey::" },
+        { "name": "WhatsApp__AppSecret", "valueFrom": "${SECRET_ARN}:WhatsAppAppSecret::" },
+        { "name": "WhatsApp__WebhookVerifyToken", "valueFrom": "${SECRET_ARN}:WhatsAppWebhookVerifyToken::" },
+        { "name": "Places__ApiKey", "valueFrom": "${SECRET_ARN}:PlacesApiKey::" },
+        { "name": "Smtp__Password", "valueFrom": "${SECRET_ARN}:SmtpPassword::" }
+      ],
+
+      "//healthCheck": "The container-level check. The load balancer runs its own against /health/ready; this one is liveness, so a slow database does not make ECS kill a healthy task.",
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl --fail --silent http://localhost:8080/health/live || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      },
+
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/${PROJECT}-api",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "api",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

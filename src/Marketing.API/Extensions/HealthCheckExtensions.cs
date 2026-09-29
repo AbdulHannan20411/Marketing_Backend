@@ -2,6 +2,7 @@ using HealthChecks.UI.Client;
 using Marketing.Common.Constants;
 using Marketing.DataAccess.Configurations;
 using Marketing.Infrastructure.Redis;
+using Marketing.Infrastructure.Storage;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Marketing.API.Extensions;
@@ -54,6 +55,18 @@ public static class HealthCheckExtensions
                 name: "redis",
                 failureStatus: HealthStatus.Degraded,
                 tags: ["cache"]);
+        }
+
+        // File storage, but only when it is S3 - there is nothing useful to probe about a local
+        // directory that the application has already created at start-up.
+        var storageOptions = configuration.GetSection(StorageOptions.SectionName).Get<StorageOptions>();
+
+        if (storageOptions is { Provider: StorageProvider.S3 })
+        {
+            builder.AddCheck<S3StorageHealthCheck>(
+                "s3",
+                failureStatus: HealthStatus.Degraded,
+                tags: ["storage"]);
         }
 
         // The broker check is contributed by MassTransit itself, configured where the bus is

@@ -1,0 +1,79 @@
+name: Deploy to AWS
+
+# Build, migrate, deploy. Manual by default, because a marketing platform that
+# redeploys itself on every push to main will do it in the middle of a campaign
+# send. Uncomment the push trigger once that is a deliberate decision.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which environment to deploy
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
+  # push:
+  #   branches: [main]
+
+concurrency:
+  # One deployment at a time per environment, and never cancel one in flight -
+  # a cancelled run can leave the migration applied and the services not
+  # updated, which is the one state worth avoiding.
+  group: deploy-${{ inputs.environment || 'staging' }}
+  cancel-in-progress: false
+
+permissions:
+  # OIDC, so no AWS access key exists as a repository secret. The role below
+  # trusts this repository and nothing else.
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'staging' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # deploy.sh tags the image with the commit, so the history has to be
+          # deep enough to resolve one.
+          fetch-depth: 1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Set up buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Deploy
+        env:
+          # Identifiers and ARNs only. The application's own secrets are read
+          # from Secrets Manager by the ECS execution role at task start-up, so
+          # they never pass through this runner.
+          PROJECT: ${{ vars.PROJECT }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          ECS_API_SERVICE: ${{ vars.ECS_API_SERVICE }}
+          ECS_WORKER_SERVICE: ${{ vars.ECS_WORKER_SERVICE }}
+          SUBNET_IDS: ${{ vars.SUBNET_IDS }}
+          SECURITY_GROUP_IDS: ${{ vars.SECURITY_GROUP_IDS }}
+          ASSIGN_PUBLIC_IP: ${{ vars.ASSIGN_PUBLIC_IP }}
+          EXECUTION_ROLE_ARN: ${{ vars.EXECUTION_ROLE_ARN }}
+          TASK_ROLE_ARN: ${{ vars.TASK_ROLE_ARN }}
+          SECRET_ARN: ${{ vars.SECRET_ARN }}
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          S3_PREFIX: ${{ vars.S3_PREFIX }}
+          CLIENT_BASE_URL: ${{ vars.CLIENT_BASE_URL }}
+          JWT_ISSUER: ${{ vars.JWT_ISSUER }}
+          JWT_AUDIENCE: ${{ vars.JWT_AUDIENCE }}
+          IMAGE_PLATFORM: ${{ vars.IMAGE_PLATFORM }}
+        run: |
+          chmod +x deploy/aws/deploy.sh
+          ./deploy/aws/deploy.sh

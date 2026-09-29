@@ -7,17 +7,76 @@ using Microsoft.Extensions.Options;
 
 namespace Marketing.Infrastructure.Storage;
 
+/// <summary>Where <see cref="IFileStorage"/> puts things.</summary>
+public enum StorageProvider
+{
+    /// <summary>The container's own disk. One instance only.</summary>
+    Local = 0,
+
+    /// <summary>An S3 bucket. The only option that survives more than one instance.</summary>
+    S3 = 1,
+}
+
 /// <summary>File storage settings, bound from the <c>Storage</c> configuration section.</summary>
-public sealed class StorageOptions
+public sealed class StorageOptions : IValidatableObject
 {
     /// <summary>Configuration section name.</summary>
     public const string SectionName = "Storage";
 
     /// <summary>
+    /// Which backing store to use. Defaults to local disk, which is right for development and
+    /// wrong for anything with more than one instance.
+    /// </summary>
+    public StorageProvider Provider { get; init; } = StorageProvider.Local;
+
+    /// <summary>
     /// Directory files are written under. Relative paths resolve against the content root.
+    /// Ignored unless <see cref="Provider"/> is <see cref="StorageProvider.Local"/>.
     /// </summary>
     [Required(AllowEmptyStrings = false)]
     public string RootPath { get; init; } = "App_Data/storage";
+
+    /// <summary>S3 bucket name. Required when <see cref="Provider"/> is S3.</summary>
+    public string? BucketName { get; init; }
+
+    /// <summary>
+    /// Key prefix inside the bucket, so one bucket can hold several environments without them
+    /// being able to read each other's keys. Empty means the bucket root.
+    /// </summary>
+    public string Prefix { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Endpoint override, for S3-compatible stores - MinIO locally, LocalStack in a test. Empty
+    /// means real S3, resolved from the region by the SDK.
+    /// </summary>
+    public string? ServiceUrl { get; init; }
+
+    /// <summary>
+    /// Whether to address buckets as a path segment rather than a subdomain. Required by MinIO
+    /// and LocalStack; leave false for S3 itself.
+    /// </summary>
+    public bool ForcePathStyle { get; init; }
+
+    /// <summary>
+    /// Multipart upload threshold in bytes. An export can be hundreds of megabytes and a single
+    /// PUT of that size is one failure away from starting again from nothing.
+    /// </summary>
+    [Range(5 * 1024 * 1024, 5L * 1024 * 1024 * 1024)]
+    public long MultipartThresholdBytes { get; init; } = 16 * 1024 * 1024;
+
+    /// <summary>
+    /// Fails start-up rather than a download, when S3 is selected with nowhere to put anything.
+    /// </summary>
+    /// <param name="validationContext">Validation context, unused.</param>
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (Provider == StorageProvider.S3 && string.IsNullOrWhiteSpace(BucketName))
+        {
+            yield return new ValidationResult(
+                "Storage:BucketName is required when Storage:Provider is S3.",
+                [nameof(BucketName)]);
+        }
+    }
 }
 
 /// <summary>

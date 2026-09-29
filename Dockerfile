@@ -3,7 +3,15 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Build
 # ─────────────────────────────────────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# --platform=$BUILDPLATFORM pins the SDK to the *builder's* architecture and
+# lets .NET cross-compile to the target with `-a $TARGETARCH`. Without it,
+# building an arm64 image on an x64 machine runs the whole SDK under QEMU
+# emulation, which turns a two-minute build into twenty.
+#
+# arm64 matters here because it is what AWS Graviton runs, and Graviton Fargate
+# is roughly 20% cheaper than x86 for the same work.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG TARGETARCH
 WORKDIR /src
 
 # Restore first, from nothing but the project files.
@@ -24,7 +32,7 @@ COPY src/Marketing.Shared/Marketing.Shared.csproj             src/Marketing.Shar
 
 # The API's project references pull in the other seven, so restoring it alone
 # covers the whole graph without dragging the test projects in.
-RUN dotnet restore src/Marketing.API/Marketing.API.csproj
+RUN dotnet restore src/Marketing.API/Marketing.API.csproj -a $TARGETARCH
 
 COPY src/ src/
 
@@ -32,30 +40,44 @@ COPY src/ src/
 # the restore layer did not see, and a stale restore fails in a confusing way.
 RUN dotnet publish src/Marketing.API/Marketing.API.csproj \
     -c Release \
+    -a $TARGETARCH \
     -o /app/publish \
     /p:UseAppHost=false
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Migrations
+# Migration bundle
 # ─────────────────────────────────────────────────────────────────────────────
-# A stage rather than a separate image, so migrations always run against exactly
-# the source that produced the running API. `dotnet ef` needs the SDK and the
-# project files, which the runtime image deliberately does not carry.
-FROM build AS migrations
+# `dotnet ef migrations bundle` compiles the migrations into a single executable
+# that carries no SDK, no source and no project files.
+#
+# The previous shape of this file shipped the SDK image plus the whole source
+# tree as the migration image - about 1.1 GB, pulled by a task that runs for
+# four seconds on every deploy. The bundle is ~75 MB on top of a base layer the
+# API image already pulled, so in practice the migration step downloads nothing.
+#
+# It is also strictly safer: the migration binary is built from exactly the
+# commit that produced the API image and cannot drift from it, and there is no
+# `dotnet ef` version to disagree about.
+FROM build AS bundle
+ARG TARGETARCH
 WORKDIR /src
 
 # The tool version is pinned in the manifest, so this stage and a developer's
-# machine always run the same dotnet-ef. Copied rather than installed globally
-# for that reason - a floating version is how a migration works locally and
-# fails in CI.
+# machine always build the bundle with the same dotnet-ef.
 COPY dotnet-tools.json ./
 RUN dotnet tool restore
 
-ENTRYPOINT ["dotnet", "ef"]
-CMD ["database", "update", \
-     "--project", "src/Marketing.DataAccess", \
-     "--startup-project", "src/Marketing.API", \
-     "--context", "ApplicationDbContext"]
+# Self-contained, so the bundle has no opinion about which runtime is installed
+# where it lands. --force overwrites a stale bundle on a rebuild.
+RUN dotnet ef migrations bundle \
+    --project src/Marketing.DataAccess \
+    --startup-project src/Marketing.API \
+    --context ApplicationDbContext \
+    --configuration Release \
+    --self-contained \
+    --runtime linux-$TARGETARCH \
+    --output /app/efbundle \
+    --force
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Runtime
@@ -97,6 +119,11 @@ COPY --from=build /app/publish .
 # Non-root. APP_UID is defined by the base image (1654); the published output is
 # read-only to it, which is what we want - nothing in this application writes to
 # its own directory.
+#
+# On ECS this image can additionally run with readonlyRootFilesystem: true, but
+# only when Storage:Provider is S3. With the local provider the application
+# creates and writes Storage:RootPath, and a read-only filesystem fails at
+# start-up rather than at the first upload.
 USER $APP_UID
 
 EXPOSE 8080
@@ -104,7 +131,43 @@ EXPOSE 8080
 # Liveness only, deliberately. /health/ready reports the database and the broker,
 # so using it here would have Docker restart a healthy API because Postgres was
 # briefly slow - turning a dependency blip into an outage of its own.
+#
+# ECS ignores this and uses the healthCheck block in the task definition, which
+# says the same thing; it is kept for `docker run` and compose.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD curl --fail --silent --show-error http://localhost:8080/health/live || exit 1
 
 ENTRYPOINT ["dotnet", "Marketing.API.dll"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Migrations
+# ─────────────────────────────────────────────────────────────────────────────
+# Deliberately built on the same base as the runtime stage. It does not need
+# ASP.NET Core, but sharing the layer means a deployment that has already pulled
+# the API image downloads only the bundle itself.
+#
+# Run as a one-off before rolling the API forward:
+#   docker compose --profile migrate run --rm migrate
+#   aws ecs run-task --task-definition marketing-migrate ...
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS migrations
+WORKDIR /app
+
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=0 \
+    DOTNET_RUNNING_IN_CONTAINER=true \
+    DOTNET_EnableDiagnostics=0
+
+COPY --from=bundle /app/efbundle ./efbundle
+
+# The bundle reads configuration the same way the API does, so a connection
+# string supplied as Database__ConnectionString in the environment is picked up
+# without this file. It is copied anyway because the bundle also reads defaults
+# from it, and a missing appsettings.json turns a clear error into a null
+# reference.
+COPY --from=build /app/publish/appsettings.json ./appsettings.json
+
+USER $APP_UID
+
+# No arguments: the bundle's default action is to apply every pending migration
+# and exit non-zero if it cannot. That exit code is what a deployment pipeline
+# should gate the service update on.
+ENTRYPOINT ["./efbundle"]

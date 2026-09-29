@@ -1,0 +1,93 @@
+{
+  "//": "ECS Fargate task definition for the scheduler. Same image as the API, different switches. Run this service with desiredCount 1 and a deployment configuration of maximumPercent 100 / minimumHealthyPercent 0, so ECS stops the old task before starting the new one and two schedulers never overlap.",
+
+  "//why-separate": "Quartz here uses UseInMemoryStore, so every process that has the scheduler enabled runs every job. Two API tasks with Scheduler:Enabled=true would dispatch every campaign twice, send every expiry reminder twice and drain the email outbox twice. Splitting the schedule into its own single-task service is the smallest change that makes the API horizontally scalable; the alternative is Quartz clustering with an AdoJobStore, which needs its own tables and a migration.",
+
+  "family": "${PROJECT}-worker",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+
+  "runtimePlatform": {
+    "cpuArchitecture": "ARM64",
+    "operatingSystemFamily": "LINUX"
+  },
+
+  "executionRoleArn": "${EXECUTION_ROLE_ARN}",
+  "taskRoleArn": "${TASK_ROLE_ARN}",
+
+  "volumes": [{ "name": "tmp" }],
+
+  "containerDefinitions": [
+    {
+      "name": "worker",
+      "image": "${IMAGE}",
+      "essential": true,
+
+      "//portMappings": "None. This task is not behind the load balancer; it listens on 8080 only so its own health check has something to answer.",
+
+      "readonlyRootFilesystem": true,
+      "mountPoints": [{ "sourceVolume": "tmp", "containerPath": "/tmp", "readOnly": false }],
+
+      "//stopTimeout": "Longer than the API's. WaitForJobsToComplete lets a campaign dispatch finish rather than being cut in half mid-batch.",
+      "stopTimeout": 180,
+
+      "environment": [
+        { "name": "ASPNETCORE_ENVIRONMENT", "value": "Production" },
+        { "name": "ASPNETCORE_HTTP_PORTS", "value": "8080" },
+
+        { "//": "The one process on the platform with this set to true.",
+          "name": "Scheduler__Enabled", "value": "true" },
+
+        { "name": "Database__ApplyMigrationsOnStartup", "value": "false" },
+        { "name": "Database__SeedOnStartup", "value": "false" },
+
+        { "name": "Storage__Provider", "value": "S3" },
+        { "name": "Storage__BucketName", "value": "${S3_BUCKET}" },
+        { "name": "Storage__Prefix", "value": "${S3_PREFIX}" },
+
+        { "name": "Redis__Enabled", "value": "true" },
+        { "name": "Redis__UseSignalRBackplane", "value": "true" },
+
+        { "//": "The export consumer runs here too. That is deliberate and safe: MassTransit consumers are competing consumers, so the API tasks and this one share the queue rather than duplicating it. Scheduled jobs are the only thing that must be singular.",
+          "name": "RabbitMQ__Enabled", "value": "true" },
+
+        { "name": "Email__ClientBaseUrl", "value": "${CLIENT_BASE_URL}" },
+        { "name": "Authentication__Issuer", "value": "${JWT_ISSUER}" },
+        { "name": "Authentication__Audience", "value": "${JWT_AUDIENCE}" },
+        { "name": "AWS_REGION", "value": "${AWS_REGION}" }
+      ],
+
+      "secrets": [
+        { "name": "Database__ConnectionString", "valueFrom": "${SECRET_ARN}:DatabaseConnectionString::" },
+        { "name": "Redis__ConnectionString", "valueFrom": "${SECRET_ARN}:RedisConnectionString::" },
+        { "name": "RabbitMQ__Host", "valueFrom": "${SECRET_ARN}:RabbitHost::" },
+        { "name": "RabbitMQ__Username", "valueFrom": "${SECRET_ARN}:RabbitUsername::" },
+        { "name": "RabbitMQ__Password", "valueFrom": "${SECRET_ARN}:RabbitPassword::" },
+        { "name": "Authentication__SigningKey", "valueFrom": "${SECRET_ARN}:JwtSigningKey::" },
+        { "name": "WhatsApp__AppSecret", "valueFrom": "${SECRET_ARN}:WhatsAppAppSecret::" },
+        { "name": "Places__ApiKey", "valueFrom": "${SECRET_ARN}:PlacesApiKey::" },
+        { "name": "Smtp__Password", "valueFrom": "${SECRET_ARN}:SmtpPassword::" }
+      ],
+
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl --fail --silent http://localhost:8080/health/live || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      },
+
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/${PROJECT}-worker",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "worker",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

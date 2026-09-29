@@ -336,6 +336,66 @@ public static class InfrastructureServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>
+    /// Registers the file store named by <c>Storage:Provider</c>.
+    /// </summary>
+    /// <remarks>
+    /// Local disk is correct for one instance and quietly wrong for several: a container's
+    /// filesystem is its own and does not survive a redeploy, so the worker that reads an upload
+    /// will not be on the node that received it, and an export downloaded through a second
+    /// instance is simply not found. Any deployment behind a load balancer wants S3.
+    /// </remarks>
+    /// <param name="services">Service collection.</param>
+    /// <param name="configuration">Application configuration.</param>
+    private static void AddFileStorage(IServiceCollection services, IConfiguration configuration)
+    {
+        var options = configuration.GetSection(Storage.StorageOptions.SectionName)
+                          .Get<Storage.StorageOptions>()
+                      ?? new Storage.StorageOptions();
+
+        if (options.Provider != Storage.StorageProvider.S3)
+        {
+            services.AddSingleton<Shared.Abstractions.IFileStorage, Storage.LocalFileStorage>();
+
+            return;
+        }
+
+        // No credentials here, and none in configuration. The SDK's default chain finds the ECS
+        // task role on Fargate and the developer's profile locally, which is what keeps an access
+        // key out of the task definition, out of appsettings and out of this repository.
+        var aws = configuration.GetAWSOptions();
+
+        services.AddDefaultAWSOptions(aws);
+
+        if (string.IsNullOrWhiteSpace(options.ServiceUrl))
+        {
+            services.AddAWSService<Amazon.S3.IAmazonS3>();
+        }
+        else
+        {
+            // MinIO or LocalStack. Registered by hand because an endpoint override cannot be
+            // expressed through AddAWSService, and path-style addressing is not optional for
+            // either of them - a bucket as a subdomain of localhost does not resolve.
+            services.AddSingleton<Amazon.S3.IAmazonS3>(provider =>
+            {
+                var config = new Amazon.S3.AmazonS3Config
+                {
+                    ServiceURL = options.ServiceUrl,
+                    ForcePathStyle = options.ForcePathStyle,
+                };
+
+                // Credentials still come from the default chain when none are configured - the
+                // single-argument constructor resolves them itself, which is also what makes
+                // MinIO work from an AWS_ACCESS_KEY_ID pair in the environment.
+                return aws.Credentials is null
+                    ? new Amazon.S3.AmazonS3Client(config)
+                    : new Amazon.S3.AmazonS3Client(aws.Credentials, config);
+            });
+        }
+
+        services.AddSingleton<Shared.Abstractions.IFileStorage, Storage.S3FileStorage>();
+    }
+
     private static IServiceCollection AddWhatsAppClient(
         this IServiceCollection services,
         IConfiguration configuration)
@@ -350,10 +410,7 @@ public static class InfrastructureServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        // Local disk is correct for one instance. A multi-instance deployment needs the same
-        // interface over shared storage, because the worker that reads an upload will not be on the
-        // node that received it.
-        services.AddSingleton<Shared.Abstractions.IFileStorage, Storage.LocalFileStorage>();
+        AddFileStorage(services, configuration);
 
         // Stateless and thread-safe, so one instance of each serves every import.
         services.AddSingleton<Application.Services.Imports.IImportFileReader, Imports.CsvImportFileReader>();

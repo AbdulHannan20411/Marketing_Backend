@@ -83,6 +83,47 @@ services:
       retries: 5
       start_period: 30s
 
+  # S3, locally. Only started with `--profile s3`, because the default local
+  # setup writes to a volume and does not need it.
+  #
+  # It exists so the S3 code path is exercised somewhere other than production.
+  # "It worked on local disk" has never once predicted that a bucket, a prefix
+  # and a task role work together.
+  minio:
+    image: minio/minio:latest
+    container_name: marketing-minio
+    profiles: ["s3"]
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Creates the bucket and exits. Without it the first upload fails with
+  # NoSuchBucket, which reads like a code fault and is not one.
+  minio-init:
+    image: minio/mc:latest
+    container_name: marketing-minio-init
+    profiles: ["s3"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >-
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing local/${S3_BUCKET:-marketing-files} &&
+      echo 'bucket ready'"
+
   api:
     build:
       context: .
@@ -143,9 +184,34 @@ services:
       Smtp__FromAddress: ${SMTP_FROM_ADDRESS:-}
       Smtp__FromName: ${SMTP_FROM_NAME:-}
 
+      # File storage. Local writes to a named volume below; S3 is what any
+      # deployment with more than one instance must use, because a container's
+      # disk is its own and does not survive a redeploy.
+      Storage__Provider: ${STORAGE_PROVIDER:-Local}
+      Storage__RootPath: /app/App_Data/storage
+      Storage__BucketName: ${S3_BUCKET:-}
+      Storage__Prefix: ${S3_PREFIX:-}
+      Storage__ServiceUrl: ${S3_SERVICE_URL:-}
+      Storage__ForcePathStyle: ${S3_FORCE_PATH_STYLE:-false}
+
+      # Read by the AWS SDK's default credential chain. Left empty for real AWS,
+      # where the ECS task role supplies credentials and no key should exist.
+      AWS_REGION: ${AWS_REGION:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+
+      # One process runs the scheduled jobs. See the note on the worker service.
+      Scheduler__Enabled: ${API_SCHEDULER_ENABLED:-true}
+
       Email__ClientBaseUrl: ${CLIENT_BASE_URL:-http://localhost:4200}
     ports:
       - "${API_PORT:-8080}:8080"
+    volumes:
+      # Only used by the local storage provider. Without it, every `compose up
+      # --build` loses every uploaded import and generated export - which is
+      # confusing locally and is exactly the failure mode that makes the local
+      # provider wrong on ECS.
+      - api-storage:/app/App_Data/storage
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health/live"]
       interval: 30s
@@ -178,13 +244,17 @@ services:
       Authentication__SigningKey: ${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY in .env}
       Authentication__Issuer: ${JWT_ISSUER:-migration}
       Authentication__Audience: ${JWT_AUDIENCE:-migration}
-    # Entrypoint and default command come from the migrations stage, so
-    # `run --rm migrate` applies pending migrations and exits. Override the
-    # command to do something else with the same tooling, for example:
-    #   docker compose --profile migrate run --rm migrate migrations list \
-    #     --project src/Marketing.DataAccess --startup-project src/Marketing.API
+    # The migrations stage is a compiled EF bundle, not the SDK. Its default
+    # action is "apply every pending migration, then exit", and it exits
+    # non-zero if it cannot - which is the signal a deployment pipeline should
+    # gate the service update on.
+    #
+    # It takes arguments of its own rather than dotnet-ef's:
+    #   docker compose --profile migrate run --rm migrate --help
 
 volumes:
   postgres-data:
   redis-data:
   rabbitmq-data:
+  minio-data:
+  api-storage:

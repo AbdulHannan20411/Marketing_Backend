@@ -1,0 +1,57 @@
+{
+  "//": "One-off task: applies pending EF Core migrations, then exits. Run with `aws ecs run-task` before rolling the API and worker forward - deploy.sh does this and waits for the exit code.",
+
+  "//why": "Not on start-up, and not from a developer's machine. On start-up, several tasks race to migrate the same database while the previous version is still serving traffic. From a laptop, the migration that reaches production is whichever one someone remembered to run, against whatever branch was checked out. This image is built from the same commit as the API image beside it and cannot disagree with it.",
+
+  "family": "${PROJECT}-migrate",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+
+  "//size": "Smallest Fargate size. The task runs for seconds and does nothing but issue DDL.",
+  "cpu": "512",
+  "memory": "1024",
+
+  "runtimePlatform": {
+    "cpuArchitecture": "ARM64",
+    "operatingSystemFamily": "LINUX"
+  },
+
+  "executionRoleArn": "${EXECUTION_ROLE_ARN}",
+
+  "//taskRoleArn": "Omitted deliberately. A migration needs the database and nothing else - no S3, no Secrets Manager beyond what the execution role injects.",
+
+  "containerDefinitions": [
+    {
+      "name": "migrate",
+      "image": "${MIGRATE_IMAGE}",
+      "essential": true,
+
+      "//": "The image's entrypoint is the compiled EF bundle. No command: its default action is to apply every pending migration and exit non-zero if it cannot.",
+
+      "readonlyRootFilesystem": true,
+
+      "environment": [
+        { "name": "ASPNETCORE_ENVIRONMENT", "value": "Production" },
+
+        { "//": "The bundle builds the application's configuration to find the context, so the options that are validated on start-up have to be satisfiable even though a migration never issues a token.",
+          "name": "Authentication__Issuer", "value": "${JWT_ISSUER}" },
+        { "name": "Authentication__Audience", "value": "${JWT_AUDIENCE}" }
+      ],
+
+      "secrets": [
+        { "name": "Database__ConnectionString", "valueFrom": "${SECRET_ARN}:DatabaseConnectionString::" },
+        { "name": "Authentication__SigningKey", "valueFrom": "${SECRET_ARN}:JwtSigningKey::" }
+      ],
+
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/${PROJECT}-migrate",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "migrate",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

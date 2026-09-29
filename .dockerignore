@@ -47,3 +47,7 @@ docs/
 Dockerfile*
 docker-compose*.yml
 .dockerignore
+
+# Deployment templates and scripts. They describe how the image is deployed;
+# nothing inside the image reads them, and deploy/aws/env.sh is local-only.
+deploy/
